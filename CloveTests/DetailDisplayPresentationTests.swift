@@ -5913,6 +5913,86 @@ struct DetailDisplayPresentationTests {
         }
         #expect(halfFoldFrames.frames["clove.detail.photoHeader"] == nil)
         #expect(halfFoldFrames.frames["clove.detail.photoCornerOverlay"] == nil)
+        #expect(halfFoldFrames.frames["clove.detail.info"] != nil)
+        #expect(halfFoldFrames.frames["clove.detail.fileName"] != nil)
+        #expect(halfFoldFrames.frames["clove.detail.zoom"] != nil)
+    }
+
+    @Test
+    func expandedDuoPortraitShowsCenteredTappableInfoAndInspectionPillAcrossFocusAndPhotoPreview()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder open") { !browsing.isFolderOpening }
+        let target = try #require(browsing.photos.first { $0.id.stem == "mmq02680" }?.id)
+        browsing.openPhoto(target)
+
+        let presentationBox = TestPresentationBox(value: .focus)
+        let headerFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: SampleDetailImages(),
+                presentation: presentationBox,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: false,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light,
+                settingsStore: store
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                headerFrames.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // Focus View in Expanded Duo Portrait (669x951): centered tappable title in top bar,
+        // no viewport corner overlay, and [Focus | Compare] bottom-left with Compare disabled.
+        try await waitFor("Portrait Duo Focus View did not settle") {
+            guard let preview = self.findPreview(in: window) else { return false }
+            return self.findFilmstripScrollView(in: window, excluding: preview) != nil
+                && headerFrames.frames["clove.detail.info"] != nil
+                && headerFrames.frames["clove.detail.fileName"] != nil
+                && headerFrames.frames["clove.detail.zoom"] != nil
+                && headerFrames.frames["clove.detail.inspectionPill"] != nil
+        }
+        let focusInfo = try #require(headerFrames.frames["clove.detail.info"])
+        #expect(focusInfo.width >= 44 && focusInfo.height >= 44)
+        #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
+        if let compareElement = findAccessibilityElement(
+            withIdentifier: "clove.detail.compare", in: window)
+        {
+            #expect(compareElement.accessibilityTraits.contains(.notEnabled))
+        }
+
+        // Photo Preview in Expanded Duo Portrait (669x951): centered tappable title stays visible
+        // in the single horizontal top bar (never disappearing when usesExpandedDuoViewportOverlay
+        // is false).
+        presentationBox.value = .photoPreview
+        try await waitFor("Portrait Duo Photo Preview did not settle") {
+            self.findCollectionView(in: window) != nil
+                && headerFrames.frames["clove.detail.info"] != nil
+                && headerFrames.frames["clove.detail.fileName"] != nil
+                && headerFrames.frames["clove.detail.zoom"] != nil
+        }
+        let previewInfo = try #require(headerFrames.frames["clove.detail.info"])
+        #expect(previewInfo.width >= 44 && previewInfo.height >= 44)
+        #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
     }
 
     @Test func showsGridPickerButtonTracksOuterTrackWidthWithoutOscillation() {

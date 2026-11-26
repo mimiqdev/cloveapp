@@ -785,12 +785,12 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsUndo: !emptyFromFilterSelection,
+                    showsUndo: !isDuoExpanded && !emptyFromFilterSelection,
                     showsNavigationTools: false,
                     showsStandaloneDockTool: !emptyFromFilterSelection && duo.showsGrid
                         && presentationPolicy.supportsPhotoPreview,
                     showsTools: true,
-                    showsBottom: duo.showsGrid
+                    showsBottom: false
                 ) {
                     EmptyView()
                 } standaloneDockTool: {
@@ -801,13 +801,8 @@ struct DetailMarkingView: View {
                     }
                 } tools: {
                     duo.filter
-                    if duo.showsGrid {
-                        duo.more
-                    }
-                    if !emptyFromFilterSelection {
-                        if !isDuoExpanded {
-                            focusRegionsToggle
-                        }
+                    if !isDuoExpanded, !emptyFromFilterSelection {
+                        focusRegionsToggle
                         if !usesInspectionPill, canEnterCompare {
                             compareToolbarButton
                         }
@@ -828,13 +823,9 @@ struct DetailMarkingView: View {
                             markingBegan: beginMarkingGesture)
                     }
                 } bottom: {
-                    if duo.showsGrid {
-                        duo.bottom
-                    }
+                    EmptyView()
                 }
-                if !emptyFromFilterSelection && !usesExpandedDuoViewportOverlay
-                    && (!duo.showsGrid || !showsPhotoGrid)
-                {
+                if !emptyFromFilterSelection && !usesExpandedDuoViewportOverlay {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
@@ -1109,7 +1100,7 @@ struct DetailMarkingView: View {
                         }
                         detailFilterButton
                             .reportHeaderControlFrame("clove.detail.filter")
-                        if !emptyFromFilterSelection {
+                        if !emptyFromFilterSelection, !isDuoExpanded {
                             GlassIconButton(
                                 label: AppLocalization.string("Undo", language: language),
                                 symbol: "arrow.uturn.backward",

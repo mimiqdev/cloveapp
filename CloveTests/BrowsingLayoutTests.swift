@@ -1609,7 +1609,8 @@ struct BrowsingLayoutTests {
         model.openPhoto(photo)
 
         let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+        let headerFrames = TestHeaderFramesBox()
 
         let host = UIHostingController(
             rootView: NavigationStack {
@@ -1623,7 +1624,10 @@ struct BrowsingLayoutTests {
             .environment(\.isDuoExpanded, true)
             .environment(\.usesSystemBrowsingToolbar, true)
             .environment(\.usesVerticalBrowsingToolbar, true)
-            .environment(\.hasFoldRegion, true))
+            .environment(\.hasFoldRegion, true)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                headerFrames.frames = frames
+            })
         host.traitOverrides.horizontalSizeClass = .regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -1639,15 +1643,36 @@ struct BrowsingLayoutTests {
                 && self.hasToolbarItem(
                     identifier: "clove.detail.gridToggle", in: host, window: window)
                 && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
-                && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
-                && (self.hasToolbarItem(identifier: "clove.duo.undo", in: host, window: window)
-                    || self.hasToolbarItem(
-                        identifier: "clove.detail.undo", in: host, window: window))
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.info"] != nil
+                && headerFrames.frames["clove.detail.fileName"] != nil
+                && headerFrames.frames["clove.detail.zoom"] != nil
         }
 
         let snapshot = inspectToolbarState(in: host, window: window)
-        #expect(!snapshot.contains("clove.detail.info"))
+        // Expanded Duo Detail toolbar carries strictly 3 buttons (< / Grid / Filter); More, Move
+        // Rejects, Undo, Info, Focus, and Compare are absent from the system toolbar (#458).
+        #expect(!snapshot.contains("clove.grid.more"))
+        #expect(!snapshot.contains("clove.grid.moveRejects"))
+        #expect(!snapshot.contains("clove.duo.undo"))
+        #expect(!snapshot.contains("clove.detail.undo"))
+        #expect(headerFrames.frames["clove.duo.undo"] == nil)
+        #expect(headerFrames.frames["clove.detail.undo"] == nil)
+        #expect(headerFrames.frames["clove.grid.more"] == nil)
+        #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.info" })
+        #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.compare" })
+        #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.focusToggle" })
         #expect(!snapshot.contains("clove.detail.preparation"))
+        #expect(snapshot.bottomToolbarIDs.isEmpty)
+        let cornerOverlayFrame = try #require(
+            headerFrames.frames["clove.detail.photoCornerOverlay"],
+            Comment(rawValue: "missing corner overlay in \(snapshot.description)"))
+        let cornerInfoFrame = try #require(
+            headerFrames.frames["clove.detail.info"],
+            Comment(rawValue: "missing corner info in \(snapshot.description)"))
+        #expect(cornerOverlayFrame.width > 0 && cornerOverlayFrame.height > 0)
+        #expect(cornerInfoFrame.width >= 44 && cornerInfoFrame.height >= 44)
+
         let backFrame = try #require(
             snapshot.frame(for: "clove.nav.back"),
             Comment(rawValue: "missing back in \(snapshot.description)"))
@@ -1657,21 +1682,12 @@ struct BrowsingLayoutTests {
         let filterFrame = try #require(
             snapshot.frame(for: "clove.grid.filter"),
             Comment(rawValue: "missing filter in \(snapshot.description)"))
-        let moreFrame = try #require(
-            snapshot.frame(for: "clove.grid.more"),
-            Comment(rawValue: "missing more in \(snapshot.description)"))
-        let moveRejectsFrame = try #require(
-            snapshot.frame(for: "clove.grid.moveRejects"),
-            Comment(rawValue: "missing moveRejects in \(snapshot.description)"))
 
         if host.traitCollection.verticalBarEdge != .unspecified {
-            let undoFrame = try #require(
-                snapshot.frame(for: "clove.duo.undo"),
-                Comment(rawValue: "missing duo undo in \(snapshot.description)"))
             #expect(
                 backFrame.maxY < toggleFrame.minY,
                 Comment(rawValue: "expected Back above gridToggle: \(snapshot.description)"))
-            // Back -> photoGridToggle -> view-tools capsule are separated standalone controls (~22-23pt gap).
+            // Back -> photoGridToggle -> standalone Filter are separated controls (~22-23pt gap).
             #expect(
                 toggleFrame.minY - backFrame.maxY >= 18,
                 Comment(
@@ -1685,18 +1701,9 @@ struct BrowsingLayoutTests {
                 filterFrame.minY - toggleFrame.maxY >= 18,
                 Comment(
                     rawValue:
-                        "expected standalone gap between gridToggle and tools capsule: \(snapshot.description)"
+                        "expected standalone gap between gridToggle and Filter: \(snapshot.description)"
                 ))
-            // Filter -> More share the view tools capsule (~14pt internal gap); Compare & Focus live
-            // in the bottom-left Detail inspection pill and Info lives on the viewport scrim (#462, #463).
-            #expect(filterFrame.maxY < moreFrame.minY)
-            #expect(moreFrame.minY - filterFrame.maxY <= 16)
-            #expect(!snapshot.contains("clove.detail.compare"))
-            #expect(moreFrame.maxY < undoFrame.minY)
-            #expect(undoFrame.maxY < moveRejectsFrame.minY)
-            #expect(moveRejectsFrame.minY - undoFrame.maxY <= 16)
 
-            // Toolbar tokens verify photoGridToggle sits before a spacer preceding Filter/More.
             #expect(snapshot.leadingIDs == ["clove.nav.back"])
             let toggleIdx = try #require(
                 snapshot.trailingRawTokens.firstIndex(of: "clove.detail.gridToggle"))
@@ -1705,31 +1712,26 @@ struct BrowsingLayoutTests {
             #expect(toggleIdx < filterIdx)
             #expect(snapshot.trailingRawTokens[toggleIdx..<filterIdx].contains("<spacer>"))
             #expect(!snapshot.trailingRawTokens[filterIdx...].contains("<spacer>"))
-            #expect(
-                snapshot.trailingIDs == [
-                    "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
-                ])
-            #expect(snapshot.bottomToolbarIDs == ["clove.duo.undo", "clove.grid.moveRejects"])
+            #expect(snapshot.trailingIDs == ["clove.detail.gridToggle", "clove.grid.filter"])
         } else {
             #expect(
                 snapshot.leadingIDs == ["clove.nav.back", "clove.detail.gridToggle"],
                 Comment(rawValue: "unexpected leadingIDs: \(snapshot.description)"))
             #expect(backFrame.maxX <= toggleFrame.minX + 2)
             #expect(toggleFrame.maxX < filterFrame.minX)
-            #expect(filterFrame.maxX <= moreFrame.minX + 2)
-            #expect(!snapshot.contains("clove.detail.compare"))
-            #expect(
-                snapshot.trailingIDs == [
-                    "clove.grid.filter", "clove.grid.more",
-                    "clove.detail.undo", "clove.grid.moveRejects",
-                ])
+            #expect(snapshot.trailingIDs == ["clove.grid.filter"])
+            let navBar = try #require(findNavigationBar(in: window))
+            let trailingRawCount =
+                navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
+            #expect(snapshot.rawLeadingItemCount == 2)
+            #expect(trailingRawCount == 1)
         }
 
-        // Non-system BrowsingHeader fallback keeps photoGridToggle/Back leading, centered tappable
-        // filename Info button (>= 44 pt), Filter + Undo trailing, and Focus/Compare in bottom pill (#462, #463).
+        // Non-system BrowsingHeader fallback omits Undo, More, and Move Rejects for Expanded Duo
+        // while keeping Back, centered tappable filename Info (>= 44 pt), Filter, and bottom pill.
         let fallbackFrames = TestHeaderFramesBox()
         let fallbackWindow = UIWindow(windowScene: scene)
-        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
         let fallbackHost = UIHostingController(
             rootView: DetailScreen(browsing: model)
                 .environment(store)
@@ -1755,6 +1757,10 @@ struct BrowsingLayoutTests {
                 && fallbackFrames.frames["clove.detail.focusToggle"] != nil
                 && fallbackFrames.frames["clove.detail.compare"] != nil
         }
+        #expect(fallbackFrames.frames["clove.detail.undo"] == nil)
+        #expect(fallbackFrames.frames["clove.duo.undo"] == nil)
+        #expect(fallbackFrames.frames["clove.grid.more"] == nil)
+        #expect(fallbackFrames.frames["clove.grid.moveRejects"] == nil)
         if let fBack = fallbackFrames.frames["clove.nav.back"],
             let fFocus = fallbackFrames.frames["clove.detail.focusToggle"],
             let fCompare = fallbackFrames.frames["clove.detail.compare"],
@@ -1767,6 +1773,234 @@ struct BrowsingLayoutTests {
             #expect(fFocus.minY > fBack.maxY)
             #expect(fCompare.minY > fBack.maxY)
             #expect(fFocus.maxX <= fCompare.minX + 2)
+        }
+    }
+
+    @Test func expandedDuoPortrait669x951DetailAndGridTopBarsFitWithoutOverflow() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let folder = TestLibrary.sampleFolderKey
+        let longFileName =
+            "2026-11-26_Kyoto_Autumn_Morning_Session_Ultra_Wide_Long_Filename_DSC04821.CR3"
+        let photos = [
+            GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "p1"),
+                fileName: longFileName,
+                time: .unavailable,
+                marks: PhotoMarks()),
+            GridPhoto(
+                id: PhotoIdentity(folderID: folder, relativeFolderPath: "", stem: "p2"),
+                fileName: "IMG_4822.CR3",
+                time: .unavailable,
+                marks: PhotoMarks(rating: .rejected)),
+        ]
+        let library = TestLibrary(photos: photos, groups: [])
+        let model = BrowsingModel(library: library, similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        #expect(model.rejectedPhotoCount == 1)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+
+        // 1. Expanded Duo Portrait Detail (669x951) in both Focus View and Photo Preview, plus a
+        //    439x951 Live-Activity-reduced top-bar width check (669 - 230 pt Live Activity reserve).
+        model.openPhoto(photos[0].id)
+        for (width, presentation) in [
+            (CGFloat(669), DetailPresentation.focus),
+            (CGFloat(669), DetailPresentation.photoPreview),
+            (CGFloat(439), DetailPresentation.focus),
+        ] {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 951)
+            let headerFrames = TestHeaderFramesBox()
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(
+                        browsing: model,
+                        thumbnails: model.thumbnails,
+                        initialPresentation: presentation)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, false)
+                .environment(\.hasFoldRegion, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    headerFrames.frames = frames
+                })
+            host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
+            host.traitOverrides.verticalSizeClass = UIUserInterfaceSizeClass.regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "Portrait Duo Detail (\(width), \(presentation)) did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                let state = self.inspectToolbarState(in: host, window: window)
+                return state.frame(for: "clove.nav.back") != nil
+                    && state.frame(for: "clove.detail.gridToggle") != nil
+                    && state.frame(for: "clove.grid.filter") != nil
+                    && self.findNavigationBar(in: window).flatMap {
+                        self.centerBarGroupFrame(in: $0, relativeTo: window)
+                    } != nil
+                    && headerFrames.frames["clove.detail.info"] != nil
+                    && headerFrames.frames["clove.detail.fileName"] != nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+            }
+
+            let snapshot = inspectToolbarState(in: host, window: window)
+            let navBar = try #require(findNavigationBar(in: window))
+            let titleFrame = try #require(centerBarGroupFrame(in: navBar, relativeTo: window))
+            let infoFrame = try #require(headerFrames.frames["clove.detail.info"])
+            let backFrame = try #require(snapshot.frame(for: "clove.nav.back"))
+            let toggleFrame = try #require(snapshot.frame(for: "clove.detail.gridToggle"))
+            let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
+
+            #expect(snapshot.leadingIDs == ["clove.nav.back", "clove.detail.gridToggle"])
+            #expect(snapshot.trailingIDs == ["clove.grid.filter"])
+            #expect(snapshot.bottomToolbarIDs.isEmpty)
+            #expect(!snapshot.contains("clove.grid.more"))
+            #expect(!snapshot.contains("clove.grid.moveRejects"))
+            #expect(!snapshot.contains("clove.duo.undo"))
+            #expect(!snapshot.contains("clove.detail.undo"))
+            #expect(headerFrames.frames["clove.duo.undo"] == nil)
+            #expect(headerFrames.frames["clove.detail.undo"] == nil)
+            #expect(headerFrames.frames["clove.grid.more"] == nil)
+            #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.compare" })
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.focusToggle" })
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.info" })
+
+            #expect(infoFrame.width >= 44 && infoFrame.height >= 44)
+            #expect(titleFrame.width > 0 && titleFrame.height > 0)
+            #expect(backFrame.maxX <= toggleFrame.minX + 2)
+            #expect(toggleFrame.maxX <= infoFrame.minX + 2)
+            #expect(infoFrame.maxX <= filterFrame.minX + 2)
+
+            // No system overflow (`...`) in top bar: exactly 2 leading items + 1 trailing item.
+            let leadingRawCount =
+                navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0
+            let trailingRawCount =
+                navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
+            #expect(leadingRawCount == 2)
+            #expect(trailingRawCount == 1)
+            #expect(
+                barButtonSubviews(in: navBar, relativeTo: window).count
+                    >= 3)
+        }
+        model.back()
+
+        // 2. Expanded Duo Portrait Grid (669x951 and 439x951 Live-Activity-reduced top bar):
+        //    Back leading, [Filter, More] trailing, Move Rejects floating bottom-right, no Undo,
+        //    and zero duplicate system overflow (`...`).
+        for width in [CGFloat(669), CGFloat(439)] {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 951)
+            let headerFrames = TestHeaderFramesBox()
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, false)
+                .environment(\.hasFoldRegion, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    headerFrames.frames = frames
+                })
+            host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
+            host.traitOverrides.verticalSizeClass = UIUserInterfaceSizeClass.regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "Portrait Duo Grid (\(width)) did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                let state = self.inspectToolbarState(in: host, window: window)
+                return state.frame(for: "clove.nav.back") != nil
+                    && state.frame(for: "clove.grid.filter") != nil
+                    && state.frame(for: "clove.grid.more") != nil
+                    && headerFrames.frames["clove.grid.moveRejects"] != nil
+            }
+
+            let snapshot = inspectToolbarState(in: host, window: window)
+            let navBar = try #require(findNavigationBar(in: window))
+            let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
+            let moreFrame = try #require(snapshot.frame(for: "clove.grid.more"))
+            let moveRejectsFrame = try #require(headerFrames.frames["clove.grid.moveRejects"])
+
+            #expect(snapshot.leadingIDs == ["clove.nav.back"])
+            #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.more"])
+            #expect(snapshot.bottomToolbarIDs.isEmpty)
+            #expect(!snapshot.contains("clove.duo.undo"))
+            #expect(!snapshot.contains("clove.detail.undo"))
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.grid.moveRejects" })
+            #expect(filterFrame.maxX <= moreFrame.minX + 2)
+            #expect(moveRejectsFrame.minY > window.bounds.height * 0.7)
+            #expect(moveRejectsFrame.minX > window.bounds.width * 0.65)
+            #expect(
+                (navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0) == 1)
+            #expect(
+                (navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0) == 2)
+        }
+
+        // 3. Portrait Duo Grid Select mode (669x951): hides Back, shows Select All leading and
+        //    [Filter, Done] trailing without Undo, Move Rejects, or overflow.
+        model.toggleSelection(photos[0].id)
+        defer { model.clearSelection() }
+        do {
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, false)
+                .environment(\.hasFoldRegion, true))
+            host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
+            host.traitOverrides.verticalSizeClass = UIUserInterfaceSizeClass.regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "Portrait Duo Grid Select mode did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                let state = self.inspectToolbarState(in: host, window: window)
+                return state.frame(for: "clove.grid.selectAll") != nil
+                    && state.frame(for: "clove.grid.filter") != nil
+                    && state.frame(for: "clove.grid.batch.done") != nil
+            }
+            let selectSnapshot = inspectToolbarState(in: host, window: window)
+            #expect(selectSnapshot.leadingIDs == ["clove.grid.selectAll"])
+            #expect(selectSnapshot.trailingIDs == ["clove.grid.filter", "clove.grid.batch.done"])
+            #expect(selectSnapshot.bottomToolbarIDs.isEmpty)
+            #expect(!selectSnapshot.contains("clove.nav.back"))
+            #expect(!selectSnapshot.contains("clove.duo.undo"))
+            #expect(!selectSnapshot.contains("clove.detail.undo"))
+            #expect(!selectSnapshot.contains("clove.grid.moveRejects"))
         }
     }
 
@@ -2184,6 +2418,62 @@ struct BrowsingLayoutTests {
                     && self.inspectToolbarState(in: host, window: window)
                         .contains("clove.detail.undo")
             }
+        }
+
+        // 6. Duo Cover Detail preserves Undo, Focus regions, Filter, and centered Info title.
+        do {
+            let photo = try #require(model.photos.first?.id)
+            model.openPhoto(photo)
+            defer { model.back() }
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+            let headerFrames = TestHeaderFramesBox()
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoCover, true)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    headerFrames.frames = frames
+                })
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "Duo Cover Detail controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                let state = self.inspectToolbarState(in: host, window: window)
+                return state.contains("clove.nav.back")
+                    && state.contains("clove.grid.filter")
+                    && (state.contains("clove.duo.undo") || state.contains("clove.detail.undo"))
+                    && headerFrames.frames["clove.detail.info"] != nil
+                    && headerFrames.frames["clove.detail.fileName"] != nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+            }
+            let snapshot = inspectToolbarState(in: host, window: window)
+            if host.traitCollection.verticalBarEdge == .unspecified {
+                #expect(
+                    snapshot.trailingIDs == [
+                        "clove.grid.filter", "clove.grid.filter", "clove.detail.undo",
+                    ])
+            } else {
+                #expect(snapshot.contains("clove.duo.undo"))
+                #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.filter"])
+            }
+            #expect(!snapshot.contains("clove.grid.more"))
+            #expect(!snapshot.contains("clove.grid.moveRejects"))
+            #expect(!snapshot.contains("clove.detail.gridToggle"))
+            #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
         }
     }
 
