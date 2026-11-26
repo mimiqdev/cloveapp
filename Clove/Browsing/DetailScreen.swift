@@ -100,7 +100,7 @@ struct DetailScreen: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.detail")
+        .accessibilityIdentifier(browsing.compareSession != nil ? "clove.compare" : "clove.detail")
         .onChange(of: browsing.compareSession != nil) { _, isComparing in
             if isComparing {
                 autoAdvance.cancel()

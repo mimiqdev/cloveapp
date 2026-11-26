@@ -1261,6 +1261,254 @@ struct CompareFlowTests {
         #expect(abs(scrollView.contentOffset.x - maxOffset) <= 2.0)
     }
 
+    @Test(
+        "Compare Focus regions toggle updates both panes A & B live without disturbing zoom/sync and preserves state on exit"
+    )
+    func compareFocusRegionsToggleUpdatesBothPanesLiveWithoutDisturbingZoomAndPreservesOnExit()
+        async throws
+    {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let p1 = library.identity("p1")
+        let p2 = library.identity("p2")
+        let images = CompareTestDetailImages()
+        images.focusPhotos = [p1, p2]
+
+        struct SurfaceCase {
+            let name: String
+            let size: CGSize
+            let horizontal: UIUserInterfaceSizeClass
+            let vertical: UIUserInterfaceSizeClass
+            let idiom: UIUserInterfaceIdiom
+            let isDuoExpanded: Bool
+            let usesSystemToolbar: Bool
+            let usesVerticalToolbar: Bool
+            let expectsCustomTopBar: Bool
+        }
+
+        let cases: [SurfaceCase] = [
+            SurfaceCase(
+                name: "iPad Landscape",
+                size: CGSize(width: 1024, height: 768),
+                horizontal: .regular, vertical: .regular, idiom: .pad,
+                isDuoExpanded: false, usesSystemToolbar: false, usesVerticalToolbar: false,
+                expectsCustomTopBar: true),
+            SurfaceCase(
+                name: "iPhone Landscape",
+                size: CGSize(width: 852, height: 393),
+                horizontal: .compact, vertical: .compact, idiom: .phone,
+                isDuoExpanded: false, usesSystemToolbar: false, usesVerticalToolbar: false,
+                expectsCustomTopBar: true),
+        ]
+
+        for surface in cases {
+            model.showsFocusRegions = true
+            model.openPhoto(p1)
+            let timeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            #expect(model.enterCompareFromDetail(timeline: timeline))
+
+            let scene = try #require(
+                UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let store = SettingsStore.sample
+            let headerFrames = CompareFrameBox()
+            let tapFrames = CompareFrameBox()
+            let host = UIHostingController(
+                rootView: AnyView(
+                    DetailScreen(browsing: model, images: images)
+                        .environment(store)
+                        .environment(\.cloveUserInterfaceIdiom, surface.idiom)
+                        .environment(\.isDuoExpanded, surface.isDuoExpanded)
+                        .environment(\.usesSystemBrowsingToolbar, surface.usesSystemToolbar)
+                        .environment(\.usesVerticalBrowsingToolbar, surface.usesVerticalToolbar)
+                        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                            headerFrames.frames = $0
+                        }
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                            tapFrames.frames = $0
+                        }))
+            host.traitOverrides.horizontalSizeClass = surface.horizontal
+            host.traitOverrides.verticalSizeClass = surface.vertical
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: surface.size)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitUntil {
+                self.findPanes(in: window).count == 2
+                    && (!surface.expectsCustomTopBar
+                        || (headerFrames.frames["clove.compare.focusRegions"] != nil
+                            && headerFrames.frames["clove.compare.syncToggle"] != nil))
+                    && tapFrames.frames["clove.compare.capsule"] != nil
+                    && tapFrames.frames["clove.compare.activeSideBadge"] != nil
+            }
+            let (paneA, paneB) = try requirePanes(in: window)
+            try await waitUntil {
+                !self.findFocusControls(in: paneA).isEmpty
+                    && !self.findFocusControls(in: paneB).isEmpty
+            }
+
+            if surface.expectsCustomTopBar {
+                let focusFrame = try #require(headerFrames.frames["clove.compare.focusRegions"])
+                let syncFrame = try #require(headerFrames.frames["clove.compare.syncToggle"])
+                #expect(abs(focusFrame.width - 44) <= 1.0)
+                #expect(abs(focusFrame.height - 44) <= 1.0)
+                #expect(focusFrame.maxX <= syncFrame.minX + 1.0)
+            }
+
+            // Zoom Pane A (Sync On mirrors Pane B), then toggle Focus regions OFF and back ON.
+            paneA.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.70, y: 0.36)))
+            try await waitUntil { paneA.isZoomed && paneB.isZoomed }
+            await flushMainRunLoop()
+            let zoomBeforeA = try #require(paneA.zoomSnapshot)
+            let zoomBeforeB = try #require(paneB.zoomSnapshot)
+
+            model.showsFocusRegions = false
+            try await waitUntil {
+                self.findFocusControls(in: paneA).isEmpty
+                    && self.findFocusControls(in: paneB).isEmpty
+            }
+            await flushMainRunLoop()
+            let zoomOffA = try #require(paneA.zoomSnapshot)
+            let zoomOffB = try #require(paneB.zoomSnapshot)
+            #expect(abs(zoomOffA.scale - zoomBeforeA.scale) < 0.02)
+            #expect(abs(zoomOffA.anchor.x - zoomBeforeA.anchor.x) < 0.02)
+            #expect(abs(zoomOffA.anchor.y - zoomBeforeA.anchor.y) < 0.02)
+            #expect(abs(zoomOffB.scale - zoomBeforeB.scale) < 0.02)
+            #expect(abs(zoomOffB.anchor.x - zoomBeforeB.anchor.x) < 0.02)
+            #expect(abs(zoomOffB.anchor.y - zoomBeforeB.anchor.y) < 0.02)
+            #expect(model.compareSession?.isSyncLocked == true)
+
+            model.showsFocusRegions = true
+            try await waitUntil {
+                !self.findFocusControls(in: paneA).isEmpty
+                    && !self.findFocusControls(in: paneB).isEmpty
+            }
+            let zoomOnA = try #require(paneA.zoomSnapshot)
+            let zoomOnB = try #require(paneB.zoomSnapshot)
+            #expect(abs(zoomOnA.scale - zoomBeforeA.scale) < 0.02)
+            #expect(abs(zoomOnB.scale - zoomBeforeB.scale) < 0.02)
+
+            // Toggling Focus OFF and exiting preserves showsFocusRegions == false in Detail.
+            model.showsFocusRegions = false
+            try await waitUntil {
+                self.findFocusControls(in: paneA).isEmpty
+                    && self.findFocusControls(in: paneB).isEmpty
+            }
+            model.exitCompare()
+            try await waitUntil {
+                model.compareSession == nil && self.findPanes(in: window).count == 1
+            }
+            #expect(!model.showsFocusRegions)
+            if let detailPreview = self.findPanes(in: window).first {
+                #expect(self.findFocusControls(in: detailPreview).isEmpty)
+            }
+        }
+    }
+
+    @Test(
+        "Compare removes permanent Undo button across surfaces, tightens A/B badge to 6 pt, and preserves Cmd+Z undo"
+    )
+    func compareRemovesPermanentUndoButtonAndPreservesCommandZUndo() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let p1 = library.identity("p1")
+        let p2 = library.identity("p2")
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+
+        let fiveStars = try #require(Rating(rawValue: 5))
+        model.apply(.rating(fiveStars), to: p2)
+        #expect(model.canUndoCompareMark)
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+        let tapFrames = CompareFrameBox()
+        let host = UIHostingController(
+            rootView: AnyView(
+                DetailScreen(browsing: model, images: SampleDetailImages())
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .pad)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    }))
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .regular
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitUntil {
+            self.findPanes(in: window).count == 2
+                && tapFrames.frames["clove.compare.capsule"] != nil
+                && tapFrames.frames["clove.compare.activeSideBadge"] != nil
+                && tapFrames.frames["clove.compare.filmstrip"] != nil
+        }
+
+        #expect(tapFrames.frames["clove.compare.undo"] == nil)
+        #expect(!hasAccessibilityIdentifier("clove.compare.undo", in: window))
+
+        let badgeFrame = try #require(tapFrames.frames["clove.compare.activeSideBadge"])
+        let capsuleFrame = try #require(tapFrames.frames["clove.compare.capsule"])
+        #expect(abs((capsuleFrame.minX - badgeFrame.maxX) - 6) <= 1.5)
+
+        // Hardware keyboard Cmd+Z (.undo) still undoes the active pane's mark without exiting Compare.
+        let session = try #require(model.compareSession)
+        let keyResult = CompareView.handleMarkingKey(
+            .undo,
+            browsing: model,
+            session: session,
+            settings: store.settings)
+        #expect(keyResult == .handled)
+        #expect(model.placedPhoto(for: p2)?.marks.isUnmarked == true)
+        #expect(model.compareSession?.activePhoto == p2)
+    }
+
+    private func hasAccessibilityIdentifier(_ identifier: String, in view: UIView) -> Bool {
+        if view.accessibilityIdentifier == identifier { return true }
+        if let elements = view.accessibilityElements {
+            for element in elements {
+                if let identifiable = element as? UIAccessibilityIdentification,
+                    identifiable.accessibilityIdentifier == identifier
+                {
+                    return true
+                }
+                if let nested = element as? UIView,
+                    hasAccessibilityIdentifier(identifier, in: nested)
+                {
+                    return true
+                }
+            }
+        }
+        return view.subviews.contains { hasAccessibilityIdentifier(identifier, in: $0) }
+    }
+
     private struct HostedCompare {
         let window: UIWindow
         let host: UIHostingController<AnyView>
@@ -1455,12 +1703,13 @@ private final class CompareStaticThumbnails: GridThumbnailSource {
 }
 
 @MainActor
-private final class CompareTestDetailImages: DetailImageSource {
+private final class CompareTestDetailImages: DetailImageSource, DetailRegionSharpnessSource {
     private let sample = SampleDetailImages()
     var warmPhotos: Set<PhotoIdentity> = []
     var delayedColdPhotos: [PhotoIdentity: Duration] = [:]
     var customFullSizes: [PhotoIdentity: CGSize] = [:]
     var unknownInitialFullSizePhotos: Set<PhotoIdentity> = []
+    var focusPhotos: Set<PhotoIdentity> = []
     private(set) var requests: [(PhotoIdentity, DetailPixelRequest)] = []
     private(set) var deliveries: [(PhotoIdentity, DetailPixelRequest.Need, DetailQuality)] = []
     private var cachedPreviews: [PhotoIdentity: DetailImage] = [:]
@@ -1560,6 +1809,30 @@ private final class CompareTestDetailImages: DetailImageSource {
 
     func leave(window: UUID) async {
         await sample.leave(window: window)
+    }
+
+    func analyzeRegions(
+        for photo: PhotoIdentity,
+        group: [PhotoIdentity],
+        nearby: [PhotoIdentity],
+        onAutofocus: @escaping @Sendable (RegionSharpnessPathResult) -> Void
+    ) async -> RegionSharpnessAnalysis? {
+        guard focusPhotos.contains(photo) else {
+            return await sample.analyzeRegions(
+                for: photo, group: group, nearby: nearby, onAutofocus: onAutofocus)
+        }
+        let af = RegionSharpnessEvidence(
+            kind: .cameraAutofocus,
+            groupIndex: nil,
+            region: NormalizedRegion(x: 0.24, y: 0.27, width: 0.12, height: 0.16),
+            score: nil,
+            unavailableBecause: nil)
+        onAutofocus(.regions([af]))
+        return RegionSharpnessAnalysis(
+            autofocus: .regions([af]),
+            faces: .unavailable(.noFacesDetected),
+            acquisitionFailure: nil,
+            timings: RegionSharpnessTimings())
     }
 
     private func makeImage(

@@ -295,16 +295,28 @@ struct CompareSessionTests {
         #expect(duoExpanded.supportsCompare)
         #expect(duoExpanded.showsFilmstrip)
 
-        // Unfolded Duo rotated portrait -> excluded
+        // Unfolded Duo portrait (669 x 951, regular horizontal size class) -> supported, shows filmstrip
         let duoExpandedPortrait = CompareLayoutPolicy(
-            availableWidth: 740,
-            availableHeight: 980,
+            availableWidth: 669,
+            availableHeight: 951,
+            isRegularWidth: true,
+            isCompactHeight: false,
+            isDuoExpanded: true,
+            isDuoCover: false
+        )
+        #expect(duoExpandedPortrait.supportsCompare)
+        #expect(duoExpandedPortrait.showsFilmstrip)
+
+        // Compact non-landscape Duo strip -> excluded
+        let duoCompactPortrait = CompareLayoutPolicy(
+            availableWidth: 466,
+            availableHeight: 678,
             isRegularWidth: false,
             isCompactHeight: false,
             isDuoExpanded: true,
             isDuoCover: false
         )
-        #expect(!duoExpandedPortrait.supportsCompare)
+        #expect(!duoCompactPortrait.supportsCompare)
 
         // iPad landscape -> supported, shows filmstrip
         let padLandscape = CompareLayoutPolicy(

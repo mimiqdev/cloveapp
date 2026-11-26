@@ -5956,7 +5956,7 @@ struct DetailDisplayPresentationTests {
         }
 
         // Focus View in Expanded Duo Portrait (669x951): centered tappable title in top bar,
-        // no viewport corner overlay, and [Focus | Compare] bottom-left with Compare disabled.
+        // no viewport corner overlay, and [Focus | Compare] bottom-left with Compare enabled.
         try await waitFor("Portrait Duo Focus View did not settle") {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findFilmstripScrollView(in: window, excluding: preview) != nil
@@ -5971,7 +5971,7 @@ struct DetailDisplayPresentationTests {
         if let compareElement = findAccessibilityElement(
             withIdentifier: "clove.detail.compare", in: window)
         {
-            #expect(compareElement.accessibilityTraits.contains(.notEnabled))
+            #expect(!compareElement.accessibilityTraits.contains(.notEnabled))
         }
 
         // Photo Preview in Expanded Duo Portrait (669x951): centered tappable title stays visible
@@ -7632,8 +7632,9 @@ struct DetailDisplayPresentationTests {
                 && soloTapFrames.frames["clove.detail.bottomBand"] != nil
         }
 
-        // 2. Portrait Expanded Duo disables Compare gracefully while Focus View places [Focus|Compare]
-        // bottom-left 12 pt above the filmstrip without squeezing the strip.
+        // 2. Portrait Expanded Duo (669x951) enables Compare with >= 2 photos while Focus View
+        // places [Focus|Compare] bottom-left 12 pt above the filmstrip without squeezing the strip,
+        // and disables Compare cleanly when < 2 photos are in scope.
         let multiBrowsing = BrowsingModel(library: TestLibrary.sample())
         multiBrowsing.openFolder()
         try await waitFor("sample folder open") { !multiBrowsing.isFolderOpening }
@@ -7642,7 +7643,7 @@ struct DetailDisplayPresentationTests {
 
         let duoPresentation = TestPresentationBox(value: .focus)
         let duoFrames = DetailFrameBox()
-        window.frame = CGRect(x: 0, y: 0, width: 703.5, height: 1000)
+        window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
         soloHost.rootView = AnyView(
             TestDuoPoseDetailHost(
                 browsing: multiBrowsing,
@@ -7650,7 +7651,7 @@ struct DetailDisplayPresentationTests {
                 presentation: duoPresentation,
                 isDuoExpanded: true,
                 isDuoCover: false,
-                usesVerticalToolbar: true,
+                usesVerticalToolbar: false,
                 hasFoldRegion: true,
                 showsGrid: true,
                 theme: .light
@@ -7673,24 +7674,46 @@ struct DetailDisplayPresentationTests {
         if let portraitCompareAlpha = effectiveRenderedOpacity(
             atCenterOf: portraitCompareFrame, in: window)
         {
-            #expect(portraitCompareAlpha < 0.6)
+            #expect(portraitCompareAlpha > 0.9)
         }
         let portraitFocusFrame = try #require(duoFrames.frames["clove.detail.focusToggle"])
-        if let portraitCompareAlpha = effectiveRenderedOpacity(
-            atCenterOf: portraitCompareFrame, in: window)
-        {
-            #expect(portraitCompareAlpha < 0.6)
-        }
         if let portraitFocusAlpha = effectiveRenderedOpacity(
             atCenterOf: portraitFocusFrame, in: window)
         {
             #expect(portraitFocusAlpha > 0.9)
         }
         #expect(
-            !CompareLayoutPolicy(
-                availableWidth: 703.5, availableHeight: 1000, isRegularWidth: true,
+            CompareLayoutPolicy(
+                availableWidth: 669, availableHeight: 951, isRegularWidth: true,
                 isCompactHeight: false, isDuoExpanded: true, isDuoCover: false
             ).supportsCompare)
+
+        // Single-photo Portrait Expanded Duo still disables Compare cleanly.
+        let soloDuoFrames = DetailFrameBox()
+        soloHost.rootView = AnyView(
+            TestDuoPoseDetailHost(
+                browsing: soloBrowsing,
+                images: SampleDetailImages(),
+                presentation: duoPresentation,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: false,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                soloDuoFrames.frames = $0
+            })
+        try await waitFor("Solo Portrait Duo Focus View did not settle") {
+            soloDuoFrames.frames["clove.detail.compare"] != nil
+        }
+        let soloDuoCompareFrame = try #require(soloDuoFrames.frames["clove.detail.compare"])
+        if let soloDuoCompareAlpha = effectiveRenderedOpacity(
+            atCenterOf: soloDuoCompareFrame, in: window)
+        {
+            #expect(soloDuoCompareAlpha < 0.6)
+        }
         #expect(multiBrowsing.compareSession == nil)
 
         // 3. Ordinary iPhone landscape leaves standalone top Focus and Compare untouched without inspectionPill.

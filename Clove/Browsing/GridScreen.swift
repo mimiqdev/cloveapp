@@ -444,7 +444,9 @@ struct GridScreen: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier(
-                usesDock && browsing.state.route == .detail ? "clove.detail" : "clove.grid")
+                usesDock && browsing.state.route == .detail
+                    ? (browsing.compareSession != nil ? "clove.compare" : "clove.detail")
+                    : "clove.grid")
     }
 
     @ViewBuilder private var surface: some View {
