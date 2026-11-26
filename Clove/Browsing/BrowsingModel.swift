@@ -155,9 +155,7 @@ final class BrowsingModel {
     private(set) var metadataFilter: PhotoMetadataFilter = .none
 
     /// Available secondary filter dimensions derived from the folder's placed photos.
-    var metadataFilterOptions: PhotoMetadataFilterOptions {
-        PhotoMetadataFilterOptions(photos: allPlacedPhotos)
-    }
+    private(set) var metadataFilterOptions: PhotoMetadataFilterOptions = .empty
 
     /// Whether any primary, label, or metadata/keyword filter is active.
     var hasActiveFilter: Bool {
@@ -191,9 +189,8 @@ final class BrowsingModel {
         recents.first { $0.identity == state.folder }.map { RecentFolderSummary.location(for: $0) }
     }
 
-    var sidebarCounts: SidebarCounts {
-        SidebarCounts(photos: storedPhotos.filter { !$0.time.isPending })
-    }
+    /// Sidebar and filter counts over the folder's placed photos and their shown marks.
+    private(set) var sidebarCounts: SidebarCounts = .empty
 
     /// All placed photos in the active order, kept up to date when stored photos or order change.
     private(set) var allPlacedPhotos: [GridPhoto] = []
@@ -711,9 +708,9 @@ final class BrowsingModel {
     @discardableResult
     func runGroupFinishing(_ plan: GroupFinishingPlan) -> Int {
         guard canMark, plan.availability.isAvailable else { return 0 }
-        let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
-            request($0.change, for: $0.photo)
-        }
+        let edits = requestBatch(
+            plan.changesAllowed { photo in self.shownMarks(for: photo) }
+                .map { ($0.change, $0.photo) })
         submit(.finishing(plan, edits))
         return edits.count
     }
@@ -912,7 +909,7 @@ final class BrowsingModel {
         guard canMark else { return }
         let plan = BatchMarkPlan(action: action, photos: batchTargets, settings: settings)
         guard !plan.items.isEmpty else { return }
-        let edits = plan.items.map { request($0.change, for: $0.photo) }
+        let edits = requestBatch(plan.items.map { ($0.change, $0.photo) })
         submit(.batch(edits))
         markUndo = MarkUndoStep(
             photo: state.route == .detail ? state.currentPhoto : nil,
@@ -1120,7 +1117,7 @@ final class BrowsingModel {
             completion(.failure(RejectMoveRefusal.disabled))
             return
         }
-        let edits = kept.map { request(.rating(.unrated), for: $0) }
+        let edits = requestBatch(kept.map { (.rating(.unrated), $0) })
         submit(.keep(edits))
         let id = submit(.move(plan, kept: edits))
         moveCompletions[id] = completion
@@ -1165,7 +1162,7 @@ final class BrowsingModel {
     /// Submits a move undo to the existing ordered pipeline.
     func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
         guard canMark else { return }
-        let edits = entry.keptPhotos.compactMap { kept -> DesiredMarkEdit? in
+        let changes = entry.keptPhotos.compactMap { kept -> (MarkChange, PhotoIdentity)? in
             var target = kept.marksAfter
             target.rating = .rejected
             guard
@@ -1174,8 +1171,9 @@ final class BrowsingModel {
                     expected: kept.marksAfter, target: target,
                     fields: .rating(kept.marksAfter.rating))
             else { return nil }
-            return request(change, for: kept.set.id)
+            return (change, kept.set.id)
         }
+        let edits = requestBatch(changes)
         submit(.moveUndo(entry, edits))
     }
 
@@ -1219,14 +1217,15 @@ final class BrowsingModel {
     /// Restore the latest marking or finishing action together.
     func undoLastMark(restoringNavigation: Bool = true) {
         guard canUndoMark, let undo = markUndo else { return }
-        let edits = undo.edits.compactMap { edit -> DesiredMarkEdit? in
+        let changes = undo.edits.compactMap { edit -> (MarkChange, PhotoIdentity)? in
             guard
                 let change = DesiredMarkRestore.change(
                     photo: edit.photo, current: shownMarks(for: edit.photo), expected: edit.after,
                     target: edit.before, fields: edit.change)
             else { return nil }
-            return request(change, for: edit.photo)
+            return (change, edit.photo)
         }
+        let edits = requestBatch(changes)
         submit(.batch(edits))
         if restoringNavigation, let returnPhoto = undo.photo {
             let timeline = DetailTimeline(
@@ -1248,22 +1247,62 @@ final class BrowsingModel {
 
     // MARK: - Ordered actions
 
+    private struct PlacedMarkChanges {
+        var marksChanged = false
+        var keywordsChanged = false
+
+        mutating func record(previous: PhotoMarks, updated: PhotoMarks) {
+            guard previous != updated else { return }
+            marksChanged = true
+            if previous.keywords != updated.keywords {
+                keywordsChanged = true
+            }
+        }
+    }
+
     private func request(_ change: MarkChange, for photo: PhotoIdentity) -> DesiredMarkEdit {
-        let confirmed = photoIndices[photo].map { confirmedPhotos[$0].marks } ?? PhotoMarks()
-        let edit = desiredMarks.apply(change, to: photo, confirmed: confirmed)
-        updateShownPhoto(photo)
+        var changes = PlacedMarkChanges()
+        let edit = stageMark(change, for: photo, changes: &changes)
+        finishShownMarkChanges(changes)
         return edit
     }
 
-    private func updateShownPhoto(_ photo: PhotoIdentity) {
+    private func requestBatch(
+        _ items: [(change: MarkChange, photo: PhotoIdentity)]
+    ) -> [DesiredMarkEdit] {
+        guard !items.isEmpty else { return [] }
+        var changes = PlacedMarkChanges()
+        let edits = items.map { stageMark($0.change, for: $0.photo, changes: &changes) }
+        finishShownMarkChanges(changes)
+        return edits
+    }
+
+    private func stageMark(
+        _ change: MarkChange, for photo: PhotoIdentity, changes: inout PlacedMarkChanges
+    ) -> DesiredMarkEdit {
+        let confirmed = photoIndices[photo].map { confirmedPhotos[$0].marks } ?? PhotoMarks()
+        let edit = desiredMarks.apply(change, to: photo, confirmed: confirmed)
+        applyShownMarks(for: photo, changes: &changes)
+        return edit
+    }
+
+    private func applyShownMarks(for photo: PhotoIdentity, changes: inout PlacedMarkChanges) {
         guard let index = photoIndices[photo] else { return }
         let shown = desiredMarks.shown(for: photo, confirmed: confirmedPhotos[index].marks)
+        guard storedPhotos[index].marks != shown else { return }
         storedPhotos[index].marks = shown
         ordering.setMarks(shown, for: photo)
         if let placedIndex = placedPhotoIndices[photo] {
+            let previous = allPlacedPhotos[placedIndex].marks
+            changes.record(previous: previous, updated: shown)
             allPlacedPhotos[placedIndex].marks = shown
         }
+    }
+
+    private func finishShownMarkChanges(_ changes: PlacedMarkChanges) {
         refilterPhotos()
+        if changes.marksChanged { updateSidebarCountsIfNeeded() }
+        if changes.keywordsChanged { updateMetadataFilterOptionsIfNeeded() }
     }
 
     /// Detail marks and finishing actions create a detail undo step; `applyBatch` installs a
@@ -1363,14 +1402,15 @@ final class BrowsingModel {
             moveCompletions.removeValue(forKey: actionID)?(.success(result))
         } catch {
             // A whole-request refusal restores only keeps the user has not changed since.
-            let restores = kept.compactMap { edit -> DesiredMarkEdit? in
+            let restoreChanges = kept.compactMap { edit -> (MarkChange, PhotoIdentity)? in
                 guard
                     let change = DesiredMarkRestore.change(
                         photo: edit.photo, current: shownMarks(for: edit.photo),
                         expected: edit.after, target: edit.before, fields: edit.change)
                 else { return nil }
-                return request(change, for: edit.photo)
+                return (change, edit.photo)
             }
+            let restores = requestBatch(restoreChanges)
             _ = await persist(restores)
             moveCompletions.removeValue(forKey: actionID)?(.failure(error))
         }
@@ -1465,14 +1505,19 @@ final class BrowsingModel {
         let dropped = actionPipeline.removePending()
         recordUndo(for: nil)
         desiredMarks.removeAll()
+        var markChanges = PlacedMarkChanges()
         storedPhotos = confirmedPhotos
         for photo in confirmedPhotos {
             ordering.setMarks(photo.marks, for: photo.id)
             if let placedIndex = placedPhotoIndices[photo.id] {
-                allPlacedPhotos[placedIndex].marks = photo.marks
+                let previous = allPlacedPhotos[placedIndex].marks
+                if previous != photo.marks {
+                    markChanges.record(previous: previous, updated: photo.marks)
+                    allPlacedPhotos[placedIndex].marks = photo.marks
+                }
             }
         }
-        refilterPhotos()
+        finishShownMarkChanges(markChanges)
         dismissFailureToast()
         dismissPhotosSaveToast()
         for entry in dropped {
@@ -1578,6 +1623,8 @@ final class BrowsingModel {
         allPlacedPhotos = []
         placedPhotoIndices = [:]
         photos = []
+        if sidebarCounts != .empty { sidebarCounts = .empty }
+        if metadataFilterOptions != .empty { metadataFilterOptions = .empty }
         desiredMarks.removeAll()
         recordUndo(for: nil)
         dismissFailureToast()
@@ -1818,18 +1865,13 @@ final class BrowsingModel {
                     && latest[index].fileName == confirmedPhotos[index].fileName
             })
         {
+            var markChanges = PlacedMarkChanges()
             for id in marks.keys {
                 guard let index = photoIndices[id] else { continue }
-                let confirmedMarks = latest[index].marks
-                confirmedPhotos[index].marks = confirmedMarks
-                let shown = desiredMarks.shown(for: id, confirmed: confirmedMarks)
-                storedPhotos[index].marks = shown
-                ordering.setMarks(shown, for: id)
-                if let placedIndex = placedPhotoIndices[id] {
-                    allPlacedPhotos[placedIndex].marks = shown
-                }
+                confirmedPhotos[index].marks = latest[index].marks
+                applyShownMarks(for: id, changes: &markChanges)
             }
-            refilterPhotos()
+            finishShownMarkChanges(markChanges)
             groups = library.groups
             reconcileExpandedGroup()
             return
@@ -1863,26 +1905,26 @@ final class BrowsingModel {
         if !generationChanged && latest.count == confirmedPhotos.count
             && Self.haveMatchingOrderKeys(confirmedPhotos, latest)
         {
+            var markChanges = PlacedMarkChanges()
+            var placedMetadataChanged = false
             for index in latest.indices {
                 let updated = latest[index]
                 confirmedPhotos[index] = updated
-                let shown = desiredMarks.shown(for: updated.id, confirmed: updated.marks)
-                if storedPhotos[index].marks != shown {
-                    storedPhotos[index].marks = shown
-                    ordering.setMarks(shown, for: updated.id)
-                    if let placedIndex = placedPhotoIndices[updated.id] {
-                        allPlacedPhotos[placedIndex].marks = shown
-                    }
-                }
+                applyShownMarks(for: updated.id, changes: &markChanges)
                 if storedPhotos[index].metadata != updated.metadata {
                     storedPhotos[index].metadata = updated.metadata
                     ordering.setMetadata(updated.metadata, for: updated.id)
                     if let placedIndex = placedPhotoIndices[updated.id] {
+                        placedMetadataChanged = true
                         allPlacedPhotos[placedIndex].metadata = updated.metadata
                     }
                 }
             }
             refilterPhotos()
+            if markChanges.marksChanged { updateSidebarCountsIfNeeded() }
+            if markChanges.keywordsChanged || placedMetadataChanged {
+                updateMetadataFilterOptionsIfNeeded()
+            }
             groups = library.groups
             reconcileExpandedGroup()
             return
@@ -1891,21 +1933,31 @@ final class BrowsingModel {
             && Self.haveMatchingOrderKeys(confirmedPhotos, latest.prefix(confirmedPhotos.count))
         {
             let previousCount = confirmedPhotos.count
+            var markChanges = PlacedMarkChanges()
+            var placedMetadataChanged = false
             for index in 0..<previousCount {
                 let updated = latest[index]
                 confirmedPhotos[index] = updated
                 let shown = desiredMarks.shown(for: updated.id, confirmed: updated.marks)
                 if storedPhotos[index].marks != shown {
+                    let previous = storedPhotos[index].marks
                     storedPhotos[index].marks = shown
                     ordering.setMarks(shown, for: updated.id)
+                    if placedPhotoIndices[updated.id] != nil {
+                        markChanges.record(previous: previous, updated: shown)
+                    }
                 }
                 if storedPhotos[index].metadata != updated.metadata {
                     storedPhotos[index].metadata = updated.metadata
                     ordering.setMetadata(updated.metadata, for: updated.id)
+                    if placedPhotoIndices[updated.id] != nil {
+                        placedMetadataChanged = true
+                    }
                 }
             }
             var inserted: [GridPhoto] = []
             inserted.reserveCapacity(latest.count - previousCount)
+            var insertedPlacedPhoto = false
             for index in previousCount..<latest.count {
                 let confirmed = latest[index]
                 confirmedPhotos.append(confirmed)
@@ -1914,9 +1966,18 @@ final class BrowsingModel {
                 shown.marks = desiredMarks.shown(for: confirmed.id, confirmed: confirmed.marks)
                 storedPhotos.append(shown)
                 inserted.append(shown)
+                if !shown.time.isPending {
+                    insertedPlacedPhoto = true
+                }
             }
             ordering.insert(inserted)
             rebuildOrderedPhotos()
+            if insertedPlacedPhoto || markChanges.marksChanged {
+                updateSidebarCountsIfNeeded()
+            }
+            if insertedPlacedPhoto || markChanges.keywordsChanged || placedMetadataChanged {
+                updateMetadataFilterOptionsIfNeeded()
+            }
             groups = library.groups
             reconcileExpandedGroup()
             return
@@ -1930,6 +1991,8 @@ final class BrowsingModel {
             return shown
         }
         rebuildOrderingAndPhotos()
+        updateSidebarCountsIfNeeded()
+        updateMetadataFilterOptionsIfNeeded()
         groups = library.groups
         reconcileRemovedPhotos()
         reconcileExpandedGroup()
@@ -1945,6 +2008,23 @@ final class BrowsingModel {
         placedPhotoIndices = Dictionary(
             uniqueKeysWithValues: allPlacedPhotos.enumerated().map { ($0.element.id, $0.offset) })
         refilterPhotos()
+    }
+
+    private func updateSidebarCountsIfNeeded() {
+        let next = allPlacedPhotos.isEmpty ? .empty : SidebarCounts(photos: allPlacedPhotos)
+        if sidebarCounts != next {
+            sidebarCounts = next
+        }
+    }
+
+    private func updateMetadataFilterOptionsIfNeeded() {
+        let next =
+            allPlacedPhotos.isEmpty
+            ? .empty
+            : PhotoMetadataFilterOptions(photos: allPlacedPhotos)
+        if metadataFilterOptions != next {
+            metadataFilterOptions = next
+        }
     }
 
     private func refilterPhotos() {

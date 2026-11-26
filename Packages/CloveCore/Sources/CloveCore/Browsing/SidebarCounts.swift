@@ -2,6 +2,8 @@ import Foundation
 
 /// Sidebar counts over the folder's photos and their shown marks. No filter is applied here.
 public struct SidebarCounts: Equatable, Sendable {
+    public static let empty = SidebarCounts(photos: [])
+
     public let all: Int
     public let unmarked: Int
     public let rejected: Int
