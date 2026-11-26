@@ -706,13 +706,16 @@ final class BrowsingModel {
 
     // MARK: - In-group culling
 
-    /// Snapshots the allowed changes from shown marks and submits one finishing action.
-    func runGroupFinishing(_ plan: GroupFinishingPlan) {
-        guard canMark, plan.availability.isAvailable else { return }
+    /// Snapshots the allowed changes from shown marks, submits one finishing action, and returns
+    /// how many photos were marked.
+    @discardableResult
+    func runGroupFinishing(_ plan: GroupFinishingPlan) -> Int {
+        guard canMark, plan.availability.isAvailable else { return 0 }
         let edits = plan.changesAllowed { photo in self.shownMarks(for: photo) }.map {
             request($0.change, for: $0.photo)
         }
         submit(.finishing(plan, edits))
+        return edits.count
     }
 
     private var settingsReturnRoute: BrowserRoute = .entry
@@ -1193,11 +1196,16 @@ final class BrowsingModel {
             && folderLocationLoss == nil
     }
 
-    /// Shows the requested mark and submits its write before returning to the input handler.
-    func apply(_ change: MarkChange, to photo: PhotoIdentity) {
-        guard canMark, !change.isEmpty else { return }
+    /// Shows the requested mark, submits its write before returning to the input handler, and
+    /// reports whether the mark hid `photo` from the active filtered list.
+    @discardableResult
+    func apply(_ change: MarkChange, to photo: PhotoIdentity) -> Bool {
+        guard canMark, !change.isEmpty else { return false }
+        let wasVisible = hasActiveFilter && photos.contains { $0.id == photo }
         let edit = request(change, for: photo)
         submit(.mark(edit))
+        guard wasVisible else { return false }
+        return !photos.contains { $0.id == photo }
     }
 
     var canUndoMark: Bool { canMark && markUndo != nil }

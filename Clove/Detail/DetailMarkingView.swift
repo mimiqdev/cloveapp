@@ -31,6 +31,7 @@ struct DetailMarkingActions {
     var collapseGroup: () -> Void = {}
     /// Submits the visible group's finishing action and starts its auto-advance.
     var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
+    var undo: (() -> Void)? = nil
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its chrome taps,
@@ -91,6 +92,7 @@ struct DetailMarkingView: View {
     let actions: DetailMarkingActions
     var duo: DuoDetailLayout?
     var presentation: Binding<DetailPresentation>? = nil
+    var undoToast: DetailUndoToast? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -219,7 +221,8 @@ struct DetailMarkingView: View {
         actions: DetailMarkingActions,
         duo: DuoDetailLayout? = nil,
         presentation: Binding<DetailPresentation>? = nil,
-        initialPresentation: DetailPresentation = .photoPreview
+        initialPresentation: DetailPresentation = .photoPreview,
+        undoToast: DetailUndoToast? = nil
     ) {
         self.browsing = browsing
         self.photo = photo
@@ -236,6 +239,7 @@ struct DetailMarkingView: View {
         self.actions = actions
         self.duo = duo
         self.presentation = presentation
+        self.undoToast = undoToast
         _widePresentation = State(initialValue: initialPresentation)
     }
 
@@ -332,17 +336,20 @@ struct DetailMarkingView: View {
     /// shrinking the photo (#305).
     private var swipeFeedbackReservation: CGFloat {
         let duoHasFocusOverlay = duo != nil && isDuoExpanded && showsFilmstrip
+        let hasUndoToast = browsing.failureToastMessage == nil && undoToast != nil
         let floatingPillVisible: Bool =
             if duoHasFocusOverlay {
-                chromeIsVisible
+                chromeIsVisible || hasUndoToast
             } else if duo != nil && !isDuoExpanded {
-                chromeIsVisible && stagePill != nil
+                hasUndoToast || (chromeIsVisible && stagePill != nil)
             } else {
                 false
             }
         let floatingPillHeight: CGFloat =
             if duoHasFocusOverlay {
-                max(DetailInspectionPill.size.height, stagePill != nil ? duoPillHeight : 0)
+                max(
+                    DetailInspectionPill.size.height,
+                    (!hasUndoToast && stagePill != nil) ? duoPillHeight : 0)
             } else {
                 duoPillHeight
             }
@@ -579,7 +586,7 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsUndo: chromeIsVisible && !emptyFromFilterSelection,
+                    showsUndo: false,
                     backTitle: detailBackTitle,
                     showsNavigationTools: !emptyFromFilterSelection,
                     showsTools: chromeIsVisible,
@@ -785,7 +792,7 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsUndo: !isDuoExpanded && !emptyFromFilterSelection,
+                    showsUndo: false,
                     showsNavigationTools: false,
                     showsStandaloneDockTool: !emptyFromFilterSelection && duo.showsGrid
                         && presentationPolicy.supportsPhotoPreview,
@@ -864,6 +871,7 @@ struct DetailMarkingView: View {
     @available(iOS 27.1, *)
     private func duoPhotoPane(showsFilmstrip: Bool) -> some View {
         let activeStagePill = chromeIsVisible ? stagePill : nil
+        let visibleUndoToast = browsing.failureToastMessage == nil ? undoToast : nil
         VStack(spacing: 0) {
             previewArea
                 .overlay(alignment: .bottom) {
@@ -881,7 +889,17 @@ struct DetailMarkingView: View {
                                     inspectionPill
                                         .layoutValue(
                                             key: DetailBottomBandRoleKey.self, value: .leadingPill)
-                                    if let activeStagePill {
+                                    if let visibleUndoToast {
+                                        detailUndoToastView(visibleUndoToast)
+                                            .layoutValue(
+                                                key: DetailBottomBandRoleKey.self,
+                                                value: .centerPill
+                                            )
+                                            .transition(
+                                                CloveMotion.slideTransition(
+                                                    edge: .bottom, offset: 12,
+                                                    reduceMotion: reduceMotion))
+                                    } else if let activeStagePill {
                                         activeStagePill
                                             .onGeometryChange(for: CGFloat.self) {
                                                 $0.size.height
@@ -902,7 +920,23 @@ struct DetailMarkingView: View {
                                 }
                                 .padding(.bottom, 12)
                                 .transition(.opacity)
+                            } else if let visibleUndoToast {
+                                detailUndoToastView(visibleUndoToast)
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 12)
+                                    .transition(
+                                        CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 12,
+                                            reduceMotion: reduceMotion))
                             }
+                        } else if let visibleUndoToast {
+                            detailUndoToastView(visibleUndoToast)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
+                                .transition(
+                                    CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 12,
+                                        reduceMotion: reduceMotion))
                         } else if let activeStagePill {
                             activeStagePill
                                 .onGeometryChange(for: CGFloat.self) {
@@ -917,14 +951,25 @@ struct DetailMarkingView: View {
                                             edge: .bottom, offset: 8, reduceMotion: reduceMotion),
                                         removal: .identity))
                         }
+                    } else if let visibleUndoToast {
+                        detailUndoToastView(visibleUndoToast)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .transition(
+                                CloveMotion.slideTransition(
+                                    edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                     }
                 }
                 .animation(
-                    showsFilmstrip && activeStagePill != nil
+                    visibleUndoToast != nil
+                        || (showsFilmstrip && activeStagePill != nil)
                         ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                    value: showsFilmstrip ? activeStagePill?.identifier : nil
+                    value: visibleUndoToast?.id.uuidString
+                        ?? (showsFilmstrip ? activeStagePill?.identifier : nil)
                 )
-                .onChange(of: activeStagePill != nil && showsFilmstrip) { _, isVisible in
+                .onChange(
+                    of: visibleUndoToast == nil && activeStagePill != nil && showsFilmstrip
+                ) { _, isVisible in
                     if !isVisible {
                         duoPillHeight = 0
                     }
@@ -983,7 +1028,7 @@ struct DetailMarkingView: View {
                     ) {
                         inspectionPill
                             .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
-                        if let activeStagePill {
+                        if visibleUndoToast == nil, let activeStagePill {
                             activeStagePill
                                 .id(activeStagePill.identity)
                                 .layoutValue(key: DetailBottomBandRoleKey.self, value: .centerPill)
@@ -1100,17 +1145,6 @@ struct DetailMarkingView: View {
                         }
                         detailFilterButton
                             .reportHeaderControlFrame("clove.detail.filter")
-                        if !emptyFromFilterSelection, !isDuoExpanded {
-                            GlassIconButton(
-                                label: AppLocalization.string("Undo", language: language),
-                                symbol: "arrow.uturn.backward",
-                                size: isWidePadLayout ? .pad : .phone,
-                                identifier: "clove.detail.undo",
-                                action: undo
-                            )
-                            .disabled(!browsing.canUndoMark)
-                            .reportHeaderControlFrame("clove.detail.undo")
-                        }
                     }
                 }
             }
@@ -1275,6 +1309,7 @@ struct DetailMarkingView: View {
             .background(Color.clove.bg.stage)
             .reportTapPickerFrame("clove.detail.bottomBand")
         } else {
+            let visibleUndoToast = browsing.failureToastMessage == nil ? undoToast : nil
             DetailPhotoPreviewBandLayout(
                 leadingInset: 16,
                 trailingInset: 24,
@@ -1282,7 +1317,7 @@ struct DetailMarkingView: View {
             ) {
                 inspectionPill
                     .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
-                if let stagePill {
+                if visibleUndoToast == nil, let stagePill {
                     stagePill
                         .layoutValue(key: DetailBottomBandRoleKey.self, value: .centerPill)
                         .transition(
@@ -1295,8 +1330,9 @@ struct DetailMarkingView: View {
                     .layoutValue(key: DetailBottomBandRoleKey.self, value: .toolbar)
             }
             .animation(
-                stagePill != nil ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                value: stagePill?.identifier
+                visibleUndoToast == nil && stagePill != nil
+                    ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                value: visibleUndoToast == nil ? stagePill?.identifier : nil
             )
             .padding(.bottom, 10)
             .frame(height: 84, alignment: .bottom)
@@ -1307,7 +1343,8 @@ struct DetailMarkingView: View {
     }
 
     private var landscapeStageFeedbackOverlay: some View {
-        VStack(spacing: 8) {
+        let visibleUndoToast = browsing.failureToastMessage == nil ? undoToast : nil
+        return VStack(spacing: 8) {
             Group {
                 if let message = browsing.failureToastMessage {
                     Toast(
@@ -1318,11 +1355,18 @@ struct DetailMarkingView: View {
                     .transition(
                         CloveMotion.slideTransition(
                             edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                } else if let visibleUndoToast {
+                    detailUndoToastView(visibleUndoToast)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, (showsFilmstrip && chromeIsVisible) ? 4 : 0)
+                        .transition(
+                            CloveMotion.slideTransition(
+                                edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 }
             }
             .animation(
                 CloveMotion.chrome(reduceMotion: reduceMotion),
-                value: browsing.failureToastMessage
+                value: browsing.failureToastMessage ?? visibleUndoToast?.id.uuidString
             )
             if showsZoomChip && scale > DetailFitScale.tolerance {
                 Text(zoomName)
@@ -1338,8 +1382,10 @@ struct DetailMarkingView: View {
     }
 
     private var standardStageOverlayChrome: some View {
+        let visibleUndoToast = browsing.failureToastMessage == nil ? undoToast : nil
         let hasWidePadOverlayItems =
             browsing.failureToastMessage != nil
+            || visibleUndoToast != nil
             || (showsZoomChip && scale > DetailFitScale.tolerance)
             || (showsFilmstrip && chromeIsVisible)
         return VStack(spacing: 8) {
@@ -1369,7 +1415,10 @@ struct DetailMarkingView: View {
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .cloveGlass(in: Capsule())
                     .padding(
-                        .bottom, (isWidePadLayout || (showsFilmstrip && chromeIsVisible)) ? 0 : 12
+                        .bottom,
+                        (isWidePadLayout || (showsFilmstrip && chromeIsVisible)
+                            || visibleUndoToast != nil)
+                            ? 0 : 12
                     )
                     .transition(.opacity)
             }
@@ -1382,7 +1431,15 @@ struct DetailMarkingView: View {
                     ) {
                         inspectionPill
                             .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
-                        if let stagePill {
+                        if let visibleUndoToast {
+                            detailUndoToastView(visibleUndoToast)
+                                .layoutValue(
+                                    key: DetailBottomBandRoleKey.self, value: .centerPill
+                                )
+                                .transition(
+                                    CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                        } else if let stagePill {
                             stagePill
                                 .layoutValue(
                                     key: DetailBottomBandRoleKey.self, value: .centerPill
@@ -1396,15 +1453,25 @@ struct DetailMarkingView: View {
                         }
                     }
                     .animation(
-                        stagePill != nil
+                        visibleUndoToast != nil || stagePill != nil
                             ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                        value: stagePill?.identifier
+                        value: visibleUndoToast?.id.uuidString ?? stagePill?.identifier
                     )
+                } else if let visibleUndoToast {
+                    detailUndoToastView(visibleUndoToast)
+                        .padding(.horizontal, 16)
+                        .transition(
+                            CloveMotion.slideTransition(
+                                edge: .bottom, offset: 12, reduceMotion: reduceMotion)
+                        )
+                        .animation(
+                            CloveMotion.chrome(reduceMotion: reduceMotion),
+                            value: visibleUndoToast.id
+                        )
                 }
             } else if showsFilmstrip && chromeIsVisible {
-                // The pill rides the floating chrome band above the strip. The band is an
-                // overlay, so its height never moves the stage (handoff components.md,
-                // Pill action; #305).
+                // The pill or transient Undo toast rides the floating chrome band above the strip.
+                // The band is an overlay, so its height never moves the stage (#305).
                 VStack(spacing: 8) {
                     if usesInspectionPill {
                         DetailPhotoPreviewBandLayout(
@@ -1415,7 +1482,16 @@ struct DetailMarkingView: View {
                             inspectionPill
                                 .layoutValue(
                                     key: DetailBottomBandRoleKey.self, value: .leadingPill)
-                            if let stagePill {
+                            if let visibleUndoToast {
+                                detailUndoToastView(visibleUndoToast)
+                                    .layoutValue(
+                                        key: DetailBottomBandRoleKey.self, value: .centerPill
+                                    )
+                                    .transition(
+                                        CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 12,
+                                            reduceMotion: reduceMotion))
+                            } else if let stagePill {
                                 stagePill
                                     .layoutValue(
                                         key: DetailBottomBandRoleKey.self, value: .centerPill
@@ -1429,14 +1505,22 @@ struct DetailMarkingView: View {
                             }
                         }
                         .animation(
-                            stagePill != nil
+                            visibleUndoToast != nil || stagePill != nil
                                 ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                            value: stagePill?.identifier
+                            value: visibleUndoToast?.id.uuidString ?? stagePill?.identifier
                         )
                         .padding(.bottom, 4)
                     } else {
                         Group {
-                            if let stagePill {
+                            if let visibleUndoToast {
+                                detailUndoToastView(visibleUndoToast)
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 4)
+                                    .transition(
+                                        CloveMotion.slideTransition(
+                                            edge: .bottom, offset: 12,
+                                            reduceMotion: reduceMotion))
+                            } else if let stagePill {
                                 stagePill
                                     .transition(
                                         .asymmetric(
@@ -1448,9 +1532,9 @@ struct DetailMarkingView: View {
                             }
                         }
                         .animation(
-                            stagePill != nil
+                            visibleUndoToast != nil || stagePill != nil
                                 ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                            value: stagePill?.identifier
+                            value: visibleUndoToast?.id.uuidString ?? stagePill?.identifier
                         )
                     }
                     DetailFilmstrip(
@@ -1488,6 +1572,18 @@ struct DetailMarkingView: View {
                     .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 8)
+            } else if let visibleUndoToast {
+                detailUndoToastView(visibleUndoToast)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .transition(
+                        CloveMotion.slideTransition(
+                            edge: .bottom, offset: 12, reduceMotion: reduceMotion)
+                    )
+                    .animation(
+                        CloveMotion.chrome(reduceMotion: reduceMotion),
+                        value: visibleUndoToast.id
+                    )
             } else if !showsFilmstrip && chromeIsVisible {
                 Group {
                     if let stagePill {
@@ -1515,6 +1611,16 @@ struct DetailMarkingView: View {
             controlsHeight = $0
         }
         .transition(.opacity)
+    }
+
+    private func detailUndoToastView(_ toast: DetailUndoToast) -> some View {
+        Toast(
+            message: toast.localizedMessage(language: language),
+            actionTitle: AppLocalization.string("Undo", language: language),
+            identifier: "clove.detail.undoToast",
+            onAction: undo
+        )
+        .reportTapPickerFrame("clove.detail.undoToast")
     }
 
     private var landscapeBottomReviewRow: some View {
@@ -2689,10 +2795,15 @@ struct DetailMarkingView: View {
         actions.markingSwipeBegan()
     }
 
-    /// Undoes the last mark from the top bar, Duo dock or `⌘Z` (PRD Undo row).
+    /// Undoes the last mark from the Detail Undo toast or `⌘Z` (PRD Undo row).
     private func undo() {
+        guard browsing.canUndoMark else { return }
         beginMarkingGesture()
-        browsing.undoLastMark()
+        if let customUndo = actions.undo {
+            customUndo()
+        } else {
+            browsing.undoLastMark()
+        }
     }
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).

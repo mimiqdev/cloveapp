@@ -1684,6 +1684,8 @@ struct BrowsingLayoutTests {
             Comment(rawValue: "missing filter in \(snapshot.description)"))
 
         if host.traitCollection.verticalBarEdge != .unspecified {
+            #expect(snapshot.frame(for: "clove.duo.undo") == nil)
+            #expect(snapshot.frame(for: "clove.detail.undo") == nil)
             #expect(
                 backFrame.maxY < toggleFrame.minY,
                 Comment(rawValue: "expected Back above gridToggle: \(snapshot.description)"))
@@ -1714,6 +1716,8 @@ struct BrowsingLayoutTests {
             #expect(!snapshot.trailingRawTokens[filterIdx...].contains("<spacer>"))
             #expect(snapshot.trailingIDs == ["clove.detail.gridToggle", "clove.grid.filter"])
         } else {
+            #expect(snapshot.frame(for: "clove.duo.undo") == nil)
+            #expect(snapshot.frame(for: "clove.detail.undo") == nil)
             #expect(
                 snapshot.leadingIDs == ["clove.nav.back", "clove.detail.gridToggle"],
                 Comment(rawValue: "unexpected leadingIDs: \(snapshot.description)"))
@@ -2335,10 +2339,11 @@ struct BrowsingLayoutTests {
                     return state.rawLeadingItemCount == 2
                         && (state.contains("clove.grid.filter")
                             || state.contains("clove.detail.filter"))
-                        && state.contains("clove.detail.undo")
                         && !state.entries.contains { $0.identifier == "clove.detail.info" }
                         && !state.contains("clove.detail.compare")
                         && !state.contains("clove.detail.focusToggle")
+                        && !state.contains("clove.detail.undo")
+                        && !state.contains("clove.duo.undo")
                 }
                 let navBar = try #require(findNavigationBar(in: window))
                 let titleFrame = try #require(centerBarGroupFrame(in: navBar, relativeTo: window))
@@ -2346,7 +2351,7 @@ struct BrowsingLayoutTests {
             }
         }
 
-        // 5. Native iPhone Detail exposes Filter alongside Undo without standalone Info,
+        // 5. Native iPhone Detail exposes Filter without permanent Undo or standalone Info,
         //    and live filter updates in Detail handle matching, non-matching, and empty results.
         do {
             let photo = try #require(model.photos.first?.id)
@@ -2384,7 +2389,8 @@ struct BrowsingLayoutTests {
                     && state.leadingIDs.first == "clove.nav.back"
                     && (state.contains("clove.grid.filter")
                         || state.contains("clove.detail.filter"))
-                    && state.contains("clove.detail.undo")
+                    && !state.contains("clove.detail.undo")
+                    && !state.contains("clove.duo.undo")
                     && !state.entries.contains { $0.identifier == "clove.detail.info" }
             }
             let navBar = try #require(findNavigationBar(in: window))
@@ -2409,18 +2415,22 @@ struct BrowsingLayoutTests {
                         || self.inspectToolbarState(in: host, window: window)
                             .contains("clove.detail.empty.clearFilters")
                         || !self.inspectToolbarState(in: host, window: window)
-                            .contains("clove.detail.undo"))
+                            .contains("clove.detail.focusToggle"))
             }
             model.clearAllFilters()
             try await waitFor("Detail did not restore after clearing filters") {
-                !model.photos.isEmpty
+                let state = self.inspectToolbarState(in: host, window: window)
+                return !model.photos.isEmpty
                     && model.state.currentPhoto != nil
-                    && self.inspectToolbarState(in: host, window: window)
-                        .contains("clove.detail.undo")
+                    && state.rawLeadingItemCount == 2
+                    && (state.contains("clove.grid.filter")
+                        || state.contains("clove.detail.filter"))
+                    && !state.contains("clove.detail.undo")
             }
         }
 
-        // 6. Duo Cover Detail preserves Undo, Focus regions, Filter, and centered Info title.
+        // 6. Duo Cover Detail preserves Focus regions, Filter, and centered Info title while
+        // omitting permanent Undo (#461).
         do {
             let photo = try #require(model.photos.first?.id)
             model.openPhoto(photo)
@@ -2455,21 +2465,16 @@ struct BrowsingLayoutTests {
                 let state = self.inspectToolbarState(in: host, window: window)
                 return state.contains("clove.nav.back")
                     && state.contains("clove.grid.filter")
-                    && (state.contains("clove.duo.undo") || state.contains("clove.detail.undo"))
+                    && !state.contains("clove.duo.undo")
+                    && !state.contains("clove.detail.undo")
                     && headerFrames.frames["clove.detail.info"] != nil
                     && headerFrames.frames["clove.detail.fileName"] != nil
                     && headerFrames.frames["clove.detail.zoom"] != nil
             }
             let snapshot = inspectToolbarState(in: host, window: window)
-            if host.traitCollection.verticalBarEdge == .unspecified {
-                #expect(
-                    snapshot.trailingIDs == [
-                        "clove.grid.filter", "clove.grid.filter", "clove.detail.undo",
-                    ])
-            } else {
-                #expect(snapshot.contains("clove.duo.undo"))
-                #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.filter"])
-            }
+            #expect(!snapshot.contains("clove.duo.undo"))
+            #expect(!snapshot.contains("clove.detail.undo"))
+            #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.filter"])
             #expect(!snapshot.contains("clove.grid.more"))
             #expect(!snapshot.contains("clove.grid.moveRejects"))
             #expect(!snapshot.contains("clove.detail.gridToggle"))

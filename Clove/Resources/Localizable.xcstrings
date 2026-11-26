@@ -89,6 +89,28 @@
         }
       }
     },
+    "%@ · hidden by filter": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · hidden by filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 因筛选隐藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · 因篩選隱藏"
+          }
+        }
+      }
+    },
     "%@, %@": {
       "localizations": {
         "en": {
@@ -2361,6 +2383,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "清除評分"
+          }
+        }
+      }
+    },
+    "Cleared reject": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cleared reject"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消淘汰"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消淘汰"
           }
         }
       }
@@ -7695,6 +7739,52 @@
           "stringUnit": {
             "state": "translated",
             "value": "已淘汰"
+          }
+        }
+      }
+    },
+    "Rejected %lld photos": {
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Rejected 1 photo"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Rejected %lld photos"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已淘汰 %lld 张照片"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hant": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "已淘汰 %lld 張相片"
+                }
+              }
+            }
           }
         }
       }

@@ -84,11 +84,28 @@ extension CloveFlowTests {
         XCTAssertTrue(marksRow.waitForExistence(timeout: 5))
         XCTAssertTrue(marksRow.label.contains("1 keyword"))
         element(app, "clove.detail.info.done").tap()
+        XCTAssertTrue(
+            wait(NSPredicate(format: "exists == false"), element(app, "clove.detail.info.sheet")))
 
-        let undoButton = element(app, "clove.detail.undo")
-        XCTAssertTrue(undoButton.waitForExistence(timeout: 5))
-        XCTAssertTrue(undoButton.isEnabled)
-        undoButton.tap()
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+
+        // Return to Grid and re-add Harbour in place to confirm reversible batch keyword editing.
+        element(app, "clove.nav.back").tap()
+        element(app, "clove.grid.more").tap()
+        app.buttons["Select"].tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
+        openBatchKeywordsSheet(app)
+        XCTAssertTrue(harbourSuggestion.waitForExistence(timeout: 5))
+        harbourSuggestion.tap()
+        XCTAssertTrue(removeHarbour.waitForExistence(timeout: 5))
+        element(app, "clove.keywords.done").tap()
+        XCTAssertTrue(
+            wait(
+                NSPredicate(format: "exists == false"), element(app, "clove.keywords.sheet"),
+                timeout: 5))
+        element(app, "clove.grid.batch.done").tap()
+        element(app, "clove.grid.photo.mmq02680").tap()
 
         element(app, "clove.detail.info").tap()
         XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
@@ -250,7 +267,7 @@ extension CloveFlowTests {
         confirmButton.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), sheet))
 
-        // Verify mmq02683 received Harbour and Undo removes it cleanly.
+        // Verify mmq02683 received Harbour in Detail Info and Detail keeps no permanent Undo.
         element(app, "clove.grid.batch.done").tap()
         element(app, "clove.grid.photo.mmq02683").tap()
         element(app, "clove.detail.info").tap()
@@ -259,14 +276,11 @@ extension CloveFlowTests {
         XCTAssertTrue(keywordsRow.waitForExistence(timeout: 5))
         XCTAssertTrue(keywordsRow.label.contains("Harbour"))
         element(app, "clove.detail.info.done").tap()
+        XCTAssertTrue(
+            wait(NSPredicate(format: "exists == false"), element(app, "clove.detail.info.sheet")))
 
-        let undoButton = element(app, "clove.detail.undo")
-        XCTAssertTrue(undoButton.waitForExistence(timeout: 5))
-        undoButton.tap()
-        element(app, "clove.detail.info").tap()
-        XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
-        XCTAssertFalse(element(app, "clove.detail.info.keywords").exists)
-        element(app, "clove.detail.info.done").tap()
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
     }
 
     @MainActor

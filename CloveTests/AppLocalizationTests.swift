@@ -830,4 +830,60 @@ struct AppLocalizationTests {
             AppLocalization.format("Add to %lld Photos", language: .traditionalChinese, Int64(4))
                 == "加入到 4 張相片")
     }
+
+    @Test func detailUndoToastLocalizationsCoverSingularPluralAndHiddenByFilter() {
+        #expect(
+            DetailUndoToast(kind: .rejectedBatch(count: 1)).localizedMessage(language: .english)
+                == "Rejected 1 photo")
+        #expect(
+            DetailUndoToast(kind: .rejectedBatch(count: 6)).localizedMessage(language: .english)
+                == "Rejected 6 photos")
+        #expect(
+            DetailUndoToast(kind: .rejectedBatch(count: 1)).localizedMessage(
+                language: .simplifiedChinese) == "已淘汰 1 张照片")
+        #expect(
+            DetailUndoToast(kind: .rejectedBatch(count: 6)).localizedMessage(
+                language: .traditionalChinese) == "已淘汰 6 張相片")
+
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .rejected)).localizedMessage(
+                language: .english) == "Rejected · hidden by filter")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .rejected)).localizedMessage(
+                language: .simplifiedChinese) == "已淘汰 · 因筛选隐藏")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .rejected)).localizedMessage(
+                language: .traditionalChinese) == "已淘汰 · 因篩選隱藏")
+
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .rated(4))).localizedMessage(
+                language: .english) == "4 stars · hidden by filter")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .labelled(.green))).localizedMessage(
+                language: .english) == "Green · hidden by filter")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .clearedReject)).localizedMessage(
+                language: .english) == "Cleared reject · hidden by filter")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .clearedReject)).localizedMessage(
+                language: .simplifiedChinese) == "已取消淘汰 · 因筛选隐藏")
+        #expect(
+            DetailUndoToast(kind: .hiddenByFilter(action: .clearedReject)).localizedMessage(
+                language: .traditionalChinese) == "已取消淘汰 · 因篩選隱藏")
+
+        #expect(
+            DetailUndoToast.Action(
+                change: .rating(.unrated), previousMarks: PhotoMarks(rating: .rejected))
+                == .clearedReject)
+        #expect(
+            DetailUndoToast.Action(
+                change: .rating(.unrated),
+                previousMarks: PhotoMarks(rating: Rating(rawValue: 3)!))
+                == .clearedRating)
+        #expect(
+            DetailUndoToast.Action(
+                change: .label(.clear),
+                previousMarks: PhotoMarks(label: ColourLabel(colour: .blue)))
+                == .clearedLabel)
+    }
 }
