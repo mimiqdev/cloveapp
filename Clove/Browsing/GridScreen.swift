@@ -111,6 +111,9 @@ struct GridScreen: View {
             && (verticalSizeClass == .compact || isLandscapeContainer)
     }
     private var usesDock: Bool { isDuoExpanded || isDuoCover }
+    private var usesVerticalGridDock: Bool {
+        isDuoCover || (isDuoExpanded && usesVerticalToolbar)
+    }
     private var supportsCompare: Bool {
         CompareLayoutPolicy(
             availableWidth: Double(containerSize.width),
@@ -230,10 +233,11 @@ struct GridScreen: View {
                 filterHandoff.dismissFiltersAndCancelPending()
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isRegular, !usesDock, showsMoveRejects {
+                if !isRegular, !usesVerticalGridDock, showsMoveRejects {
                     MoveRejectsButton(identifier: "clove.grid.moveRejects") {
                         presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
+                    .reportHeaderControlFrame("clove.grid.moveRejects")
                     .padding(16)
                     .transition(
                         .asymmetric(
@@ -243,7 +247,7 @@ struct GridScreen: View {
                 }
             }
             .animation(
-                (!isRegular && !usesDock && showsMoveRejects)
+                (!isRegular && !usesVerticalGridDock && showsMoveRejects)
                     ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
                 value: showsMoveRejects
             )
@@ -466,14 +470,14 @@ struct GridScreen: View {
                         BrowsingToolbar(
                             back: { browsing.back() }, undo: { browsing.undoLastMark() },
                             canUndo: browsing.canUndoMark,
-                            showsBack: !isRegular && (usesDock || !isSelecting),
-                            showsUndo: isDuoExpanded,
+                            showsBack: !isRegular && (usesVerticalGridDock || !isSelecting),
+                            showsUndo: isDuoExpanded && usesVerticalToolbar,
                             showsNavigationTools: isSelecting,
                             showsHorizontalLeadingTools: isSelecting,
                             showsStandaloneDockTool: isDuoCover && !isSelecting && showsMoveRejects,
                             showsHorizontalTools: isDuoCover,
                             showsTools: !isDuoCover,
-                            showsBottom: isDuoCover || isDuoExpanded
+                            showsBottom: usesVerticalGridDock
                         ) {
                             if isSelecting {
                                 systemSelectAllButton
@@ -499,7 +503,7 @@ struct GridScreen: View {
                         } bottom: {
                             if isDuoCover {
                                 filterButton
-                            } else if isDuoExpanded {
+                            } else if isDuoExpanded && usesVerticalToolbar {
                                 dockBottom
                             }
                         }
