@@ -19,10 +19,8 @@ struct GridScreen: View {
     @State private var isPickingEmptyFolder = false
     @State private var filterHandoff = GridFilterSheetHandoff()
     @State private var popoverHandoffTask: Task<Void, Never>?
-    @State private var filterAnchorAttachments = 0
     @State private var selectsEmpty = false
     @State private var areGroupsUnfolded: Bool
-    private var isFilterAnchorReady: Bool { filterAnchorAttachments > 0 }
     @State private var isLandscapeContainer = false
     @State private var containerSize: CGSize = .zero
     @State private var presentation = DetailPresentation.focus
@@ -210,12 +208,6 @@ struct GridScreen: View {
                 if route == .detail { hasOpenedPhoto = true }
                 if route != .detail {
                     presentation = .focus
-                }
-            }
-            .onChange(of: filterPopoverTrigger) { _, _ in
-                if isFilterAnchorReady, scenePhase == .active {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.setFiltersPresented(true)
                 }
             }
             .onChange(of: filterDismissTrigger) { _, _ in
@@ -461,8 +453,7 @@ struct GridScreen: View {
                 DetailScreen(
                     browsing: browsing,
                     duo: DuoDetailLayout(
-                        presentation: $presentation, filter: AnyView(filterButton),
-                        more: AnyView(moreMenu), bottom: AnyView(dockBottom),
+                        presentation: $presentation,
                         showsGrid: isDuoExpanded))
             } else {
                 grid
@@ -904,11 +895,10 @@ struct GridScreen: View {
             identifierPrefix: "clove.grid.filter",
             filterHandoff: $filterHandoff,
             canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
+            popoverTrigger: filterPopoverTrigger,
             onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
             onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
-        ) { delta in
-            filterAnchorAttachments = max(0, filterAnchorAttachments + delta)
-        }
+        )
     }
 
     private var moreMenu: some View {
@@ -1118,10 +1108,14 @@ struct GridScreen: View {
     }
 
     private var canPresentMetadataFiltersFromPopover: Bool {
-        !isRegular
-            && (browsing.state.route == .grid
-                || (usesDock && browsing.state.route == .detail
-                    && browsing.compareSession == nil))
+        Self.allowsMetadataFiltersFromPopover(
+            isRegular: isRegular, usesDock: usesDock, route: browsing.state.route)
+    }
+
+    static func allowsMetadataFiltersFromPopover(
+        isRegular: Bool, usesDock: Bool, route: BrowserRoute
+    ) -> Bool {
+        (!isRegular || usesDock) && route == .grid
     }
 
     private func presentSheet(_ route: GridSheetRoute) {

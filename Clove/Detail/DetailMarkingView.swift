@@ -136,7 +136,6 @@ struct DetailMarkingView: View {
     @State private var activeSheet: DetailSheetRoute?
     @State private var filterHandoff = GridFilterSheetHandoff()
     @State private var popoverHandoffTask: Task<Void, Never>?
-    @State private var filterAnchorAttachments = 0
     @State private var emptyFromFilterSelection = false
     private var showsInformation: Bool { activeSheet == .information }
     @State private var showsToolbarStars = false
@@ -718,9 +717,7 @@ struct DetailMarkingView: View {
             canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
             onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
             onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
-        ) { delta in
-            filterAnchorAttachments = max(0, filterAnchorAttachments + delta)
-        }
+        )
     }
 
     private var detailToolbarTitle: some View {
@@ -807,7 +804,7 @@ struct DetailMarkingView: View {
                         photoGridToggle
                     }
                 } tools: {
-                    duo.filter
+                    detailFilterButton
                     if !isDuoExpanded, !emptyFromFilterSelection {
                         focusRegionsToggle
                         if !usesInspectionPill, canEnterCompare {
@@ -2912,7 +2909,11 @@ struct DetailMarkingView: View {
     }
 
     private var canPresentMetadataFiltersFromPopover: Bool {
-        duo == nil && browsing.compareSession == nil
+        Self.allowsMetadataFiltersFromPopover(isComparing: browsing.compareSession != nil)
+    }
+
+    static func allowsMetadataFiltersFromPopover(isComparing: Bool) -> Bool {
+        !isComparing
     }
 
     private func cancelPendingMetadataFiltersHandoff() {

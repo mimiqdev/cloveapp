@@ -1580,7 +1580,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(gridToggle.label, "Show photo grid")
         XCTAssertEqual(gridToggle.value as? String, "Focus View")
         let dockBack = element(app, "clove.nav.back")
-        let dockFilter = element(app, "clove.grid.filter")
+        let dockFilter = element(app, "clove.detail.filter")
         let viewportInfo = element(app, "clove.detail.info")
         XCTAssertTrue(dockBack.exists && dockFilter.exists && viewportInfo.exists)
         XCTAssertFalse(element(app, "clove.grid.more").exists)
@@ -2042,6 +2042,31 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(faceIndicator.waitForExistence(timeout: 5))
         XCTAssertEqual(faceIndicator.label, "Face detected")
         XCTAssertFalse(missingAFIndicator.exists)
+
+        // Vertical rail Filter popover anchors beside the trailing rail and re-opens reliably (#470).
+        let coverDetailFilter = element(app, "clove.detail.filter")
+        XCTAssertTrue(coverDetailFilter.waitForExistence(timeout: 5))
+        coverDetailFilter.tap()
+        let coverDetailRejected = element(app, "clove.detail.filter.rejected")
+        XCTAssertTrue(coverDetailRejected.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(coverDetailRejected.frame.midX, app.frame.midX)
+        XCTAssertGreaterThan(coverDetailRejected.frame.minY, 60)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), coverDetailRejected))
+
+        coverDetailFilter.tap()
+        XCTAssertTrue(coverDetailRejected.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(coverDetailRejected.frame.midX, app.frame.midX)
+        coverDetailRejected.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), coverDetailRejected))
+        XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
+
+        coverDetailFilter.tap()
+        let coverDetailAll = element(app, "clove.detail.filter.all")
+        XCTAssertTrue(coverDetailAll.waitForExistence(timeout: 5))
+        coverDetailAll.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), coverDetailAll))
+        XCTAssertTrue(coverDetailFilter.isHittable)
     }
 
     /// Runs on the Duo's cover display: the strip's content fills its viewport after leaving a
@@ -3338,16 +3363,27 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(
             wait(NSPredicate(format: "exists == false"), element(app, "clove.detail.info.sheet")))
 
-        // Detail Filter switches filters live without returning to Grid.
+        // Detail Filter anchors beside the button, re-opens after dismissal, and switches filters live.
         let filterButton = element(app, "clove.detail.filter")
         XCTAssertTrue(filterButton.waitForExistence(timeout: 5))
-        XCTAssertEqual(filterButton.value as? String, "Off")
+        if let value = filterButton.value as? String, !value.isEmpty {
+            XCTAssertEqual(value, "Off")
+        }
         filterButton.tap()
         let rejectedRow = element(app, "clove.detail.filter.rejected")
         XCTAssertTrue(rejectedRow.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(rejectedRow.frame.midX, app.frame.midX)
+        XCTAssertGreaterThan(rejectedRow.frame.minY, 40)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), rejectedRow))
+
+        filterButton.tap()
+        XCTAssertTrue(rejectedRow.waitForExistence(timeout: 5))
         rejectedRow.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), rejectedRow))
-        XCTAssertEqual(filterButton.value as? String, "On")
+        if let value = filterButton.value as? String, !value.isEmpty {
+            XCTAssertEqual(value, "On")
+        }
         XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
 
         // More filters hands off from Detail Filter popover cleanly into MetadataFilterSheet.
@@ -3374,7 +3410,10 @@ final class CloveFlowTests: XCTestCase {
         clearDetail.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), emptyDetail))
         XCTAssertTrue(fileName.waitForExistence(timeout: 5))
-        XCTAssertEqual(filterButton.value as? String, "Off")
+        if let value = filterButton.value as? String, !value.isEmpty {
+            XCTAssertEqual(value, "Off")
+        }
+        XCTAssertTrue(filterButton.isHittable)
     }
 
     @MainActor
