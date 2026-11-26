@@ -48,6 +48,7 @@ import Testing
 
     @Test func emptyAndSingleFolderHaveNoInventedLocations() {
         let empty = SidebarCounts(photos: [])
+        #expect(empty == .empty)
         #expect(empty.all == 0)
         #expect(empty.subfolders.isEmpty)
         #expect(empty.labels.isEmpty)

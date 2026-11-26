@@ -123,16 +123,19 @@ struct PhotoFilterPopoverButton: View {
         }
     }
 
+    @ViewBuilder
     private var filterMenu: some View {
+        let counts = browsing.sidebarCounts
         VStack(spacing: 0) {
             filterRow(
-                AppLocalization.string("All", language: language), filter: .all, identifier: "all")
+                AppLocalization.string("All", language: language), count: counts.all, filter: .all,
+                identifier: "all")
             filterRow(
-                AppLocalization.string("Unmarked", language: language), filter: .unmarked,
-                identifier: "unmarked")
+                AppLocalization.string("Unmarked", language: language), count: counts.unmarked,
+                filter: .unmarked, identifier: "unmarked")
             filterRow(
-                AppLocalization.string("Rejected", language: language), filter: .rejected,
-                identifier: "rejected")
+                AppLocalization.string("Rejected", language: language), count: counts.rejected,
+                filter: .rejected, identifier: "rejected")
             Divider().overlay(Color.clove.separator)
             HStack {
                 Text(AppLocalization.string("Rating ≥", language: language))
@@ -214,7 +217,9 @@ struct PhotoFilterPopoverButton: View {
         .background(Color.clove.surface.sheet)
     }
 
-    private func filterRow(_ name: String, filter: PhotoFilter, identifier: String) -> some View {
+    private func filterRow(_ name: String, count: Int, filter: PhotoFilter, identifier: String)
+        -> some View
+    {
         Button {
             browsing.setFilter(filter)
             filterHandoff.setFiltersPresented(false)
@@ -227,12 +232,8 @@ struct PhotoFilterPopoverButton: View {
                     .frame(width: 16)
                 Text(name)
                 Spacer()
-                Text(
-                    browsing.allPlacedPhotos.filter {
-                        filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
-                    }.count.formatted(.number.locale(language.locale))
-                )
-                .foregroundStyle(Color.clove.text.secondary)
+                Text(count.formatted(.number.locale(language.locale)))
+                    .foregroundStyle(Color.clove.text.secondary)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: 40)

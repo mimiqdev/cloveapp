@@ -10,38 +10,26 @@ struct MetadataFilterSheet: View {
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
 
-    private var options: PhotoMetadataFilterOptions { browsing.metadataFilterOptions }
-    private var activeFilter: PhotoMetadataFilter { browsing.metadataFilter }
-
-    private var cameras: [PhotoFilterOption<String>] {
-        resolvedOptions(options.cameras, active: activeFilter.camera) { value in
+    var body: some View {
+        let options = browsing.metadataFilterOptions
+        let activeFilter = browsing.metadataFilter
+        let cameras = resolvedOptions(options.cameras, active: activeFilter.camera) { value in
             browsing.allPlacedPhotos.count { $0.metadata.camera == value }
         }
-    }
-
-    private var lenses: [PhotoFilterOption<String>] {
-        resolvedOptions(options.lenses, active: activeFilter.lens) { value in
+        let lenses = resolvedOptions(options.lenses, active: activeFilter.lens) { value in
             browsing.allPlacedPhotos.count { $0.metadata.lens == value }
         }
-    }
-
-    private var focalLengths: [PhotoFilterOption<FocalLengthBucket>] {
-        resolvedOptions(options.focalLengths, active: activeFilter.focalLength) { bucket in
+        let focalLengths = resolvedOptions(
+            options.focalLengths, active: activeFilter.focalLength
+        ) { bucket in
             browsing.allPlacedPhotos.count { $0.metadata.focalLengthBucket == bucket }
         }
-    }
-
-    private var keywords: [PhotoFilterOption<String>] {
-        resolvedOptions(options.keywords, active: activeFilter.keyword) { keyword in
+        let keywords = resolvedOptions(options.keywords, active: activeFilter.keyword) { keyword in
             browsing.allPlacedPhotos.count { $0.marks.keywords.contains(keyword) }
         }
-    }
+        let hasVisibleContent =
+            !cameras.isEmpty || !lenses.isEmpty || !focalLengths.isEmpty || !keywords.isEmpty
 
-    private var hasVisibleContent: Bool {
-        !cameras.isEmpty || !lenses.isEmpty || !focalLengths.isEmpty || !keywords.isEmpty
-    }
-
-    var body: some View {
         NavigationStack {
             Group {
                 if hasVisibleContent {
@@ -69,10 +57,11 @@ struct MetadataFilterSheet: View {
                                 }
                             }
                             if !focalLengths.isEmpty {
-                                focalLengthSection
+                                focalLengthSection(
+                                    focalLengths, selected: activeFilter.focalLength)
                             }
                             if !keywords.isEmpty {
-                                keywordsSection
+                                keywordsSection(keywords, selected: activeFilter.keyword)
                             }
                         }
                         .padding(20)
@@ -186,12 +175,15 @@ struct MetadataFilterSheet: View {
         }
     }
 
-    private var focalLengthSection: some View {
+    private func focalLengthSection(
+        _ focalLengths: [PhotoFilterOption<FocalLengthBucket>],
+        selected: FocalLengthBucket?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle(AppLocalization.string("Focal length", language: language))
             VStack(spacing: 0) {
                 ForEach(Array(focalLengths.enumerated()), id: \.element.value) { index, option in
-                    let isSelected = activeFilter.focalLength == option.value
+                    let isSelected = selected == option.value
                     Button {
                         browsing.toggleFocalLengthFilter(option.value)
                     } label: {
@@ -237,12 +229,15 @@ struct MetadataFilterSheet: View {
         }
     }
 
-    private var keywordsSection: some View {
+    private func keywordsSection(
+        _ keywords: [PhotoFilterOption<String>],
+        selected: String?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionTitle(AppLocalization.string("Keywords", language: language))
             MetadataChipLayout(spacing: 8) {
                 ForEach(keywords, id: \.value) { option in
-                    let isSelected = activeFilter.keyword == option.value
+                    let isSelected = selected == option.value
                     Button {
                         browsing.toggleKeywordFilter(option.value)
                     } label: {

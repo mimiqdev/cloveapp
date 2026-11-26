@@ -236,6 +236,25 @@ struct PhotoMetadataFilterTests {
             ])
     }
 
+    @Test func optionsDeduplicateMultiAndSingleKeywordPhotosEqually() {
+        var manualDuplicate = makePhoto("a", seconds: 1)
+        manualDuplicate.marks.keywords = ["solo", "solo", ""]
+        var singleEmpty = makePhoto("b", seconds: 2)
+        singleEmpty.marks.keywords = [""]
+        let singleValid = makePhoto("c", seconds: 3, marks: PhotoMarks(keywords: ["dawn"]))
+        let multiValid = makePhoto("d", seconds: 4, marks: PhotoMarks(keywords: ["dawn", "coast"]))
+
+        let options = PhotoMetadataFilterOptions(photos: [
+            manualDuplicate, singleEmpty, singleValid, multiValid,
+        ])
+        #expect(
+            options.keywords == [
+                PhotoFilterOption(value: "dawn", count: 2),
+                PhotoFilterOption(value: "coast", count: 1),
+                PhotoFilterOption(value: "solo", count: 1),
+            ])
+    }
+
     private func makePhoto(
         _ stem: String,
         seconds: TimeInterval,

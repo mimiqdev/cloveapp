@@ -166,8 +166,14 @@ public struct PhotoMetadataFilterOptions: Equatable, Sendable {
             if let bucket = photo.metadata.focalLengthBucket {
                 bucketCounts[bucket, default: 0] += 1
             }
-            if !photo.marks.keywords.isEmpty {
-                for keyword in Set(photo.marks.keywords) where !keyword.isEmpty {
+            let photoKeywords = photo.marks.keywords
+            if photoKeywords.count == 1 {
+                let keyword = photoKeywords[0]
+                if !keyword.isEmpty {
+                    keywordCounts[keyword, default: 0] += 1
+                }
+            } else if photoKeywords.count > 1 {
+                for keyword in Set(photoKeywords) where !keyword.isEmpty {
                     keywordCounts[keyword, default: 0] += 1
                 }
             }
