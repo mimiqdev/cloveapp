@@ -1935,80 +1935,145 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertGreaterThan(coverFilter.frame.midY, app.frame.height * 0.65)
         capture("duo-cover")
         element(app, "clove.grid.photo.mmq02680").tap()
-        XCTAssertTrue(element(app, "clove.detail.fileName").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, "clove.detail.filmstrip").exists)
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.duo.photoPreview").exists)
+        let fileName = element(app, "clove.detail.fileName")
+        let zoomLabel = element(app, "clove.detail.zoom")
+        let cornerInfo = element(app, "clove.detail.info")
+        let strip = element(app, "clove.detail.filmstrip")
+        let capsule = element(app, "clove.duo.capsule")
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        XCTAssertTrue(zoomLabel.exists)
+        XCTAssertTrue(cornerInfo.exists)
+        XCTAssertTrue(strip.exists)
+        XCTAssertTrue(capsule.exists)
+
+        // Cover Detail top-left pins compact dark-scrim DetailPhotoCornerOverlay inside viewport.
+        XCTAssertGreaterThanOrEqual(cornerInfo.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(cornerInfo.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(fileName.frame.minY, preview.frame.minY + 11)
+        XCTAssertGreaterThanOrEqual(fileName.frame.minX, preview.frame.minX + 15)
+        XCTAssertGreaterThanOrEqual(zoomLabel.frame.minY, fileName.frame.maxY - 1)
+        XCTAssertLessThan(cornerInfo.frame.maxX, preview.frame.midX)
+
+        // Cover Detail right rail holds strictly 3 buttons (Back, Focus regions, Filter) and empty bottom.
+        let detailBack = element(app, "clove.nav.back")
+        let focusToggle = element(app, "clove.detail.focusToggle")
+        let detailFilter = element(app, "clove.detail.filter")
+        XCTAssertFalse(element(app, "clove.grid.filter").exists)
+        XCTAssertTrue(detailBack.exists && focusToggle.exists && detailFilter.exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "clove.detail.focusToggle").count, 1)
+        XCTAssertLessThan(detailBack.frame.maxY, focusToggle.frame.minY)
+        XCTAssertLessThan(focusToggle.frame.maxY, detailFilter.frame.minY)
+        XCTAssertFalse(element(app, "clove.grid.more").exists)
+        XCTAssertFalse(element(app, "clove.grid.moveRejects").exists)
         XCTAssertFalse(element(app, "clove.detail.gridToggle").exists)
+        XCTAssertFalse(element(app, "clove.detail.compare").exists)
+        XCTAssertFalse(element(app, "clove.detail.inspectionPill").exists)
         XCTAssertFalse(element(app, "clove.detail.photoGrid").exists)
         XCTAssertFalse(element(app, "clove.detail.capsule").exists)
         XCTAssertFalse(element(app, "clove.detail.rail").exists)
-        let rating = element(app, "clove.duo.rating")
+        XCTAssertFalse(element(app, "clove.duo.rating").exists)
+        XCTAssertFalse(element(app, "clove.duo.reject").exists)
+        XCTAssertFalse(element(app, "clove.duo.label").exists)
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+
+        // Bottom stack places shared 168 × 48 MarkingToolbar centered below DetailFilmstrip.
+        XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
+        XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(capsule.frame.minY, strip.frame.maxY + 7)
+        XCTAssertEqual(capsule.frame.midX, preview.frame.midX, accuracy: 2)
+        capture("duo-cover-detail")
+
+        let rating = element(app, "clove.duo.capsule.rating")
+        let stars = element(app, "clove.duo.capsule.stars")
         rating.tap()
-        let stars = element(app, "clove.duo.stars")
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(stars.frame.height, stars.frame.width)
-        XCTAssertTrue(element(app, "clove.duo.stars.clear").exists)
-        element(app, "clove.duo.stars.3").tap()
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
-        let start = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -60)))
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "5 stars"), rating))
+        XCTAssertGreaterThan(stars.frame.width, stars.frame.height)
+        XCTAssertTrue(element(app, "clove.duo.capsule.stars.clear").exists)
+        element(app, "clove.duo.capsule.stars.3").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         XCTAssertFalse(element(app, "clove.duo.undo").exists)
         XCTAssertFalse(element(app, "clove.detail.undo").exists)
         XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        // Tapping current rating clears it in place; tapping again restores 3 stars.
+        rate(3, toolbar: "clove.duo.capsule", in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+        rate(3, toolbar: "clove.duo.capsule", in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         rating.tap()
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        element(app, "clove.duo.stars.3").tap()
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
-        rating.tap()
-        XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(stars.frame.midX, app.frame.midX)
         capture("duo-cover-stars")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.3)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), stars))
-        element(app, "clove.duo.label").tap()
+
+        let labelButton = element(app, "clove.duo.capsule.label")
+        labelButton.tap()
         let labels = element(app, "clove.duo.labels")
         XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
-        XCTAssertGreaterThan(labels.frame.height, labels.frame.width)
+        XCTAssertGreaterThan(labels.frame.width, labels.frame.height)
         capture("duo-cover-labels")
         element(app, "clove.duo.labels.green").tap()
         XCTAssertTrue(
-            wait(
-                NSPredicate(format: "label CONTAINS[c] %@", "green"),
-                element(app, "clove.duo.label")))
+            wait(NSPredicate(format: "label CONTAINS[c] %@", "green"), labelButton))
         // Explicit Clear in RatingPicker clears stars while preserving the green label.
         rating.tap()
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        element(app, "clove.duo.stars.clear").tap()
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "0 stars"), rating))
-        XCTAssertTrue(
-            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        element(app, "clove.duo.capsule.stars.clear").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Green"), capsule))
+        XCTAssertTrue(labelButton.label.localizedCaseInsensitiveContains("green"))
         // Restoring 3 stars in place preserves the green label.
-        rating.tap()
-        XCTAssertTrue(stars.waitForExistence(timeout: 5))
-        element(app, "clove.duo.stars.3").tap()
-        XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
-        XCTAssertTrue(
-            element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
+        rate(3, toolbar: "clove.duo.capsule", in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        XCTAssertTrue(labelButton.label.localizedCaseInsensitiveContains("green"))
         // Clearing the label via None keeps 3 stars, and picking Green restores the green label.
-        element(app, "clove.duo.label").tap()
+        labelButton.tap()
         XCTAssertTrue(element(app, "clove.duo.labels.none").waitForExistence(timeout: 5))
         element(app, "clove.duo.labels.none").tap()
         XCTAssertTrue(
-            wait(
-                NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"),
-                element(app, "clove.duo.label")))
-        XCTAssertTrue(rating.label.contains("3 stars"))
-        element(app, "clove.duo.label").tap()
+            wait(NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"), labelButton))
+        XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
+        labelButton.tap()
         XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
         element(app, "clove.duo.labels.green").tap()
         XCTAssertTrue(
-            wait(
-                NSPredicate(format: "label CONTAINS[c] %@", "green"),
-                element(app, "clove.duo.label")))
+            wait(NSPredicate(format: "label CONTAINS[c] %@", "green"), labelButton))
+
+        // Reject via MarkingToolbar + transient Undo toast on filter-hiding mark.
+        let rejectButton = element(app, "clove.duo.capsule.reject")
+        rejectButton.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Green · Rejected"), capsule))
+        rejectButton.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Green"), capsule))
+        labelButton.tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.none").waitForExistence(timeout: 5))
+        element(app, "clove.duo.labels.none").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+
+        detailFilter.tap()
+        let unmarkedFilter = element(app, "clove.detail.filter.unmarked")
+        XCTAssertTrue(unmarkedFilter.waitForExistence(timeout: 5))
+        unmarkedFilter.tap()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        rejectButton.tap()
+        let undoToast = element(app, "clove.detail.undoToast")
+        XCTAssertTrue(undoToast.waitForExistence(timeout: 5))
+        XCTAssertTrue(undoToast.staticTexts["Rejected · hidden by filter"].exists)
+        XCTAssertLessThanOrEqual(undoToast.frame.maxY, strip.frame.minY)
+        element(app, "clove.detail.undoToast.action").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        detailFilter.tap()
+        let allFilter = element(app, "clove.detail.filter.all")
+        XCTAssertTrue(allFilter.waitForExistence(timeout: 5))
+        allFilter.tap()
+
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02680").waitForExistence(timeout: 5))
         element(app, "clove.grid.photo.mmq02683").tap()
-        let focusToggle = element(app, "clove.detail.focusToggle")
         let overlapAF = element(app, "clove.detail.region.af.0")
         let separatedEye = element(app, "clove.detail.region.face.4-1")
         let focusIndicators = element(app, "clove.detail.focusIndicators")
@@ -2133,11 +2198,18 @@ final class CloveFlowTests: XCTestCase {
         // drags advance one viewport at a time, so the lazy cells materialize as the offset
         // moves and the resting end is the content's real end, not a jump's estimate (#237).
         let last = element(app, "clove.detail.filmstrip.mmq02713")
-        for _ in 0..<14 where !restsAtTrailingEdge(last, of: strip) {
+        let stripTrailingEdge = duoPreview.frame.maxX
+        for _ in 0..<14 where !restsAtTrailingEdge(last, of: strip, trailingEdge: stripTrailingEdge)
+        {
             dragStripForward(strip)
         }
         XCTAssertTrue(
-            wait(NSPredicate { _, _ in self.restsAtTrailingEdge(last, of: strip) }, last),
+            wait(
+                NSPredicate { _, _ in
+                    self.restsAtTrailingEdge(last, of: strip, trailingEdge: stripTrailingEdge)
+                },
+                last
+            ),
             "the last thumbnail stops short of the strip's edge: its trailing area is reserved twice"
         )
         capture("duo-cover-strip-last-photo")
@@ -3973,10 +4045,12 @@ final class CloveFlowTests: XCTestCase {
     /// one thumbnail's width: the position the strip's content rests at when it fills its
     /// viewport (#237).
     @MainActor
-    private func restsAtTrailingEdge(_ cell: XCUIElement, of strip: XCUIElement) -> Bool {
+    private func restsAtTrailingEdge(
+        _ cell: XCUIElement, of strip: XCUIElement, trailingEdge: CGFloat? = nil
+    ) -> Bool {
         guard cell.exists else { return false }
         let frame = cell.frame
-        let edge = strip.frame.maxX
+        let edge = trailingEdge ?? strip.frame.maxX
         return frame.maxX <= edge && frame.maxX >= edge - 27 && frame.minX >= strip.frame.minX
     }
 

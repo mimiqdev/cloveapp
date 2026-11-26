@@ -536,6 +536,124 @@ struct TapPickerTests {
             expectedDockLeftEdge: dockLeftEdge)
     }
 
+    @Test func duoCoverPlacesCenteredMarkingToolbarAndOpensHorizontalTapPickersAboveWithoutClip()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let browsing = BrowsingModel(library: TestLibrary.sample())
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let target = try #require(browsing.photos.first { $0.fileName == "MMQ02680.ARW" })
+        browsing.openPhoto(target.id)
+
+        let box = TapPickerTestBox()
+        let postureBox = DuoCoverPostureBox()
+
+        struct CoverHost: View {
+            let browsing: BrowsingModel
+            let store: SettingsStore
+            let box: TapPickerTestBox
+            @Bindable var posture: DuoCoverPostureBox
+
+            var body: some View {
+                NavigationStack {
+                    DetailScreen(
+                        browsing: browsing,
+                        duo: DuoDetailLayout(
+                            presentation: .constant(.focus),
+                            showsGrid: posture.isDuoExpanded))
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoCover, posture.isDuoCover)
+                .environment(\.isDuoExpanded, posture.isDuoExpanded)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, posture.isDuoExpanded)
+                .environment(\.scenePhase, .active)
+                .environment(\.tapPickerTriggerRequest, box.trigger)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    box.frames = frames
+                }
+            }
+        }
+
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let host = UIHostingController(
+            rootView: CoverHost(browsing: browsing, store: store, box: box, posture: postureBox))
+        host.traitOverrides.horizontalSizeClass = .compact
+        // Simulate Cover's trailing vertical rail + camera cutout safe area (~84 pt).
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("Duo Cover Focus View mounted") {
+            box.frames["clove.duo.focus"] != nil
+                && box.frames["clove.detail.filmstrip"] != nil
+                && box.frames["clove.duo.capsule"] != nil
+                && self.findZoomPreview(in: window) != nil
+        }
+
+        let paneFrame = try #require(box.frames["clove.duo.focus"])
+        let stripFrame = try #require(box.frames["clove.detail.filmstrip"])
+        let capsuleFrame = try #require(box.frames["clove.duo.capsule"])
+        let stageBeforePickers = try #require(findZoomPreview(in: window)).convert(
+            try #require(findZoomPreview(in: window)).bounds, to: window)
+        #expect(abs(capsuleFrame.width - 168) <= 0.5)
+        #expect(abs(capsuleFrame.height - 48) <= 0.5)
+        #expect(capsuleFrame.minY >= stripFrame.maxY + 7)
+        #expect(abs(capsuleFrame.midX - paneFrame.midX) <= 1.5)
+        #expect(capsuleFrame.maxX <= window.frame.width - 84)
+
+        for (buttonID, pickerID) in [
+            ("clove.duo.capsule.rating", "clove.duo.capsule.stars"),
+            ("clove.duo.capsule.label", "clove.duo.labels"),
+        ] {
+            box.sendTrigger(buttonID)
+            try await waitFor("Cover horizontal picker \(pickerID) visible") {
+                box.frames[pickerID] != nil
+            }
+            let pickerFrame = try #require(box.frames[pickerID])
+            #expect(pickerFrame.width > pickerFrame.height)
+            #expect(abs(pickerFrame.width - 288) <= 2)
+            #expect(abs(pickerFrame.height - 52) <= 2)
+            #expect(pickerFrame.maxY <= capsuleFrame.minY - 8)
+            #expect(pickerFrame.minX >= paneFrame.minX + 12 - 1.5)
+            #expect(pickerFrame.maxX <= paneFrame.maxX - 12 + 1.5)
+            #expect(pickerFrame.maxX <= window.frame.width - 84 - 12 + 1.5)
+            let stageDuringPicker = try #require(findZoomPreview(in: window)).convert(
+                try #require(findZoomPreview(in: window)).bounds, to: window)
+            #expect(abs(stageDuringPicker.height - stageBeforePickers.height) <= 1)
+            box.sendTrigger(buttonID)
+            try await waitFor("Cover horizontal picker \(pickerID) dismissed") {
+                box.frames[pickerID] == nil
+            }
+        }
+
+        // Unfolding Cover -> Expanded dismisses an open tap picker cleanly.
+        box.sendTrigger("clove.duo.capsule.rating")
+        try await waitFor("Cover rating picker open before unfold") {
+            box.frames["clove.duo.capsule.stars"] != nil
+        }
+        postureBox.isDuoCover = false
+        postureBox.isDuoExpanded = true
+        window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+        try await waitFor("Cover rating picker dismissed on unfold") {
+            box.frames["clove.duo.capsule.stars"] == nil
+        }
+    }
+
     @Test func nestedTapPickerContainersIsolateHorizontallyOffsetInnerHost() async throws {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -1638,6 +1756,13 @@ private struct PixelBuffer {
         return RGBA(
             r: bytes[offset], g: bytes[offset + 1], b: bytes[offset + 2], a: bytes[offset + 3])
     }
+}
+
+@MainActor
+@Observable
+private final class DuoCoverPostureBox {
+    var isDuoCover = true
+    var isDuoExpanded = false
 }
 
 @MainActor
