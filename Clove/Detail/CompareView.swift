@@ -2,6 +2,7 @@ import CloveCore
 import CloveImaging
 import CoreGraphics
 import SwiftUI
+import UIKit
 
 /// Side-by-side dual-photo comparison workspace supporting both scope stepping and fixed-pair inspection.
 struct CompareView: View {
@@ -16,6 +17,7 @@ struct CompareView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
+    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -31,7 +33,15 @@ struct CompareView: View {
     @State private var paneB = ComparePaneController(side: .challenger)
     @State private var transitionState = CompareTransitionState()
 
-    @FocusState private var hasKeyFocus: Bool
+    private var keyFocusTrigger: CompareKeyFocusTrigger {
+        CompareKeyFocusTrigger(
+            dismissToken: tapPickerDismissToken,
+            showsFocusRegions: browsing.showsFocusRegions,
+            activeSide: session.activeSide,
+            isSyncLocked: session.isSyncLocked,
+            reference: session.reference,
+            challenger: session.challenger)
+    }
 
     private var layoutPolicy: CompareLayoutPolicy {
         CompareLayoutPolicy(
@@ -55,18 +65,40 @@ struct CompareView: View {
         isDuoExpanded ? .duo : (horizontalSizeClass == .regular ? .pad : .phone)
     }
 
+    private var usesDuoSystemToolbar: Bool {
+        if #available(iOS 27.1, *) {
+            return isDuoExpanded && usesSystemToolbar
+        }
+        return false
+    }
+
     var body: some View {
         let content =
             compareBody
-            .background(Rectangle().fill(Color.clove.bg.stage).ignoresSafeArea())
-            .focusable()
-            .focusEffectDisabled()
-            .focused($hasKeyFocus)
-            .onKeyPress { press in
-                handleKeyPress(press)
+            .background {
+                ZStack {
+                    Rectangle().fill(Color.clove.bg.stage).ignoresSafeArea()
+                    CompareKeyResponderHost(
+                        focusTrigger: keyFocusTrigger,
+                        onMarkingKey: { key in
+                            Self.handleMarkingKey(
+                                key,
+                                browsing: browsing,
+                                session: session,
+                                settings: settings,
+                                onHandled: { tapPickerDismissToken += 1 })
+                        },
+                        onEscape: {
+                            tapPickerDismissToken += 1
+                            browsing.exitCompare()
+                        }
+                    )
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
             }
             .onAppear {
-                hasKeyFocus = true
                 ensureTransitionPrepared()
             }
             .task {
@@ -111,16 +143,142 @@ struct CompareView: View {
             .accessibilityIdentifier("clove.compare")
             .navigationBarBackButtonHidden(true)
 
-        if #available(iOS 27.1, *), usesVerticalToolbar {
-            content.contentMargins(for: .container, edges: .horizontal)
+        if #available(iOS 27.1, *), isDuoExpanded, usesSystemToolbar {
+            duoToolbarContainer(content)
+        } else if #available(iOS 27.1, *), usesVerticalToolbar {
+            content
+                .toolbar(.hidden, for: .navigationBar)
+                .contentMargins(for: .container, edges: .horizontal)
         } else {
             content.toolbar(.hidden, for: .navigationBar)
         }
     }
 
+    @available(iOS 27.1, *)
+    @ViewBuilder
+    private func duoToolbarContainer<Content: View>(_ content: Content) -> some View {
+        let configured =
+            content
+            .toolbar {
+                duoCompareToolbar
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbarVisibility(.visible, for: .navigationBar)
+            .toolbarVerticalBehavior(.automatic)
+            .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+
+        if usesVerticalToolbar {
+            configured.contentMargins(for: .container, edges: .horizontal)
+        } else {
+            configured
+        }
+    }
+
+    @available(iOS 27.1, *)
+    @ToolbarContentBuilder
+    private var duoCompareToolbar: some ToolbarContent {
+        if usesVerticalToolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                duoCompareDoneButton
+            }
+            .axisBehavior(.verticalPreferred)
+
+            ToolbarItem(placement: .topBarTrailing) {
+                duoCompareFocusButton
+            }
+            .axisBehavior(.verticalPreferred)
+
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+            ToolbarItem(placement: .topBarTrailing) {
+                duoCompareSyncButton
+            }
+            .axisBehavior(.verticalPreferred)
+        } else {
+            ToolbarItem(placement: .topBarLeading) {
+                duoCompareDoneButton
+            }
+
+            ToolbarItem(placement: .principal) {
+                Text(AppLocalization.string("Compare", language: language))
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color.clove.text.primary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("clove.compare.title")
+            }
+            .axisBehavior(.horizontalOnly)
+
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                duoCompareFocusButton
+                duoCompareSyncButton
+            }
+        }
+    }
+
+    private var duoCompareDoneButton: some View {
+        Button(
+            AppLocalization.string("Done", language: language),
+            systemImage: "chevron.backward"
+        ) {
+            tapPickerDismissToken += 1
+            browsing.exitCompare()
+        }
+        .accessibilityIdentifier("clove.compare.done")
+    }
+
+    private var duoCompareFocusButton: some View {
+        let focusLabel = AppLocalization.string("Focus regions", language: language)
+        let focusValue = AppLocalization.string(
+            browsing.showsFocusRegions ? "On" : "Off", language: language)
+        return Button(focusLabel, systemImage: "viewfinder") {
+            tapPickerDismissToken += 1
+            browsing.showsFocusRegions.toggle()
+        }
+        .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+        .help(focusLabel)
+        .accessibilityLabel(focusLabel)
+        .accessibilityValue(focusValue)
+        .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
+        .accessibilityIdentifier("clove.compare.focusRegions")
+    }
+
+    @ViewBuilder
+    private var duoCompareSyncButton: some View {
+        let syncLabel = AppLocalization.string(
+            session.isSyncLocked ? "Sync On" : "Sync Off", language: language)
+        let syncValue = AppLocalization.string(
+            session.isSyncLocked ? "On" : "Off", language: language)
+        if session.isSyncLocked {
+            Button(syncLabel, systemImage: "lock.fill") {
+                tapPickerDismissToken += 1
+                browsing.toggleCompareSyncLock()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color.clove.accent)
+            .help(syncLabel)
+            .accessibilityLabel(syncLabel)
+            .accessibilityValue(syncValue)
+            .accessibilityAddTraits(.isSelected)
+            .accessibilityIdentifier("clove.compare.syncToggle")
+        } else {
+            Button(syncLabel, systemImage: "lock.open") {
+                tapPickerDismissToken += 1
+                browsing.toggleCompareSyncLock()
+            }
+            .tint(Color.clove.text.primary)
+            .help(syncLabel)
+            .accessibilityLabel(syncLabel)
+            .accessibilityValue(syncValue)
+            .accessibilityIdentifier("clove.compare.syncToggle")
+        }
+    }
+
     private var compareBody: some View {
         VStack(spacing: 8) {
-            topBar
+            if !usesDuoSystemToolbar {
+                topBar
+            }
             if let message = browsing.failureToastMessage {
                 Toast(
                     message: AppLocalization.string(message, language: language),
@@ -160,6 +318,7 @@ struct CompareView: View {
                 .foregroundStyle(Color.clove.text.primary)
                 .lineLimit(1)
                 .accessibilityIdentifier("clove.compare.title")
+                .reportHeaderControlFrame("clove.compare.title")
 
             HStack(spacing: 12) {
                 Button {
@@ -174,56 +333,73 @@ struct CompareView: View {
                         .contentShape(Capsule())
                         .cloveGlass(in: Capsule())
                 }
-                .frame(minHeight: 40)
+                .frame(minHeight: 44)
                 .buttonStyle(.cloveGlassPress)
                 .accessibilityIdentifier("clove.compare.done")
+                .reportHeaderControlFrame("clove.compare.done")
 
                 Spacer(minLength: 16)
 
-                Button {
-                    tapPickerDismissToken += 1
-                    browsing.toggleCompareSyncLock()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: session.isSyncLocked ? "lock.fill" : "lock.open")
-                            .imageScale(.small)
-                        Text(
-                            AppLocalization.string(
-                                session.isSyncLocked ? "Sync On" : "Sync Off",
-                                language: language)
-                        )
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    GlassIconButton(
+                        label: AppLocalization.string("Focus regions", language: language),
+                        symbol: "viewfinder",
+                        isActive: browsing.showsFocusRegions,
+                        size: .phone,
+                        identifier: "clove.compare.focusRegions"
+                    ) {
+                        tapPickerDismissToken += 1
+                        browsing.showsFocusRegions.toggle()
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(
-                        session.isSyncLocked
-                            ? Color.white : theme.tokens.primaryText.color
-                    )
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background {
-                        if session.isSyncLocked {
-                            Capsule().fill(Color.clove.accent)
+                    .help(AppLocalization.string("Focus regions", language: language))
+                    .reportHeaderControlFrame("clove.compare.focusRegions")
+
+                    Button {
+                        tapPickerDismissToken += 1
+                        browsing.toggleCompareSyncLock()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: session.isSyncLocked ? "lock.fill" : "lock.open")
+                                .imageScale(.small)
+                            Text(
+                                AppLocalization.string(
+                                    session.isSyncLocked ? "Sync On" : "Sync Off",
+                                    language: language)
+                            )
+                            .lineLimit(1)
                         }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(
+                            session.isSyncLocked
+                                ? Color.white : theme.tokens.primaryText.color
+                        )
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .contentShape(Capsule())
+                        .cloveGlass(
+                            in: Capsule(),
+                            tint: session.isSyncLocked ? theme.tokens.accent.color : nil)
                     }
-                    .contentShape(Capsule())
-                    .cloveGlass(in: Capsule())
+                    .frame(minHeight: 44)
+                    .buttonStyle(.cloveGlassPress)
+                    .accessibilityLabel(
+                        AppLocalization.string(
+                            session.isSyncLocked ? "Sync On" : "Sync Off",
+                            language: language)
+                    )
+                    .accessibilityValue(
+                        AppLocalization.string(
+                            session.isSyncLocked ? "On" : "Off", language: language)
+                    )
+                    .accessibilityAddTraits(session.isSyncLocked ? .isSelected : [])
+                    .accessibilityIdentifier("clove.compare.syncToggle")
+                    .reportHeaderControlFrame("clove.compare.syncToggle")
                 }
-                .frame(minHeight: 40)
-                .buttonStyle(.cloveGlassPress)
-                .accessibilityLabel(
-                    AppLocalization.string(
-                        session.isSyncLocked ? "Sync On" : "Sync Off",
-                        language: language)
-                )
-                .accessibilityValue(
-                    AppLocalization.string(session.isSyncLocked ? "On" : "Off", language: language)
-                )
-                .accessibilityIdentifier("clove.compare.syncToggle")
             }
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
+        .reportHeaderControlFrame("clove.compare.topBar")
     }
 
     // MARK: - Side-by-Side Split Panes
@@ -390,20 +566,9 @@ struct CompareView: View {
         let targetPhoto = session.activePhoto
         let marks = browsing.shownMarks(for: targetPhoto)
 
-        return HStack(spacing: 8) {
-            GlassIconButton(
-                label: AppLocalization.string("Undo", language: language),
-                symbol: "arrow.uturn.backward",
-                size: paneControlSize,
-                identifier: "clove.compare.undo"
-            ) {
-                tapPickerDismissToken += 1
-                browsing.undoCompareMark()
-            }
-            .disabled(!browsing.canUndoCompareMark)
-            .opacity(browsing.canUndoCompareMark ? 1 : 0.45)
-
+        return HStack(spacing: 6) {
             activeSideBadge
+                .reportTapPickerFrame("clove.compare.activeSideBadge")
 
             MarkingToolbar(
                 rating: marks.isRejected ? .unrated : marks.rating,
@@ -420,6 +585,7 @@ struct CompareView: View {
             )
             .disabled(!browsing.canMark)
             .opacity(browsing.canMark ? 1 : 0.45)
+            .accessibilityValue(MarkSummary.text(for: marks, language: language))
         }
     }
 
@@ -443,77 +609,85 @@ struct CompareView: View {
 
     // MARK: - Marking & Keyboard Handling
 
-    private var markingRules: MarkingInputRules {
+    private static func markingRules(settings: AppSettings, canMark: Bool) -> MarkingInputRules {
         var inputSettings = settings
-        inputSettings.gesturesEnabled = settings.gesturesEnabled && browsing.canMark
+        inputSettings.gesturesEnabled = settings.gesturesEnabled && canMark
         return MarkingInputRules(settings: inputSettings)
     }
 
     private func rateActive(_ rating: Rating) {
         let target = session.activePhoto
-        applyMarkingResult(
-            markingRules.result(
+        Self.applyMarkingResult(
+            Self.markingRules(settings: settings, canMark: browsing.canMark).result(
                 forRating: rating, marks: browsing.shownMarks(for: target),
                 allowsMarking: browsing.canMark),
-            to: target)
+            to: target,
+            using: browsing)
     }
 
     private func toggleRejectActive() {
         let target = session.activePhoto
-        applyMarkingResult(
-            markingRules.result(
+        Self.applyMarkingResult(
+            Self.markingRules(settings: settings, canMark: browsing.canMark).result(
                 forRejectToggle: browsing.shownMarks(for: target),
                 allowsMarking: browsing.canMark),
-            to: target)
+            to: target,
+            using: browsing)
     }
 
     private func chooseActiveLabel(_ label: LabelColour?) {
         let target = session.activePhoto
         let resolvedLabel = label.map { ColourLabel(colour: $0) } ?? .clear
-        applyMarkingResult(
-            markingRules.result(
+        Self.applyMarkingResult(
+            Self.markingRules(settings: settings, canMark: browsing.canMark).result(
                 forLabel: resolvedLabel,
                 marks: browsing.shownMarks(for: target),
                 allowsMarking: browsing.canMark),
-            to: target)
+            to: target,
+            using: browsing)
     }
 
-    private func applyMarkingResult(_ result: MarkingResult, to target: PhotoIdentity) {
+    private static func applyMarkingResult(
+        _ result: MarkingResult,
+        to target: PhotoIdentity,
+        using browsing: BrowsingModel
+    ) {
         if case .mark(let change, _) = result {
             browsing.apply(change, to: target)
         }
     }
 
-    private func handleKeyPress(_ press: KeyPress) -> KeyPress.Result {
-        if press.key == .escape {
-            tapPickerDismissToken += 1
-            browsing.exitCompare()
-            return .handled
-        }
-        guard let key = MarkingKey(press) else { return .ignored }
+    static func handleMarkingKey(
+        _ key: MarkingKey,
+        browsing: BrowsingModel,
+        session: CompareSession,
+        settings: AppSettings,
+        onHandled: () -> Void = {}
+    ) -> KeyPress.Result {
         switch key {
         case .previousPhoto:
             guard session.mode == .stepping else { return .handled }
-            tapPickerDismissToken += 1
+            onHandled()
             browsing.stepCompareChallenger(offset: -1)
             return .handled
         case .nextPhoto:
             guard session.mode == .stepping else { return .handled }
-            tapPickerDismissToken += 1
+            onHandled()
             browsing.stepCompareChallenger(offset: 1)
             return .handled
         case .undo:
-            tapPickerDismissToken += 1
+            onHandled()
             browsing.undoCompareMark()
             return .handled
         case .rating, .colourLabel, .nextRating, .reject:
-            tapPickerDismissToken += 1
+            onHandled()
             let target = session.activePhoto
             applyMarkingResult(
-                markingRules.result(
+                markingRules(settings: settings, canMark: browsing.canMark).result(
                     for: key, marks: browsing.shownMarks(for: target),
                     allowsMarking: browsing.canMark),
-                to: target)
+                to: target,
+                using: browsing)
             return .handled
         case .toggleGroupFocus, .collapseGroup:
             return .ignored
@@ -1630,6 +1804,7 @@ struct CompareFilmstrip: View {
         .frame(height: 56)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.compare.filmstrip")
+        .reportTapPickerFrame("clove.compare.filmstrip")
     }
 
     private func scheduleScroll(
@@ -1706,5 +1881,172 @@ struct CompareFilmstrip: View {
         )
         .accessibilityAddTraits(isChallenger ? [.isSelected] : [])
         .accessibilityIdentifier("clove.compare.filmstrip.\(photo.id.stem.lowercased())")
+    }
+}
+
+private struct CompareKeyFocusTrigger: Equatable {
+    let dismissToken: Int
+    let showsFocusRegions: Bool
+    let activeSide: CompareSide
+    let isSyncLocked: Bool
+    let reference: PhotoIdentity
+    let challenger: PhotoIdentity
+}
+
+private struct CompareKeyResponderHost: UIViewRepresentable {
+    let focusTrigger: CompareKeyFocusTrigger
+    let onMarkingKey: @MainActor (MarkingKey) -> KeyPress.Result
+    let onEscape: @MainActor () -> Void
+
+    final class Coordinator {
+        var onMarkingKey: @MainActor (MarkingKey) -> KeyPress.Result
+        var onEscape: @MainActor () -> Void
+        var lastFocusTrigger: CompareKeyFocusTrigger?
+
+        init(
+            onMarkingKey: @escaping @MainActor (MarkingKey) -> KeyPress.Result,
+            onEscape: @escaping @MainActor () -> Void
+        ) {
+            self.onMarkingKey = onMarkingKey
+            self.onEscape = onEscape
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onMarkingKey: onMarkingKey, onEscape: onEscape)
+    }
+
+    func makeUIView(context: Context) -> CompareKeyResponderView {
+        let view = CompareKeyResponderView()
+        view.onMarkingKey = context.coordinator.onMarkingKey
+        view.onEscape = context.coordinator.onEscape
+        return view
+    }
+
+    func updateUIView(_ uiView: CompareKeyResponderView, context: Context) {
+        context.coordinator.onMarkingKey = onMarkingKey
+        context.coordinator.onEscape = onEscape
+        uiView.onMarkingKey = onMarkingKey
+        uiView.onEscape = onEscape
+        if context.coordinator.lastFocusTrigger != focusTrigger {
+            context.coordinator.lastFocusTrigger = focusTrigger
+            Task { @MainActor [weak uiView] in
+                uiView?.claimFirstResponderIfNeeded()
+            }
+        }
+    }
+}
+
+@MainActor
+private final class CompareKeyResponderView: UIView {
+    var onMarkingKey: (@MainActor (MarkingKey) -> KeyPress.Result)?
+    var onEscape: (@MainActor () -> Void)?
+
+    private lazy var shortcutCommands: [UIKeyCommand] = [
+        priorityCommand(
+            input: "z", modifierFlags: .command, action: #selector(handleUndoKeyCommand)),
+        priorityCommand(
+            input: UIKeyCommand.inputEscape, modifierFlags: [],
+            action: #selector(handleEscapeKeyCommand)),
+        priorityCommand(
+            input: UIKeyCommand.inputLeftArrow, modifierFlags: [],
+            action: #selector(handlePreviousKeyCommand)),
+        priorityCommand(
+            input: UIKeyCommand.inputRightArrow, modifierFlags: [],
+            action: #selector(handleNextKeyCommand)),
+        priorityCommand(
+            input: UIKeyCommand.inputUpArrow, modifierFlags: [],
+            action: #selector(handleNextRatingKeyCommand)),
+        priorityCommand(
+            input: UIKeyCommand.inputDownArrow, modifierFlags: [],
+            action: #selector(handleRejectKeyCommand)),
+    ]
+
+    override var canBecomeFirstResponder: Bool { true }
+
+    override var keyCommands: [UIKeyCommand]? { shortcutCommands }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        claimFirstResponderIfNeeded()
+        Task { @MainActor [weak self] in
+            self?.claimFirstResponderIfNeeded()
+        }
+    }
+
+    func claimFirstResponderIfNeeded() {
+        guard window != nil, !isFirstResponder else { return }
+        becomeFirstResponder()
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var unhandled: Set<UIPress> = []
+        for press in presses {
+            guard let key = press.key else {
+                unhandled.insert(press)
+                continue
+            }
+            // Arrow keys, Escape, and Cmd+Z are handled via `keyCommands` so UIKit / iPad
+            // focus navigation and system Undo neither swallow them nor fire twice.
+            if key.modifierFlags.contains(.command)
+                || key.keyCode == .keyboardEscape
+                || key.keyCode == .keyboardLeftArrow
+                || key.keyCode == .keyboardRightArrow
+                || key.keyCode == .keyboardUpArrow
+                || key.keyCode == .keyboardDownArrow
+            {
+                unhandled.insert(press)
+                continue
+            }
+            if let markingKey = MarkingKey(key), onMarkingKey?(markingKey) == .handled {
+                continue
+            }
+            unhandled.insert(press)
+        }
+        if !unhandled.isEmpty {
+            super.pressesBegan(unhandled, with: event)
+        }
+    }
+
+    private func priorityCommand(
+        input: String, modifierFlags: UIKeyModifierFlags, action: Selector
+    ) -> UIKeyCommand {
+        let command = UIKeyCommand(
+            title: "", action: action, input: input, modifierFlags: modifierFlags)
+        command.wantsPriorityOverSystemBehavior = true
+        return command
+    }
+
+    @objc private func handleUndoKeyCommand() {
+        _ = onMarkingKey?(.undo)
+    }
+
+    @objc private func handleEscapeKeyCommand() {
+        onEscape?()
+    }
+
+    @objc private func handlePreviousKeyCommand() {
+        _ = onMarkingKey?(.previousPhoto)
+    }
+
+    @objc private func handleNextKeyCommand() {
+        _ = onMarkingKey?(.nextPhoto)
+    }
+
+    @objc private func handleNextRatingKeyCommand() {
+        _ = onMarkingKey?(.nextRating)
+    }
+
+    @objc private func handleRejectKeyCommand() {
+        _ = onMarkingKey?(.reject)
     }
 }

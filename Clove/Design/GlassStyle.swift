@@ -10,15 +10,24 @@ import SwiftUI
 private struct CloveGlass<S: Shape>: ViewModifier {
     /// The outline the glass is clipped to, such as a circle or the controls' capsule.
     let shape: S
+    let tint: Color?
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: shape)
+            content.glassEffect(
+                tint.map { .regular.tint($0) } ?? .regular,
+                in: shape)
         } else {
             content
                 .background {
                     shape.fill(.ultraThinMaterial)
-                        .overlay { shape.fill(Color.clove.surface.glass) }
+                        .overlay {
+                            if let tint {
+                                shape.fill(tint)
+                            } else {
+                                shape.fill(Color.clove.surface.glass)
+                            }
+                        }
                 }
                 .compositingGroup()
                 .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
@@ -28,7 +37,7 @@ private struct CloveGlass<S: Shape>: ViewModifier {
 
 extension View {
     /// Draws the shared glass material behind the view, in ``shape`` (components.md).
-    func cloveGlass(in shape: some Shape) -> some View {
-        modifier(CloveGlass(shape: shape))
+    func cloveGlass(in shape: some Shape, tint: Color? = nil) -> some View {
+        modifier(CloveGlass(shape: shape, tint: tint))
     }
 }

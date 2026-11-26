@@ -3876,6 +3876,83 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tileC))
         XCTAssertFalse(tileB.isSelected)
         XCTAssertFalse(tileA.isSelected)
+        XCTAssertFalse(element(app, "clove.compare.undo").exists)
+    }
+
+    /// Verifies Compare top-bar Focus toggle, removal of permanent Undo button, and `Cmd+Z` undo
+    /// across both iPhone Landscape and iPad.
+    @MainActor
+    func testCompareFocusToggleAndCommandZUndoWithoutPermanentUndoButton() {
+        let app = launchSample()
+        defer {
+            app.terminate()
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                XCUIDevice.shared.orientation = .portrait
+            }
+        }
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            XCUIDevice.shared.orientation = .landscapeLeft
+        }
+        openLibrary(app)
+
+        let gridCollection = element(app, "clove.grid").collectionViews.firstMatch
+        let targetTile = element(app, "clove.grid.photo.mmq02683")
+        for _ in 0..<4 where !(targetTile.exists && targetTile.isHittable) {
+            gridCollection.swipeUp()
+        }
+        XCTAssertTrue(targetTile.waitForExistence(timeout: 5))
+        targetTile.tap()
+
+        let compareButton = element(app, "clove.detail.compare")
+        XCTAssertTrue(compareButton.waitForExistence(timeout: 5))
+        compareButton.tap()
+
+        XCTAssertTrue(element(app, "clove.compare").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.compare.undo").exists)
+
+        let focusToggle = element(app, "clove.compare.focusRegions")
+        let syncToggle = element(app, "clove.compare.syncToggle")
+        XCTAssertTrue(focusToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(syncToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(focusToggle.frame.width, 44, accuracy: 2)
+        XCTAssertEqual(focusToggle.frame.height, 44, accuracy: 2)
+        XCTAssertLessThanOrEqual(focusToggle.frame.maxX, syncToggle.frame.minX + 1)
+        XCTAssertEqual(focusToggle.value as? String, "On")
+
+        let afOverlay = element(app, "clove.detail.region.af.0")
+        XCTAssertTrue(afOverlay.waitForExistence(timeout: 5))
+
+        // Toggle Focus OFF -> overlays disappear without leaving Compare, and state persists back to Detail.
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), focusToggle))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), afOverlay))
+
+        element(app, "clove.compare.done").tap()
+        let detailFocusToggle = element(app, "clove.detail.focusToggle")
+        XCTAssertTrue(detailFocusToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(detailFocusToggle.value as? String, "Off")
+
+        // Re-enter Compare, restore Focus ON, mark active photo, and verify Cmd+Z undoes in place.
+        XCTAssertTrue(compareButton.waitForExistence(timeout: 5))
+        compareButton.tap()
+        XCTAssertTrue(focusToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(focusToggle.value as? String, "Off")
+        focusToggle.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "On"), focusToggle))
+        XCTAssertTrue(afOverlay.waitForExistence(timeout: 5))
+
+        let capsule = element(app, "clove.compare.capsule")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        let initialValue = capsule.value as? String
+        app.typeKey("3", modifierFlags: [])
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        app.typeKey("z", modifierFlags: .command)
+        if let initialValue {
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", initialValue), capsule))
+        } else {
+            XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+        }
+        XCTAssertTrue(element(app, "clove.compare").exists)
     }
 
     @MainActor
