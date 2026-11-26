@@ -55,6 +55,53 @@ struct PhotoActionsTests {
         #expect(library.photos.filter { $0.marks.isRejected }.isEmpty)
     }
 
+    @Test func applyReturnsWhetherMarkHidPhotoFromActiveFilterAndFinishingReturnsCount()
+        async throws
+    {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c", "d"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "burst"),
+            members: ["a", "b", "c"].map { library.identity($0) })
+        library.groups = [group]
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        model.openPhoto(library.identity("d"))
+
+        // Under All filter, marking keeps the photo visible.
+        #expect(!model.apply(.rating(.rejected), to: library.identity("d")))
+        #expect(model.apply(.rating(.unrated), to: library.identity("d")) == false)
+
+        // Under Unmarked filter, marking a photo hides it from the filtered list.
+        model.setFilter(.unmarked)
+        model.openPhoto(library.identity("d"))
+        #expect(model.apply(.rating(.rejected), to: library.identity("d")))
+        model.undoLastMark(restoringNavigation: true)
+        #expect(model.currentPhoto?.id == library.identity("d"))
+
+        // Under Green label filter, rating the photo stars keeps it visible.
+        model.setFilter(.all)
+        let fourStars = try #require(Rating(rawValue: 4))
+        model.apply(.label(ColourLabel(colour: .green)), to: library.identity("a"))
+        model.setLabelFilter(.green)
+        #expect(!model.apply(.rating(fourStars), to: library.identity("a")))
+
+        // Under >= 4 stars filter, clearing the rating hides it.
+        model.setLabelFilter(.green)
+        model.setFilter(.ratedAtLeast(fourStars))
+        #expect(model.apply(.rating(.unrated), to: library.identity("a")))
+
+        // Finishing returns the exact number of newly rejected photos.
+        model.setFilter(.all)
+        model.openGroup(group.id, on: library.identity("a"))
+        let plan = GroupFinishingPlan(
+            groupID: group.id, members: group.members, action: .rejectUnmarked,
+            currentPhoto: library.identity("a"),
+            marks: Dictionary(uniqueKeysWithValues: model.groupPhotos.map { ($0.id, $0.marks) }))
+        #expect(model.runGroupFinishing(plan) == 2)
+        #expect(model.runGroupFinishing(plan) == 0)
+        await model.drainActions()
+    }
+
     @Test func selectGroupPhotoIsANoOpWhenNotInGroupFocus() async throws {
         let library = ControlledPhotoLibrary(rejected: [], stems: ["a", "b", "c", "next"])
         let group = BrowsingGroup(

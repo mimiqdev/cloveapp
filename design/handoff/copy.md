@@ -49,7 +49,7 @@ Every user-facing string as it appears in the designs. Numbers are examples; use
 | a11y.rating | Rating / {n} stars / Unrated (the toolbar's rating action value) |
 | a11y.clearRating | Clear rating (the swipe ladder's `star.slash` stage) |
 | a11y.label | Label, {color} |
-| a11y.info / a11y.undo | Info / Undo |
+| a11y.info | Info |
 | a11y.gridToggle | Hide photo grid / Show photo grid (value: Photo Preview / Focus View) |
 | a11y.focusToggle | Focus regions (value: On / Off) |
 | a11y.focusRegion.* | Autofocus region / Face region / Eye region |
@@ -66,6 +66,16 @@ Counts and companion text remain visible. Only access problems add a subtitle in
 | a11y.save.disconnected | Not connected |
 | a11y.save.viewOnly | View only |
 
+## Detail Undo toast (#461)
+
+| Key | String |
+|---|---|
+| detail.undoToast.batchReject | Rejected {n} photos (singular: Rejected 1 photo) |
+| detail.undoToast.hiddenByFilter | {Action} · hidden by filter (e.g., Rejected · hidden by filter, 3 stars · hidden by filter, Red · hidden by filter, Unrated · hidden by filter, No label · hidden by filter, Cleared reject · hidden by filter) |
+| detail.undoToast.undo | Undo |
+
+Shown for ~4 s centered 12 pt above the filmstrip in Focus View (or centered 12 pt above the bottom bar in 30/70 Photo Preview) only after batch `"Reject {n} unmarked"` or a mark that hides the current photo under an active live filter. Auto-dismisses after ~4 s or immediately when **Undo** is tapped, when navigating away / leaving Detail, or when replaced by another mark or toast.
+
 ## Failure toast (owner decision, 2026-11-11)
 
 | Key | String |
@@ -81,7 +91,7 @@ Show one toast per failure burst, above the bottom edge in the Move rejects toas
 | group.expand | Expand {n} photos |
 | group.rejectRest | Reject {n} unmarked |
 
-The active pill floats centred above the filmstrip, outside its layout height (or at the bottom of the stage in Photo Preview when chrome is visible): `"Expand {n} photos"` when browsing an unexpanded multi-photo group stack in Timeline (marking disabled; vertical stage drags gently pulse the pill), and `"Reject {n} unmarked"` in Group Focus once the visible group has both a rated or labeled member and an unmarked member. Both hide with chrome; nothing replaces them.
+The active pill floats centred above the filmstrip, outside its layout height (or at the bottom of the stage in Photo Preview when chrome is visible): `"Expand {n} photos"` when browsing an unexpanded multi-photo group stack in Timeline (marking disabled; vertical stage drags gently pulse the pill), and `"Reject {n} unmarked"` in Group Focus once the visible group has both a rated or labeled member and an unmarked member. Tapping `"Reject {n} unmarked"` displays `"Rejected {n} photos"` with **Undo** in the transient Detail Undo toast. Both pills hide with chrome; nothing replaces them.
 
 ## Move Rejects
 | Key | String |

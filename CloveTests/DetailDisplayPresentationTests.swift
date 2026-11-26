@@ -3913,10 +3913,11 @@ struct DetailDisplayPresentationTests {
                         && headerFrames.frames["clove.detail.info"] != nil
                         && headerFrames.frames["clove.detail.expandGroup"] != nil
                         && headerFrames.frames["clove.detail.filter"] != nil
-                        && headerFrames.frames["clove.detail.undo"] != nil
                         && tapFrames.frames["clove.detail.filmstrip"] != nil
                         && tapFrames.frames["clove.detail.capsule"] != nil
                 }
+
+                #expect(headerFrames.frames["clove.detail.undo"] == nil)
 
                 func expectHeaderOrder(_ pillID: String) throws {
                     let back = try #require(headerFrames.frames["clove.nav.back"])
@@ -3925,14 +3926,12 @@ struct DetailDisplayPresentationTests {
                     let info = try #require(headerFrames.frames["clove.detail.info"])
                     let pill = try #require(headerFrames.frames[pillID])
                     let filter = try #require(headerFrames.frames["clove.detail.filter"])
-                    let undo = try #require(headerFrames.frames["clove.detail.undo"])
                     #expect(info.width >= 44 && info.height >= 44)
                     #expect(back.maxX <= focus.minX + 1)
                     #expect(focus.maxX <= info.minX + 1)
                     #expect(file.minX >= info.minX - 1 && file.maxX <= info.maxX + 1)
                     #expect(info.maxX <= pill.minX + 1)
                     #expect(pill.maxX <= filter.minX + 1)
-                    #expect(filter.maxX <= undo.minX + 1)
                 }
 
                 try expectHeaderOrder("clove.detail.expandGroup")
@@ -4266,9 +4265,9 @@ struct DetailDisplayPresentationTests {
                 headerFrames.frames["clove.browsing.header"] != nil
                     && headerFrames.frames["clove.detail.info"] != nil
                     && headerFrames.frames["clove.detail.filter"] != nil
-                    && headerFrames.frames["clove.detail.undo"] != nil
                     && tapFrames.frames["clove.detail.filmstrip"] != nil
             }
+            #expect(headerFrames.frames["clove.detail.undo"] == nil)
             let portraitHeader = try #require(headerFrames.frames["clove.browsing.header"])
             #expect(abs(portraitHeader.height - 64) <= 0.5)
 
@@ -4277,8 +4276,8 @@ struct DetailDisplayPresentationTests {
             try await waitFor("portrait chrome did not hide bottom controls and trailing tools") {
                 tapFrames.frames["clove.detail.filmstrip"] == nil
                     && headerFrames.frames["clove.detail.filter"] == nil
-                    && headerFrames.frames["clove.detail.undo"] == nil
             }
+            #expect(headerFrames.frames["clove.detail.undo"] == nil)
             let portraitHeaderHiddenChrome = try #require(
                 headerFrames.frames["clove.browsing.header"])
             #expect(abs(portraitHeaderHiddenChrome.height - 64) <= 0.5)
@@ -4555,7 +4554,7 @@ struct DetailDisplayPresentationTests {
             let plan = try #require(finishingPlan(for: group, currentPhoto: rep, in: browsing))
             #expect(!plan.isEmpty)
             withAnimation(CloveMotion.chrome(reduceMotion: false)) {
-                browsing.runGroupFinishing(plan)
+                _ = browsing.runGroupFinishing(plan)
             }
             try await waitForPillRemoval(label: "Mid finishing Reject->nil")
             #expect(preview.bounds.size == baselinePreviewSize)
@@ -7053,6 +7052,463 @@ struct DetailDisplayPresentationTests {
         }
         try await Task.sleep(for: .milliseconds(350))
         #expect(preview.isZoomed)
+    }
+
+    @Test func detailRemovesPermanentUndoAcrossPhonePadAndDuo() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let target = try #require(browsing.photos.first?.id)
+        browsing.openPhoto(target)
+        let threeStars = try #require(Rating(rawValue: 3))
+        browsing.apply(.rating(threeStars), to: target)
+        #expect(browsing.canUndoMark)
+
+        func verifyNoPermanentUndo<Content: View>(
+            size: CGSize,
+            horizontalSizeClass: UIUserInterfaceSizeClass,
+            verticalSizeClass: UIUserInterfaceSizeClass = .regular,
+            expectsHeaderInfo: Bool,
+            @ViewBuilder content: (
+                _ browsing: BrowsingModel, _ presentation: TestPresentationBox
+            ) -> Content
+        ) async throws {
+            let presentationBox = TestPresentationBox(value: .focus)
+            let headerFrames = DetailFrameBox()
+            let tapFrames = DetailFrameBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: size)
+            let host = UIHostingController(
+                rootView: content(browsing, presentationBox)
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        headerFrames.frames = $0
+                    }
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    })
+            host.traitOverrides.horizontalSizeClass = horizontalSizeClass
+            host.traitOverrides.verticalSizeClass = verticalSizeClass
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor("detail layout did not settle for permanent undo check") {
+                let hasCapsule =
+                    tapFrames.frames["clove.detail.capsule"] != nil
+                    || tapFrames.frames["clove.duo.capsule"] != nil
+                let hasInfoIfHeader =
+                    !expectsHeaderInfo || headerFrames.frames["clove.detail.info"] != nil
+                return self.findPreview(in: window) != nil && hasCapsule && hasInfoIfHeader
+            }
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(headerFrames.frames["clove.detail.undo"] == nil)
+            #expect(headerFrames.frames["clove.duo.undo"] == nil)
+            #expect(
+                self.findAccessibilityElement(withIdentifier: "clove.detail.undo", in: window)
+                    == nil)
+            #expect(
+                self.findAccessibilityElement(withIdentifier: "clove.duo.undo", in: window) == nil)
+            #expect(tapFrames.frames["clove.detail.undoToast"] == nil)
+        }
+
+        // iPhone Portrait
+        try await verifyNoPermanentUndo(
+            size: CGSize(width: 393, height: 852), horizontalSizeClass: .compact,
+            expectsHeaderInfo: true
+        ) { browsing, presentation in
+            TestDetailPresentationHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: presentation, usesSystemToolbar: false, idiom: .phone
+            )
+            .environment(\.cloveTheme, .dark)
+        }
+
+        // iPhone Landscape
+        try await verifyNoPermanentUndo(
+            size: CGSize(width: 852, height: 393),
+            horizontalSizeClass: .compact, verticalSizeClass: .compact,
+            expectsHeaderInfo: true
+        ) { browsing, presentation in
+            TestDetailPresentationHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: presentation, usesSystemToolbar: false, idiom: .phone
+            )
+            .environment(\.cloveTheme, .dark)
+        }
+
+        // iPad Photo Preview & Focus View
+        try await verifyNoPermanentUndo(
+            size: CGSize(width: 1024, height: 768), horizontalSizeClass: .regular,
+            expectsHeaderInfo: false
+        ) { browsing, presentation in
+            TestDetailPresentationHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: presentation, usesSystemToolbar: true, idiom: .pad
+            )
+            .environment(\.cloveTheme, .dark)
+        }
+
+        // Duo Expanded
+        try await verifyNoPermanentUndo(
+            size: CGSize(width: 900, height: 700), horizontalSizeClass: .regular,
+            expectsHeaderInfo: false
+        ) { browsing, presentation in
+            TestDuoPoseDetailHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: presentation, isDuoExpanded: true, isDuoCover: false,
+                usesVerticalToolbar: true, hasFoldRegion: false, showsGrid: true, theme: .dark)
+        }
+    }
+
+    @Test func detailUndoToastAppearsForFilterHiddenMarkOnlyAndRespectsDismissalAndLayout()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let firstUnmarked = try #require(browsing.photos.first { $0.marks.isUnmarked }?.id)
+        browsing.openPhoto(firstUnmarked)
+
+        // 1. iPhone Portrait Focus View: All filter produces no toast; active Unmarked filter shows
+        // toast 12 pt above filmstrip, survives auto-advance, dismisses on undo / manual nav /
+        // filter change / non-hiding mark / ~4s timeout.
+        let phonePresentation = TestPresentationBox(value: .focus)
+        let phoneTapFrames = DetailFrameBox()
+        let phoneWindow = UIWindow(windowScene: scene)
+        phoneWindow.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let phoneHost = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: phonePresentation, usesSystemToolbar: false, idiom: .phone
+            )
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                phoneTapFrames.frames = $0
+            })
+        phoneHost.traitOverrides.horizontalSizeClass = .compact
+        phoneWindow.rootViewController = phoneHost
+        phoneWindow.makeKeyAndVisible()
+        defer {
+            phoneWindow.isHidden = true
+            phoneWindow.rootViewController = nil
+        }
+
+        try await waitFor("iPhone Detail did not lay out") {
+            self.findPreview(in: phoneWindow) != nil
+                && phoneTapFrames.frames["clove.detail.filmstrip"] != nil
+                && phoneTapFrames.frames["clove.detail.capsule"] != nil
+        }
+        let phonePreview = try #require(findPreview(in: phoneWindow))
+        let stageBefore = phonePreview.convert(phonePreview.bounds, to: phoneWindow)
+        let stripBefore = try #require(phoneTapFrames.frames["clove.detail.filmstrip"])
+
+        // All filter -> no Undo toast.
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(browsing.shownMarks(for: firstUnmarked).isRejected)
+        #expect(phoneTapFrames.frames["clove.detail.undoToast"] == nil)
+
+        browsing.undoLastMark(restoringNavigation: true)
+        try await waitFor("undo restored firstUnmarked under All") {
+            browsing.currentPhoto?.id == firstUnmarked
+                && browsing.shownMarks(for: firstUnmarked).isUnmarked
+        }
+
+        // Active Unmarked filter -> rejecting hides photo, auto-advances, keeps toast visible.
+        browsing.setFilter(.unmarked)
+        browsing.openPhoto(firstUnmarked)
+        try await Task.sleep(for: .milliseconds(80))
+        phoneHost.view.setNeedsLayout()
+        phoneHost.view.layoutIfNeeded()
+        try await waitFor("firstUnmarked active under Unmarked") {
+            browsing.currentPhoto?.id == firstUnmarked && phonePreview.allowsMarking
+        }
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await waitFor("Undo toast appeared and auto-advanced") {
+            phoneTapFrames.frames["clove.detail.undoToast"] != nil
+                && browsing.currentPhoto?.id != firstUnmarked
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        phoneHost.view.setNeedsLayout()
+        phoneHost.view.layoutIfNeeded()
+        #expect(browsing.currentPhoto?.id != firstUnmarked)
+
+        let phoneToast = try #require(phoneTapFrames.frames["clove.detail.undoToast"])
+        let phoneStrip = try #require(phoneTapFrames.frames["clove.detail.filmstrip"])
+        let phoneCapsule = try #require(phoneTapFrames.frames["clove.detail.capsule"])
+        let stageAfter = phonePreview.convert(phonePreview.bounds, to: phoneWindow)
+        #expect(abs(stageAfter.height - stageBefore.height) <= 1)
+        #expect(abs(phoneStrip.height - stripBefore.height) <= 0.5)
+        #expect(phoneToast.maxY <= phoneStrip.minY + 0.5)
+        #expect(abs((phoneStrip.minY - 12) - phoneToast.maxY) <= 12.5)
+        #expect(!phoneToast.intersects(phoneCapsule))
+        #expect(abs(phoneToast.midX - phoneWindow.bounds.midX) <= 2)
+
+        // Performing Undo (same path as button / Cmd-Z) dismisses toast and restores photo + nav.
+        browsing.undoLastMark(restoringNavigation: true)
+        try await waitFor("Undo dismissed toast and restored hidden photo") {
+            phoneTapFrames.frames["clove.detail.undoToast"] == nil
+                && browsing.currentPhoto?.id == firstUnmarked
+                && browsing.shownMarks(for: firstUnmarked).isUnmarked
+                && phonePreview.allowsMarking
+        }
+
+        // Manual navigation dismisses toast immediately.
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await waitFor("Undo toast reappeared") {
+            phoneTapFrames.frames["clove.detail.undoToast"] != nil
+        }
+        let nextVisible = try #require(
+            browsing.photos.first { $0.id != browsing.currentPhoto?.id }?.id)
+        browsing.openPhoto(nextVisible)
+        try await waitFor("manual navigation dismissed toast") {
+            phoneTapFrames.frames["clove.detail.undoToast"] == nil
+        }
+
+        // Filter change dismisses toast immediately.
+        browsing.undoLastMark(restoringNavigation: true)
+        browsing.openPhoto(firstUnmarked)
+        try await Task.sleep(for: .milliseconds(80))
+        phoneHost.view.setNeedsLayout()
+        phoneHost.view.layoutIfNeeded()
+        try await waitFor("restored unmarked photo ready for marking") {
+            browsing.currentPhoto?.id == firstUnmarked && phonePreview.allowsMarking
+        }
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await waitFor("Undo toast shown before filter change") {
+            phoneTapFrames.frames["clove.detail.undoToast"] != nil
+        }
+        browsing.setFilter(.all)
+        try await waitFor("filter change dismissed toast") {
+            phoneTapFrames.frames["clove.detail.undoToast"] == nil
+        }
+
+        // Non-hiding mark dismisses an active toast under a rating filter without re-showing.
+        browsing.undoLastMark(restoringNavigation: true)
+        let fourStars = try #require(Rating(rawValue: 4))
+        let fiveStars = try #require(Rating(rawValue: 5))
+        let groupedIDs = Set(browsing.groups.flatMap(\.members))
+        let standaloneUnmarked = browsing.photos.filter {
+            $0.marks.isUnmarked && !groupedIDs.contains($0.id)
+        }.map(\.id)
+        try #require(standaloneUnmarked.count >= 2)
+        let firstRatedTarget = standaloneUnmarked[0]
+        let secondRatedTarget = standaloneUnmarked[1]
+        browsing.apply(.rating(fourStars), to: firstRatedTarget)
+        browsing.apply(.rating(fourStars), to: secondRatedTarget)
+        browsing.setFilter(.ratedAtLeast(fourStars))
+        browsing.openPhoto(firstRatedTarget)
+        try await Task.sleep(for: .milliseconds(80))
+        phoneHost.view.setNeedsLayout()
+        phoneHost.view.layoutIfNeeded()
+        try await waitFor("first rated standalone ready") {
+            browsing.currentPhoto?.id == firstRatedTarget && phonePreview.allowsMarking
+        }
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await waitFor("Undo toast shown under rating filter") {
+            phoneTapFrames.frames["clove.detail.undoToast"] != nil
+                && browsing.currentPhoto?.id == secondRatedTarget
+                && phonePreview.allowsMarking
+        }
+        phonePreview.onMarkingSwipe?(fiveStars)
+        try await waitFor("non-hiding mark dismissed active toast") {
+            phoneTapFrames.frames["clove.detail.undoToast"] == nil
+        }
+
+        // Auto-dismisses after ~4 s when left untouched.
+        try await Task.sleep(for: .milliseconds(80))
+        phoneHost.view.setNeedsLayout()
+        phoneHost.view.layoutIfNeeded()
+        try await waitFor("second rated standalone ready") {
+            browsing.currentPhoto?.id == secondRatedTarget && phonePreview.allowsMarking
+        }
+        phonePreview.onMarkingSwipe?(.rejected)
+        try await waitFor("Undo toast shown for auto-dismiss timer") {
+            phoneTapFrames.frames["clove.detail.undoToast"] != nil
+        }
+        try await waitFor("Undo toast auto-dismissed after ~4 s") {
+            phoneTapFrames.frames["clove.detail.undoToast"] == nil
+        }
+
+        // 2. iPad 30/70 Photo Preview: toast sits centered 12 pt above bottomBand over the 70% stage.
+        phoneWindow.isHidden = true
+        phoneWindow.rootViewController = nil
+        let ipadBrowsing = BrowsingModel(library: TestLibrary.sample())
+        ipadBrowsing.openFolder()
+        try await waitFor("iPad folder did not open") { !ipadBrowsing.isFolderOpening }
+        ipadBrowsing.setFilter(.unmarked)
+        let ipadTarget = try #require(ipadBrowsing.photos.first { $0.id.stem == "mmq02683" }?.id)
+        ipadBrowsing.openPhoto(ipadTarget)
+        let ipadPresentation = TestPresentationBox(value: .photoPreview)
+        let ipadTapFrames = DetailFrameBox()
+        let ipadWindow = UIWindow(windowScene: scene)
+        ipadWindow.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let ipadHost = UIHostingController(
+            rootView: TestDetailPresentationHost(
+                browsing: ipadBrowsing, images: SampleDetailImages(),
+                presentation: ipadPresentation, usesSystemToolbar: false, idiom: .pad
+            )
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                ipadTapFrames.frames = $0
+            })
+        ipadHost.traitOverrides.horizontalSizeClass = .regular
+        ipadWindow.rootViewController = ipadHost
+        ipadWindow.makeKeyAndVisible()
+        defer {
+            ipadWindow.isHidden = true
+            ipadWindow.rootViewController = nil
+        }
+
+        try await waitFor("iPad Photo Preview laid out") {
+            self.findPreview(in: ipadWindow)?.allowsMarking == true
+                && ipadTapFrames.frames["clove.detail.bottomBand"] != nil
+                && ipadTapFrames.frames["clove.detail.capsule"] != nil
+        }
+        let ipadPreview = try #require(findPreview(in: ipadWindow))
+        let ipadStage = ipadPreview.convert(ipadPreview.bounds, to: ipadWindow)
+        ipadPreview.onMarkingSwipe?(.rejected)
+        try await waitFor("iPad Photo Preview Undo toast appeared") {
+            ipadTapFrames.frames["clove.detail.undoToast"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(350))
+        ipadHost.view.setNeedsLayout()
+        ipadHost.view.layoutIfNeeded()
+        #expect(ipadBrowsing.shownMarks(for: ipadTarget).isRejected)
+        let ipadToast = try #require(ipadTapFrames.frames["clove.detail.undoToast"])
+        let ipadBottomBand = try #require(ipadTapFrames.frames["clove.detail.bottomBand"])
+        let ipadCapsule = try #require(ipadTapFrames.frames["clove.detail.capsule"])
+        let ipadInspection = try #require(ipadTapFrames.frames["clove.detail.inspectionPill"])
+        #expect(ipadToast.maxY <= ipadBottomBand.minY + 0.5)
+        #expect(abs((ipadBottomBand.minY - 12) - ipadToast.maxY) <= 12.5)
+        #expect(!ipadToast.intersects(ipadCapsule))
+        #expect(!ipadToast.intersects(ipadInspection))
+        #expect(abs(ipadToast.midX - ipadStage.midX) <= 2)
+    }
+
+    @Test func detailUndoToastBatchRejectRenderingAndSlotPrecedence() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let burst = try #require(browsing.groups.first { $0.id.rawValue == "burst-2678" })
+        browsing.openGroup(burst.id, on: burst.members[0])
+        let current = try #require(browsing.currentPhoto)
+        let timeline = DetailTimeline(
+            photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+        let expanded = try #require(timeline.activeGroup(with: burst.id))
+
+        let tapFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let host = UIHostingController(
+            rootView: DetailMarkingView(
+                browsing: browsing,
+                photo: current,
+                settings: SettingsStore.sample.settings,
+                images: SampleDetailImages(),
+                timeline: timeline,
+                expandedGroup: expanded,
+                order: timeline.stagePhotos,
+                actions: DetailMarkingActions(
+                    apply: { _, _ in },
+                    marked: { _, _, _ in },
+                    step: { _ in },
+                    markingSwipeBegan: {}),
+                undoToast: DetailUndoToast(kind: .rejectedBatch(count: 3))
+            )
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                tapFrames.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("batch reject Undo toast did not lay out") {
+            tapFrames.frames["clove.detail.undoToast"] != nil
+                && tapFrames.frames["clove.detail.filmstrip"] != nil
+                && tapFrames.frames["clove.detail.capsule"] != nil
+        }
+        let toastFrame = try #require(tapFrames.frames["clove.detail.undoToast"])
+        let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
+        let capsuleFrame = try #require(tapFrames.frames["clove.detail.capsule"])
+        #expect(abs((stripFrame.minY - 12) - toastFrame.maxY) <= 2)
+        #expect(abs(toastFrame.midX - window.bounds.midX) <= 2)
+        #expect(!toastFrame.intersects(stripFrame))
+        #expect(!toastFrame.intersects(capsuleFrame))
+        // Transiently occupies the centered action slot instead of centered stage action pills.
+        #expect(tapFrames.frames["clove.detail.rejectUnmarked"] == nil)
+        #expect(tapFrames.frames["clove.detail.expandGroup"] == nil)
+
+        // Wide iPad Focus View (narrow 680 pt width): centered Undo toast clears DetailInspectionPill
+        // via DetailPhotoPreviewBandLayout without overlapping bottom-left controls or filmstrip.
+        window.isHidden = true
+        window.rootViewController = nil
+        let ipadFocusFrames = DetailFrameBox()
+        let ipadFocusWindow = UIWindow(windowScene: scene)
+        ipadFocusWindow.frame = CGRect(x: 0, y: 0, width: 680, height: 768)
+        let ipadFocusHost = UIHostingController(
+            rootView: DetailMarkingView(
+                browsing: browsing,
+                photo: current,
+                settings: SettingsStore.sample.settings,
+                images: SampleDetailImages(),
+                timeline: timeline,
+                expandedGroup: expanded,
+                order: timeline.stagePhotos,
+                actions: DetailMarkingActions(
+                    apply: { _, _ in },
+                    marked: { _, _, _ in },
+                    step: { _ in },
+                    markingSwipeBegan: {}),
+                initialPresentation: .focus,
+                undoToast: DetailUndoToast(kind: .rejectedBatch(count: 3))
+            )
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .pad)
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                ipadFocusFrames.frames = $0
+            })
+        ipadFocusHost.traitOverrides.horizontalSizeClass = .regular
+        ipadFocusWindow.rootViewController = ipadFocusHost
+        ipadFocusWindow.makeKeyAndVisible()
+        defer {
+            ipadFocusWindow.isHidden = true
+            ipadFocusWindow.rootViewController = nil
+        }
+
+        try await waitFor("iPad Focus Undo toast did not lay out") {
+            ipadFocusFrames.frames["clove.detail.undoToast"] != nil
+                && ipadFocusFrames.frames["clove.detail.inspectionPill"] != nil
+                && ipadFocusFrames.frames["clove.detail.filmstrip"] != nil
+                && ipadFocusFrames.frames["clove.detail.capsule"] != nil
+        }
+        let ipadToast = try #require(ipadFocusFrames.frames["clove.detail.undoToast"])
+        let ipadInspection = try #require(ipadFocusFrames.frames["clove.detail.inspectionPill"])
+        let ipadStrip = try #require(ipadFocusFrames.frames["clove.detail.filmstrip"])
+        let ipadCapsule = try #require(ipadFocusFrames.frames["clove.detail.capsule"])
+        #expect(!ipadToast.intersects(ipadInspection))
+        #expect(ipadToast.minX >= ipadInspection.maxX + 11.5)
+        #expect(!ipadToast.intersects(ipadStrip))
+        #expect(!ipadToast.intersects(ipadCapsule))
+        #expect(abs(ipadToast.midY - ipadInspection.midY) <= 1.5)
+        #expect(ipadFocusFrames.frames["clove.detail.rejectUnmarked"] == nil)
     }
 
     private func effectiveRenderedOpacity(atCenterOf rect: CGRect, in window: UIWindow) -> CGFloat?

@@ -417,7 +417,8 @@ extension CloveFlowTests {
         XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
         XCTAssertEqual(capsule.frame.height, 48, accuracy: 1)
         XCTAssertTrue(element(in: app, "clove.detail.info").exists)
-        XCTAssertTrue(element(in: app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(in: app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(in: app, "clove.detail.undoToast").exists)
 
         let marks = detailMarksControl(in: app).value as? String
         XCTAssertTrue(

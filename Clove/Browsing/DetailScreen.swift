@@ -30,9 +30,15 @@ struct DetailScreen: View {
     /// this screen draws (PRD Gesture-related settings).
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
     @State private var autoAdvance = MarkAutoAdvance()
+
+    /// Transient high-regret Undo toast shown after `Reject N unmarked` or filter-hiding marks.
+    @State private var undoToast: DetailUndoToast?
+    @State private var toastContextPhoto: PhotoIdentity?
+    @State private var toastContextExpandedGroup: GroupID?
 
     /// C12's current settings: the double-tap behaviour, the zoomed gestures and the enabled
     /// ratings.
@@ -98,18 +104,65 @@ struct DetailScreen: View {
         .onChange(of: browsing.compareSession != nil) { _, isComparing in
             if isComparing {
                 autoAdvance.cancel()
+                dismissUndoToast()
             }
         }
         .onChange(of: settings.similarGroupsEnabled) { _, enabled in
             if !enabled {
                 autoAdvance.cancel()
+                dismissUndoToast()
                 browsing.collapseGroup()
             }
+        }
+        .onChange(of: browsing.state.currentPhoto) { _, newPhoto in
+            if undoToast != nil, newPhoto != toastContextPhoto {
+                dismissUndoToast()
+            }
+        }
+        .onChange(of: browsing.expandedGroup) { _, newGroup in
+            if undoToast != nil, newGroup != toastContextExpandedGroup {
+                dismissUndoToast()
+            }
+        }
+        .onChange(of: browsing.state.route) { _, route in
+            if route != .detail {
+                autoAdvance.cancel()
+                dismissUndoToast()
+            }
+        }
+        .onChange(of: browsing.state.folder) { _, _ in
+            dismissUndoToast()
+        }
+        .onChange(of: browsing.state.filter) { _, _ in
+            dismissUndoToast()
+        }
+        .onChange(of: browsing.labelFilter) { _, _ in
+            dismissUndoToast()
+        }
+        .onChange(of: browsing.metadataFilter) { _, _ in
+            dismissUndoToast()
+        }
+        .onChange(of: browsing.failureToastMessage != nil) { _, hasFailure in
+            if hasFailure {
+                dismissUndoToast()
+            }
+        }
+        .onChange(of: browsing.canUndoMark) { _, canUndo in
+            if !canUndo {
+                dismissUndoToast()
+            }
+        }
+        .task(id: undoToast?.id) {
+            guard let toastID = undoToast?.id else { return }
+            try? await Task.sleep(for: DetailUndoToast.autoDismissDelay)
+            guard !Task.isCancelled, undoToast?.id == toastID else { return }
+            dismissUndoToast()
         }
         .onDisappear {
             // Leaving detail drops a pending advance, so coming back never jumps photos
             // (PRD Auto-advance).
             autoAdvance.cancel()
+            dismissUndoToast()
         }
     }
 
@@ -130,14 +183,26 @@ struct DetailScreen: View {
             actions: actions,
             duo: duo,
             presentation: presentation,
-            initialPresentation: initialPresentation)
+            initialPresentation: initialPresentation,
+            undoToast: undoToast)
     }
 
     /// What the marking view asks this screen to do: write a mark, advance after it, and move
     /// through the active Detail level's order (Timeline vs Group Focus).
     private var actions: DetailMarkingActions {
         DetailMarkingActions(
-            apply: { change, photo in browsing.apply(change, to: photo.id) },
+            apply: { change, photo in
+                let previousMarks = photo.marks
+                let hidFromFilter = browsing.apply(change, to: photo.id)
+                if hidFromFilter,
+                    let action = DetailUndoToast.Action(
+                        change: change, previousMarks: previousMarks)
+                {
+                    presentUndoToast(.hiddenByFilter(action: action))
+                } else {
+                    dismissUndoToast()
+                }
+            },
             marked: { kind, change, photo in
                 startAutoAdvance(after: kind, change: change, from: photo)
             },
@@ -152,9 +217,15 @@ struct DetailScreen: View {
                 autoAdvance.cancel()
                 let advance = timeline.finishingAdvancePlan(
                     groupID: expanded.id, from: plan.currentPhoto, rules: rules)
-                browsing.runGroupFinishing(plan)
+                let rejectedCount = browsing.runGroupFinishing(plan)
+                if rejectedCount > 0 {
+                    presentUndoToast(.rejectedBatch(count: rejectedCount))
+                } else {
+                    dismissUndoToast()
+                }
                 schedule(advance)
-            })
+            },
+            undo: { performUndo() })
     }
 
     // MARK: - Navigation
@@ -162,6 +233,7 @@ struct DetailScreen: View {
     /// Steps horizontally within the active level (Timeline slots or Group Focus members) without
     /// crossing levels or wrapping at ends.
     private func stepPhoto(offset: Int) {
+        dismissUndoToast()
         guard let current = browsing.state.currentPhoto,
             let target = timeline.steppedPhoto(
                 from: current, offset: offset, expandedGroup: activeExpandedGroup?.id)
@@ -175,26 +247,59 @@ struct DetailScreen: View {
 
     /// Opens one photo in Timeline mode (`expandedGroup = nil`) and drops any pending advance.
     private func openPhoto(_ photo: PhotoIdentity) {
+        dismissUndoToast()
         autoAdvance.cancel()
         browsing.openPhoto(photo)
     }
 
     /// Selects another member within the active expanded group and drops any pending advance.
     private func selectGroupPhoto(_ photo: PhotoIdentity) {
+        dismissUndoToast()
         autoAdvance.cancel()
         browsing.selectGroupPhoto(photo)
     }
 
     /// Enters Group Focus for `groupID` and drops any pending advance.
     private func expandGroup(_ groupID: GroupID) {
+        dismissUndoToast()
         autoAdvance.cancel()
         browsing.openGroup(groupID, on: browsing.state.currentPhoto)
     }
 
     /// Collapses Group Focus back to Timeline on the group's Representative Photo.
     private func collapseGroup() {
+        dismissUndoToast()
         autoAdvance.cancel()
         browsing.collapseGroup()
+    }
+
+    // MARK: - Transient Undo toast
+
+    private func presentUndoToast(_ kind: DetailUndoToast.Kind) {
+        browsing.dismissFailureToast()
+        let toast = DetailUndoToast(kind: kind)
+        toastContextPhoto = browsing.state.currentPhoto
+        toastContextExpandedGroup = browsing.expandedGroup
+        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+            undoToast = toast
+        }
+        UIAccessibility.post(
+            notification: .announcement, argument: toast.localizedMessage(language: language))
+    }
+
+    private func dismissUndoToast() {
+        toastContextPhoto = nil
+        toastContextExpandedGroup = nil
+        guard undoToast != nil else { return }
+        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+            undoToast = nil
+        }
+    }
+
+    private func performUndo() {
+        autoAdvance.cancel()
+        dismissUndoToast()
+        browsing.undoLastMark(restoringNavigation: true)
     }
 
     // MARK: - Auto-advance
@@ -220,6 +325,10 @@ struct DetailScreen: View {
                 browsing.selectGroupPhoto(next)
             case .nextPhoto(let next), .nextUnmarkedPhoto(let next):
                 browsing.openPhoto(next)
+            }
+            if undoToast != nil {
+                toastContextPhoto = browsing.state.currentPhoto
+                toastContextExpandedGroup = browsing.expandedGroup
             }
         }
     }

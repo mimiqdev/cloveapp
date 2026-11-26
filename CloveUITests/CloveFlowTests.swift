@@ -135,8 +135,9 @@ final class CloveFlowTests: XCTestCase {
         let strip = element(app, "clove.detail.filmstrip")
         let splitGrid = element(app, "clove.detail.photoGrid")
         let gridToggle = element(app, "clove.detail.gridToggle")
-        let undoButton = element(app, "clove.detail.undo")
         XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
         XCTAssertFalse(element(app, "clove.detail.rail").exists)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
         XCTAssertEqual(capsule.frame.width, 168, accuracy: 1)
@@ -172,7 +173,8 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
         capture("ipad-detail-photo-preview-light")
 
-        // Toggle to Focus View: same photo, marks, stationary MarkingToolbar, and Undo stay intact.
+        // Toggle to Focus View: same photo, marks, and stationary MarkingToolbar stay intact;
+        // marking under All shows no transient Undo toast, and clearing in place restores Unmarked.
         gridToggle.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
         XCTAssertFalse(splitGrid.exists)
@@ -180,13 +182,16 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(gridToggle.value as? String, "Focus View")
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02680.ARW")
         XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
-        XCTAssertTrue(undoButton.isEnabled)
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
         assertSameFrame(
             capsule.frame, photoPreviewCapsuleFrame,
             "MarkingToolbar shifted between Photo Preview and Focus View")
         XCTAssertEqual(capsule.frame.minX - strip.frame.maxX, 24, accuracy: 2)
-        undoButton.tap()
-        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        rate(3, in: app)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
 
         // Toggle back to Photo Preview, step to another photo, then return to Focus View to
         // verify presentation preference persists across photo navigation in Focus View.
@@ -719,11 +724,12 @@ final class CloveFlowTests: XCTestCase {
         let centre = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
         centre.doubleTap()
         XCTAssertEqual(zoom.label, "2 / 32 · 100%")
-        // Chrome is one visibility across fit and zoom: the marking controls, Info, Undo and the
-        // filmstrip all stay put until a single tap hides them (#302).
+        // Chrome is one visibility across fit and zoom: the marking controls, Info and the
+        // filmstrip all stay put until a single tap hides them (#302), with no permanent Undo.
         XCTAssertTrue(element(app, "clove.detail.capsule").exists)
         XCTAssertTrue(element(app, "clove.detail.info").exists)
-        XCTAssertTrue(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
         XCTAssertTrue(strip.exists)
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
@@ -808,21 +814,27 @@ final class CloveFlowTests: XCTestCase {
         let capsule = element(app, "clove.detail.capsule")
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45))
 
-        // Unrated -> slow down past rejectTravel rejects immediately (no 120pt dead band).
+        // Unrated -> slow down past rejectTravel rejects immediately (no 120pt dead band),
+        // then clears in place without a permanent Undo button or toast.
         start.press(
             forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 95)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("Rejected") == true)
-        element(app, "clove.detail.undo").tap()
-        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        element(app, "clove.detail.capsule.reject").tap()
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
 
-        // Unrated -> up reaches 5 stars across full upSpan, then undo.
+        // Unrated -> up reaches 5 stars across full upSpan, then clears in place.
         start.press(
             forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -150)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertTrue((capsule.value as? String)?.contains("5 stars") == true)
-        element(app, "clove.detail.undo").tap()
-        XCTAssertEqual(capsule.value as? String, "Unmarked")
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        rate(5, in: app)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
 
         // Unrated -> up raises stars symmetrically to 3 stars.
         start.press(
@@ -835,16 +847,16 @@ final class CloveFlowTests: XCTestCase {
             forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 52)),
             withVelocity: XCUIGestureVelocity(rawValue: 100), thenHoldForDuration: 0)
         XCTAssertEqual(capsule.value as? String, "Unmarked")
-        element(app, "clove.detail.undo").tap()
-        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+        rate(3, in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
 
         // From 3 stars, fast first downward step also clears to Unmarked.
         start.press(
             forDuration: 0.01, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 52)),
             withVelocity: XCUIGestureVelocity(rawValue: 1200), thenHoldForDuration: 0)
         XCTAssertEqual(capsule.value as? String, "Unmarked")
-        element(app, "clove.detail.undo").tap()
-        XCTAssertTrue((capsule.value as? String)?.contains("3 stars") == true)
+        rate(3, in: app)
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
 
         // From 3 stars, second downward step (>= clearTravel + rejectTravel) rejects regardless of speed.
         start.press(
@@ -977,18 +989,25 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertLessThanOrEqual(pill.frame.maxY, strip.frame.minY)
         XCTAssertTrue(pill.isHittable)
 
-        // Fit again, then finish the group: the pill goes and the stage and strip stay put.
+        // Fit again, then finish the group: the pill goes and the stage and strip stay put,
+        // and a transient Detail Undo toast offers to undo the batch reject without a permanent Undo button.
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
         let pillLabel = pill.label
         pill.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
         assertSameFrame(preview.frame, stage, "finishing resized the stage")
         XCTAssertTrue(strip.exists)
+        let undoToast = element(app, "clove.detail.undoToast")
+        XCTAssertTrue(undoToast.waitForExistence(timeout: 5))
+        XCTAssertTrue(undoToast.staticTexts["Rejected 1 photo"].exists)
+        XCTAssertLessThanOrEqual(undoToast.frame.maxY, strip.frame.minY)
 
-        // Detail Undo restores the finished photo and its finishing pill in one step; returning to
-        // Grid clears Detail Undo.
-        element(app, "clove.detail.undo").tap()
+        // Detail Undo toast restores the finished photo and its finishing pill in one step;
+        // returning to Grid clears Detail Undo.
+        element(app, "clove.detail.undoToast.action").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
         XCTAssertEqual(pill.label, pillLabel)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02678.ARW")
@@ -1629,7 +1648,9 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
         rate(5, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "5 stars"), capsule))
-        // Tapping the current rating clears it; rating again restores it.
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        // Tapping the current rating clears it in place; rating again restores it.
         rate(5, toolbar: "clove.duo.capsule", in: app)
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
         rate(3, toolbar: "clove.duo.capsule", in: app)
@@ -1931,7 +1952,12 @@ final class CloveFlowTests: XCTestCase {
         let start = rating.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -60)))
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "5 stars"), rating))
-        element(app, "clove.duo.undo").tap()
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        element(app, "clove.duo.stars.3").tap()
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
         rating.tap()
         XCTAssertTrue(stars.waitForExistence(timeout: 5))
@@ -1956,12 +1982,14 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "0 stars"), rating))
         XCTAssertTrue(
             element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
-        // Undo is single-step: it restores 3 stars while keeping the green label.
-        element(app, "clove.duo.undo").tap()
+        // Restoring 3 stars in place preserves the green label.
+        rating.tap()
+        XCTAssertTrue(stars.waitForExistence(timeout: 5))
+        element(app, "clove.duo.stars.3").tap()
         XCTAssertTrue(wait(NSPredicate(format: "label CONTAINS %@", "3 stars"), rating))
         XCTAssertTrue(
             element(app, "clove.duo.label").label.localizedCaseInsensitiveContains("green"))
-        // Clearing the label via None keeps 3 stars, and Undo restores the green label.
+        // Clearing the label via None keeps 3 stars, and picking Green restores the green label.
         element(app, "clove.duo.label").tap()
         XCTAssertTrue(element(app, "clove.duo.labels.none").waitForExistence(timeout: 5))
         element(app, "clove.duo.labels.none").tap()
@@ -1970,7 +1998,9 @@ final class CloveFlowTests: XCTestCase {
                 NSPredicate(format: "NOT (label CONTAINS[c] %@)", "green"),
                 element(app, "clove.duo.label")))
         XCTAssertTrue(rating.label.contains("3 stars"))
-        element(app, "clove.duo.undo").tap()
+        element(app, "clove.duo.label").tap()
+        XCTAssertTrue(element(app, "clove.duo.labels.green").waitForExistence(timeout: 5))
+        element(app, "clove.duo.labels.green").tap()
         XCTAssertTrue(
             wait(
                 NSPredicate(format: "label CONTAINS[c] %@", "green"),
@@ -3502,19 +3532,17 @@ final class CloveFlowTests: XCTestCase {
         let info = element(app, "clove.detail.info")
         let rejectPill = element(app, "clove.detail.rejectUnmarked")
         let filter = element(app, "clove.detail.filter")
-        let undo = element(app, "clove.detail.undo")
         XCTAssertTrue(back.exists)
         XCTAssertTrue(focus.exists)
         XCTAssertTrue(fileName.exists)
         XCTAssertTrue(info.exists)
         XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
         XCTAssertTrue(filter.exists)
-        XCTAssertTrue(undo.exists)
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
         XCTAssertLessThanOrEqual(back.frame.maxX, focus.frame.minX + 1)
         XCTAssertLessThanOrEqual(focus.frame.maxX, info.frame.minX + 1)
         XCTAssertLessThanOrEqual(info.frame.maxX, rejectPill.frame.minX + 1)
         XCTAssertLessThanOrEqual(rejectPill.frame.maxX, filter.frame.minX + 1)
-        XCTAssertLessThanOrEqual(filter.frame.maxX, undo.frame.minX + 1)
 
         // Single tap on stage in landscapeLeft hides top nav bar and bottom row, second tap restores cleanly.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
@@ -3522,16 +3550,15 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), back))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), fileName))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), filter))
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undo))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         XCTAssertTrue(fileName.waitForExistence(timeout: 5))
         XCTAssertTrue(info.waitForExistence(timeout: 5))
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
         XCTAssertGreaterThanOrEqual(back.frame.minX, 0)
-        XCTAssertLessThanOrEqual(undo.frame.maxX, app.frame.maxX)
+        XCTAssertLessThanOrEqual(filter.frame.maxX, app.frame.maxX)
 
         // Collapse Group Focus via trailing chevron.up -> returns to Timeline & Expand pill in header.
         let foldButton = element(app, "clove.detail.filmstrip.group.fold")
@@ -3562,16 +3589,16 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), back))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), fileName))
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undo))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), filter))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         XCTAssertTrue(fileName.waitForExistence(timeout: 5))
         XCTAssertTrue(info.waitForExistence(timeout: 5))
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
         XCTAssertGreaterThanOrEqual(back.frame.minX, 0)
-        XCTAssertLessThanOrEqual(undo.frame.maxX, app.frame.maxX)
+        XCTAssertLessThanOrEqual(filter.frame.maxX, app.frame.maxX)
 
         // Rotate back to portrait -> returns to stacked portrait layout and Back exits to Grid.
         XCUIDevice.shared.orientation = .portrait
@@ -3738,6 +3765,104 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), tileC))
         XCTAssertFalse(tileB.isSelected)
         XCTAssertFalse(tileA.isSelected)
+    }
+
+    @MainActor
+    func testDetailUndoToastOnFilterHiddenMarkAndNoToastUnderAllFilter() {
+        let app = launchSample()
+        defer { app.terminate() }
+        openLibrary(app)
+
+        // Under the All filter, Detail has no permanent Undo button and marking/clearing in place
+        // shows no Undo toast.
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let preview = element(app, "clove.detail.preview")
+        let capsule = element(app, "clove.detail.capsule")
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.undo").exists)
+        XCTAssertFalse(element(app, "clove.duo.undo").exists)
+
+        rate(3, in: app)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+        preview.swipeRight()
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "3 stars"), capsule))
+        rate(3, in: app)
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+
+        // Return to Grid, enable the Unmarked filter, and open an unmarked photo.
+        element(app, "clove.nav.back").tap()
+        let filterButton = element(app, "clove.grid.filter")
+        if filterButton.exists {
+            filterButton.tap()
+            element(app, "clove.grid.filter.unmarked").tap()
+        } else {
+            element(app, "clove.sidebar.unmarked").tap()
+        }
+        element(app, "clove.grid.photo.mmq02680").tap()
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+
+        // Rejecting hides MMQ02680 from the Unmarked filter and shows the transient Undo toast
+        // centered above the bottom controls, surviving auto-advance.
+        element(app, "clove.detail.capsule.reject").tap()
+        let undoToast = element(app, "clove.detail.undoToast")
+        XCTAssertTrue(undoToast.waitForExistence(timeout: 5))
+        XCTAssertTrue(undoToast.staticTexts["Rejected · hidden by filter"].exists)
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        if filmstrip.exists {
+            XCTAssertLessThanOrEqual(undoToast.frame.maxY, filmstrip.frame.minY)
+        } else {
+            XCTAssertLessThanOrEqual(undoToast.frame.maxY, capsule.frame.minY)
+        }
+
+        // Tapping the toast's Undo button restores MMQ02680 and navigates back to it cleanly.
+        let undoAction = element(app, "clove.detail.undoToast.action")
+        XCTAssertTrue(undoAction.isHittable)
+        undoAction.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
+        XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+
+        // Manual navigation while a filter-hidden Undo toast is visible dismisses it immediately.
+        element(app, "clove.detail.capsule.reject").tap()
+        XCTAssertTrue(undoToast.waitForExistence(timeout: 5))
+        preview.swipeLeft()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
+
+        // Plural batch Reject N unmarked in Group Focus ("Rejected 2 photos") + Undo.
+        element(app, "clove.nav.back").tap()
+        if filterButton.exists {
+            filterButton.tap()
+            element(app, "clove.grid.filter.all").tap()
+        } else {
+            element(app, "clove.sidebar.all").tap()
+        }
+        let burst = element(app, "clove.grid.group.burst-2696")
+        let gridCollection = app.collectionViews.firstMatch
+        for _ in 0..<4 where !(burst.exists && burst.isHittable) {
+            gridCollection.swipeUp()
+        }
+        XCTAssertTrue(burst.waitForExistence(timeout: 5))
+        burst.tap()
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        rate(4, in: app)
+        let pill = element(app, "clove.detail.rejectUnmarked")
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertEqual(pill.label, "Reject 2 unmarked")
+        pill.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), pill))
+        XCTAssertTrue(undoToast.waitForExistence(timeout: 5))
+        XCTAssertTrue(undoToast.staticTexts["Rejected 2 photos"].exists)
+        element(app, "clove.detail.undoToast.action").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
+        XCTAssertTrue(pill.waitForExistence(timeout: 5))
+        XCTAssertEqual(pill.label, "Reject 2 unmarked")
     }
 
     @MainActor

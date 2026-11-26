@@ -68,7 +68,7 @@ struct BrowsingToolbar<
     let undo: () -> Void
     let canUndo: Bool
     var showsBack = true
-    var showsUndo = true
+    var showsUndo = false
     var backTitle: String? = nil
     var showsNavigationTools = true
     var showsHorizontalLeadingTools = false
@@ -91,7 +91,7 @@ struct BrowsingToolbar<
         undo: @escaping () -> Void,
         canUndo: Bool,
         showsBack: Bool = true,
-        showsUndo: Bool = true,
+        showsUndo: Bool = false,
         backTitle: String? = nil,
         showsNavigationTools: Bool = NavigationTools.self != EmptyView.self,
         showsHorizontalLeadingTools: Bool = HorizontalLeadingTools.self != EmptyView.self,
