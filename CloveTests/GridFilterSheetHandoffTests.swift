@@ -142,4 +142,30 @@ struct GridFilterSheetHandoffTests {
         #expect(options.focalLengths.map(\.value) == [.wide, .standard, .shortTelephoto])
         #expect(options.keywords.map(\.value) == ["Coast", "Portrait"])
     }
+
+    @MainActor
+    @Test func gridScreenAndDetailMarkingAllowsMetadataFiltersInDuoExpandedCoverAndPadDetail() {
+        // Ordinary phone Grid and Compact iPad Grid allow "More filters"; Regular iPad Grid uses sidebar.
+        #expect(
+            GridScreen.allowsMetadataFiltersFromPopover(
+                isRegular: false, usesDock: false, route: .grid))
+        #expect(
+            !GridScreen.allowsMetadataFiltersFromPopover(
+                isRegular: true, usesDock: false, route: .grid))
+        // Expanded Duo Grid & Duo Cover Grid always allow "More filters" even when Expanded Duo is .regular.
+        #expect(
+            GridScreen.allowsMetadataFiltersFromPopover(
+                isRegular: true, usesDock: true, route: .grid))
+        #expect(
+            GridScreen.allowsMetadataFiltersFromPopover(
+                isRegular: false, usesDock: true, route: .grid))
+        // GridScreen's own filterButton does not hand off when route is .detail (Detail owns its sheet).
+        #expect(
+            !GridScreen.allowsMetadataFiltersFromPopover(
+                isRegular: false, usesDock: true, route: .detail))
+
+        // DetailMarkingView allows "More filters" across Phone, iPad, Duo Cover, and Expanded Duo unless comparing.
+        #expect(DetailMarkingView.allowsMetadataFiltersFromPopover(isComparing: false))
+        #expect(!DetailMarkingView.allowsMetadataFiltersFromPopover(isComparing: true))
+    }
 }

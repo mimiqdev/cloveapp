@@ -46,9 +46,6 @@ extension EnvironmentValues {
 
 struct DuoDetailLayout {
     var presentation: Binding<DetailPresentation>
-    var filter: AnyView
-    var more: AnyView
-    var bottom: AnyView
     var showsGrid: Bool
 }
 

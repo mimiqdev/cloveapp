@@ -11,17 +11,17 @@ struct PhotoFilterPopoverButton: View {
     var identifierPrefix = "clove.grid.filter"
     @Binding var filterHandoff: GridFilterSheetHandoff
     let canPresentMetadataFilters: Bool
+    var popoverTrigger: Int = 0
     let onCancelPendingMetadataFilters: () -> Void
     let onCompleteMetadataFiltersHandoff: () -> Void
-    var onAnchorCountChange: ((Int) -> Void)? = nil
 
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appLanguage) private var language
-    @State private var anchorAttachments = 0
+    @State private var isAnchorReady = false
+    @State private var isPopoverContentMounted = false
 
     private var hasFilter: Bool { browsing.hasActiveFilter }
-    private var isAnchorReady: Bool { anchorAttachments > 0 }
 
     private var minimumRating: Rating {
         if case .ratedAtLeast(let rating) = browsing.state.filter { return rating }
@@ -31,60 +31,95 @@ struct PhotoFilterPopoverButton: View {
     var body: some View {
         let filterLabel = AppLocalization.string("Filter", language: language)
         let activeValue = AppLocalization.string(hasFilter ? "On" : "Off", language: language)
-        Group {
-            if usesSystemToolbar {
-                Button {
-                    onCancelPendingMetadataFilters()
-                    filterHandoff.toggleFilters()
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease")
-                        .foregroundStyle(hasFilter ? Color.clove.accent : Color.clove.text.primary)
-                }
-                .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
-                .help(filterLabel)
-                .accessibilityLabel(filterLabel)
-                .accessibilityValue(activeValue)
-                .accessibilityAddTraits(hasFilter ? .isSelected : [])
-                .accessibilityIdentifier(identifierPrefix)
-            } else {
-                GlassIconButton(
-                    label: filterLabel,
-                    symbol: "line.3.horizontal.decrease",
-                    isActive: hasFilter,
-                    size: controlSize,
-                    identifier: identifierPrefix
-                ) {
-                    onCancelPendingMetadataFilters()
-                    filterHandoff.toggleFilters()
-                }
+        if usesSystemToolbar, #available(iOS 27.1, *) {
+            SystemToolbarFilterButton(
+                filterLabel: filterLabel,
+                activeValue: activeValue,
+                hasFilter: hasFilter,
+                identifierPrefix: identifierPrefix,
+                isPresented: popoverBinding,
+                onTap: handleTap,
+                onAnchorAppear: handleAnchorAppear,
+                onAnchorDisappear: handleAnchorDisappear,
+                popoverTrigger: popoverTrigger,
+                onTrigger: handlePopoverTrigger
+            ) {
+                popoverContent
             }
-        }
-        .popover(
-            isPresented: Binding(
-                get: { filterHandoff.showsFilters && isAnchorReady && scenePhase == .active },
-                set: { presented in
-                    if presented {
-                        onCancelPendingMetadataFilters()
-                    }
-                    filterHandoff.setFiltersPresented(presented)
-                })
-        ) {
-            filterMenu
-                .presentationCompactAdaptation(.popover)
-                .onDisappear {
-                    onCompleteMetadataFiltersHandoff()
-                }
-        }
-        .onAppear {
-            anchorAttachments += 1
-            onAnchorCountChange?(1)
-        }
-        .onDisappear {
-            anchorAttachments = max(0, anchorAttachments - 1)
-            onAnchorCountChange?(-1)
-            if anchorAttachments == 0 {
-                filterHandoff.setFiltersPresented(false)
+        } else {
+            GlassIconButton(
+                label: filterLabel,
+                symbol: "line.3.horizontal.decrease",
+                isActive: hasFilter,
+                size: controlSize,
+                identifier: identifierPrefix,
+                action: handleTap
+            )
+            .popover(
+                isPresented: popoverBinding,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                popoverContent
             }
+            .onChange(of: popoverTrigger) { _, _ in
+                handlePopoverTrigger()
+            }
+            .onAppear(perform: handleAnchorAppear)
+            .onDisappear(perform: handleAnchorDisappear)
+        }
+    }
+
+    private var popoverBinding: Binding<Bool> {
+        Binding(
+            get: { filterHandoff.showsFilters && isAnchorReady && scenePhase == .active },
+            set: { presented in
+                if presented {
+                    onCancelPendingMetadataFilters()
+                }
+                filterHandoff.setFiltersPresented(presented)
+            })
+    }
+
+    private var popoverContent: some View {
+        filterMenu
+            .presentationCompactAdaptation(.popover)
+            .onAppear {
+                isPopoverContentMounted = true
+            }
+            .onDisappear {
+                isPopoverContentMounted = false
+                if filterHandoff.showsFilters {
+                    filterHandoff.setFiltersPresented(false)
+                }
+                onCompleteMetadataFiltersHandoff()
+            }
+    }
+
+    private func handleTap() {
+        let isCurrentlyPresented =
+            filterHandoff.showsFilters
+            && isAnchorReady
+            && isPopoverContentMounted
+            && scenePhase == .active
+        isAnchorReady = true
+        onCancelPendingMetadataFilters()
+        filterHandoff.setFiltersPresented(!isCurrentlyPresented)
+    }
+
+    private func handleAnchorAppear() {
+        isAnchorReady = true
+    }
+
+    private func handleAnchorDisappear() {
+        isAnchorReady = false
+        filterHandoff.setFiltersPresented(false)
+    }
+
+    private func handlePopoverTrigger() {
+        if isAnchorReady, scenePhase == .active {
+            onCancelPendingMetadataFilters()
+            filterHandoff.setFiltersPresented(true)
         }
     }
 
@@ -133,7 +168,9 @@ struct PhotoFilterPopoverButton: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-            if browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty {
+            if canPresentMetadataFilters,
+                browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty
+            {
                 Divider().overlay(Color.clove.separator)
                 Button {
                     onCancelPendingMetadataFilters()
@@ -224,5 +261,52 @@ struct PhotoFilterPopoverButton: View {
             }
             clearTask()
         }
+    }
+}
+
+@available(iOS 27.1, *)
+private struct SystemToolbarFilterButton<PopoverContent: View>: View {
+    let filterLabel: String
+    let activeValue: String
+    let hasFilter: Bool
+    let identifierPrefix: String
+    @Binding var isPresented: Bool
+    let onTap: () -> Void
+    let onAnchorAppear: () -> Void
+    let onAnchorDisappear: () -> Void
+    let popoverTrigger: Int
+    let onTrigger: () -> Void
+    @ViewBuilder let popoverContent: () -> PopoverContent
+
+    @Environment(\.toolbarVerticalEdge) private var verticalEdge
+
+    private var arrowEdge: Edge {
+        switch verticalEdge {
+        case .leading: .leading
+        case .trailing: .trailing
+        default: .top
+        }
+    }
+
+    var body: some View {
+        Button(filterLabel, systemImage: "line.3.horizontal.decrease", action: onTap)
+            .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
+            .help(filterLabel)
+            .accessibilityLabel(filterLabel)
+            .accessibilityValue(activeValue)
+            .accessibilityAddTraits(hasFilter ? .isSelected : [])
+            .accessibilityIdentifier(identifierPrefix)
+            .popover(
+                isPresented: $isPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: arrowEdge
+            ) {
+                popoverContent()
+            }
+            .onChange(of: popoverTrigger) { _, _ in
+                onTrigger()
+            }
+            .onAppear(perform: onAnchorAppear)
+            .onDisappear(perform: onAnchorDisappear)
     }
 }

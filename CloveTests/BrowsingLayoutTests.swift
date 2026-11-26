@@ -1344,9 +1344,6 @@ struct BrowsingLayoutTests {
                     isDuoExpanded: true,
                     duo: DuoDetailLayout(
                         presentation: duoPresentation,
-                        filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()),
-                        bottom: AnyView(EmptyView()),
                         showsGrid: true)))
             duoHost.traitOverrides.horizontalSizeClass = .regular
             window.rootViewController = duoHost
@@ -1642,7 +1639,7 @@ struct BrowsingLayoutTests {
             self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
                 && self.hasToolbarItem(
                     identifier: "clove.detail.gridToggle", in: host, window: window)
-                && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
+                && self.hasToolbarItem(identifier: "clove.detail.filter", in: host, window: window)
                 && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
                 && headerFrames.frames["clove.detail.info"] != nil
                 && headerFrames.frames["clove.detail.fileName"] != nil
@@ -1653,6 +1650,7 @@ struct BrowsingLayoutTests {
         // Expanded Duo Detail toolbar carries strictly 3 buttons (< / Grid / Filter); More, Move
         // Rejects, Undo, Info, Focus, and Compare are absent from the system toolbar (#458).
         #expect(!snapshot.contains("clove.grid.more"))
+        #expect(!snapshot.contains("clove.grid.filter"))
         #expect(!snapshot.contains("clove.grid.moveRejects"))
         #expect(!snapshot.contains("clove.duo.undo"))
         #expect(!snapshot.contains("clove.detail.undo"))
@@ -1680,7 +1678,7 @@ struct BrowsingLayoutTests {
             snapshot.frame(for: "clove.detail.gridToggle"),
             Comment(rawValue: "missing gridToggle in \(snapshot.description)"))
         let filterFrame = try #require(
-            snapshot.frame(for: "clove.grid.filter"),
+            snapshot.frame(for: "clove.detail.filter"),
             Comment(rawValue: "missing filter in \(snapshot.description)"))
 
         if host.traitCollection.verticalBarEdge != .unspecified {
@@ -1710,11 +1708,11 @@ struct BrowsingLayoutTests {
             let toggleIdx = try #require(
                 snapshot.trailingRawTokens.firstIndex(of: "clove.detail.gridToggle"))
             let filterIdx = try #require(
-                snapshot.trailingRawTokens.firstIndex(of: "clove.grid.filter"))
+                snapshot.trailingRawTokens.firstIndex(of: "clove.detail.filter"))
             #expect(toggleIdx < filterIdx)
             #expect(snapshot.trailingRawTokens[toggleIdx..<filterIdx].contains("<spacer>"))
             #expect(!snapshot.trailingRawTokens[filterIdx...].contains("<spacer>"))
-            #expect(snapshot.trailingIDs == ["clove.detail.gridToggle", "clove.grid.filter"])
+            #expect(snapshot.trailingIDs == ["clove.detail.gridToggle", "clove.detail.filter"])
         } else {
             #expect(snapshot.frame(for: "clove.duo.undo") == nil)
             #expect(snapshot.frame(for: "clove.detail.undo") == nil)
@@ -1723,7 +1721,7 @@ struct BrowsingLayoutTests {
                 Comment(rawValue: "unexpected leadingIDs: \(snapshot.description)"))
             #expect(backFrame.maxX <= toggleFrame.minX + 2)
             #expect(toggleFrame.maxX < filterFrame.minX)
-            #expect(snapshot.trailingIDs == ["clove.grid.filter"])
+            #expect(snapshot.trailingIDs == ["clove.detail.filter"])
             let navBar = try #require(findNavigationBar(in: window))
             let trailingRawCount =
                 navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
@@ -1850,7 +1848,7 @@ struct BrowsingLayoutTests {
                 let state = self.inspectToolbarState(in: host, window: window)
                 return state.frame(for: "clove.nav.back") != nil
                     && state.frame(for: "clove.detail.gridToggle") != nil
-                    && state.frame(for: "clove.grid.filter") != nil
+                    && state.frame(for: "clove.detail.filter") != nil
                     && self.findNavigationBar(in: window).flatMap {
                         self.centerBarGroupFrame(in: $0, relativeTo: window)
                     } != nil
@@ -1865,10 +1863,10 @@ struct BrowsingLayoutTests {
             let infoFrame = try #require(headerFrames.frames["clove.detail.info"])
             let backFrame = try #require(snapshot.frame(for: "clove.nav.back"))
             let toggleFrame = try #require(snapshot.frame(for: "clove.detail.gridToggle"))
-            let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
+            let filterFrame = try #require(snapshot.frame(for: "clove.detail.filter"))
 
             #expect(snapshot.leadingIDs == ["clove.nav.back", "clove.detail.gridToggle"])
-            #expect(snapshot.trailingIDs == ["clove.grid.filter"])
+            #expect(snapshot.trailingIDs == ["clove.detail.filter"])
             #expect(snapshot.bottomToolbarIDs.isEmpty)
             #expect(!snapshot.contains("clove.grid.more"))
             #expect(!snapshot.contains("clove.grid.moveRejects"))
@@ -2464,7 +2462,7 @@ struct BrowsingLayoutTests {
             ) {
                 let state = self.inspectToolbarState(in: host, window: window)
                 return state.contains("clove.nav.back")
-                    && state.contains("clove.grid.filter")
+                    && state.contains("clove.detail.filter")
                     && !state.contains("clove.duo.undo")
                     && !state.contains("clove.detail.undo")
                     && headerFrames.frames["clove.detail.info"] != nil
@@ -2474,12 +2472,265 @@ struct BrowsingLayoutTests {
             let snapshot = inspectToolbarState(in: host, window: window)
             #expect(!snapshot.contains("clove.duo.undo"))
             #expect(!snapshot.contains("clove.detail.undo"))
-            #expect(snapshot.trailingIDs == ["clove.grid.filter", "clove.grid.filter"])
+            #expect(
+                snapshot.trailingIDs == ["clove.detail.filter", "clove.detail.focusToggle"],
+                Comment(rawValue: "unexpected trailingIDs: \(snapshot.description)"))
             #expect(!snapshot.contains("clove.grid.more"))
             #expect(!snapshot.contains("clove.grid.moveRejects"))
             #expect(!snapshot.contains("clove.detail.gridToggle"))
             #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
         }
+    }
+
+    @Test func filterPopoverAnchorsToToolbarButtonAndReopensReliablyAcrossDismissCycles()
+        async throws
+    {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let library = TestLibrary.forLaunch(environment: [
+            TestLibrary.launchVariable: "1",
+            TestLibrary.metadataSamplesVariable: "1",
+        ])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        try await waitFor("folder did not open") { !model.isFolderOpening }
+        let photo = try #require(model.photos.first?.id)
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+
+        enum LayoutKind {
+            case expandedDuoDetail
+            case portraitDuoDetail
+            case duoCoverDetail
+            case phoneHorizontalDetail
+            case phoneHorizontalGrid
+            case expandedDuoGrid
+            case iPadDetail
+        }
+
+        let cases:
+            [(
+                name: String, kind: LayoutKind, size: CGSize, idiom: UIUserInterfaceIdiom,
+                horizontal: UIUserInterfaceSizeClass, isDuoExpanded: Bool, isDuoCover: Bool,
+                usesVerticalToolbar: Bool, hasFoldRegion: Bool, expectedFilterID: String
+            )] = [
+                (
+                    "expandedDuoDetail", .expandedDuoDetail, CGSize(width: 951, height: 669),
+                    .phone, .regular, true, false, true, true, "clove.detail.filter"
+                ),
+                (
+                    "portraitDuoDetail", .portraitDuoDetail, CGSize(width: 669, height: 951),
+                    .phone, .regular, true, false, false, true, "clove.detail.filter"
+                ),
+                (
+                    "duoCoverDetail", .duoCoverDetail, CGSize(width: 466, height: 678),
+                    .phone, .compact, false, true, true, false, "clove.detail.filter"
+                ),
+                (
+                    "phoneHorizontalDetail", .phoneHorizontalDetail,
+                    CGSize(width: 393, height: 852),
+                    .phone, .compact, false, false, false, false, "clove.detail.filter"
+                ),
+                (
+                    "phoneHorizontalGrid", .phoneHorizontalGrid, CGSize(width: 393, height: 852),
+                    .phone, .compact, false, false, false, false, "clove.grid.filter"
+                ),
+                (
+                    "expandedDuoGrid", .expandedDuoGrid, CGSize(width: 951, height: 669),
+                    .phone, .regular, true, false, true, true, "clove.grid.filter"
+                ),
+                (
+                    "iPadDetail", .iPadDetail, CGSize(width: 1024, height: 768),
+                    .pad, .regular, false, false, false, false, "clove.detail.filter"
+                ),
+            ]
+
+        for entry in cases {
+            model.clearAllFilters()
+            if entry.kind == .phoneHorizontalGrid || entry.kind == .expandedDuoGrid {
+                if model.state.route != .grid { model.back() }
+            } else {
+                model.openPhoto(photo)
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: entry.size)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    if entry.kind == .phoneHorizontalDetail || entry.kind == .iPadDetail {
+                        DetailScreen(browsing: model)
+                    } else {
+                        GridScreen(
+                            browsing: model,
+                            thumbnails: model.thumbnails,
+                            initialPresentation: .focus)
+                    }
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, entry.idiom)
+                .environment(\.isDuoExpanded, entry.isDuoExpanded)
+                .environment(\.isDuoCover, entry.isDuoCover)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, entry.usesVerticalToolbar)
+                .environment(\.hasFoldRegion, entry.hasFoldRegion)
+                .environment(\.scenePhase, .active))
+            host.traitOverrides.horizontalSizeClass = entry.horizontal
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "\(entry.name) filter item did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                self.hasToolbarItem(
+                    identifier: entry.expectedFilterID, in: host, window: window)
+            }
+
+            let snapshot = inspectToolbarState(in: host, window: window)
+            let filterFrame = try #require(
+                snapshot.frame(for: entry.expectedFilterID),
+                Comment(rawValue: "\(entry.name) missing filterFrame in \(snapshot.description)"))
+
+            // Open -> verify anchoring -> dismiss -> re-open across 3 cycles, including filter change.
+            for cycle in 1...3 {
+                try triggerToolbarButton(
+                    identifier: entry.expectedFilterID, expectedFrame: filterFrame, in: host,
+                    window: window)
+                try await waitFor("\(entry.name) popover did not present on cycle \(cycle)") {
+                    guard let vc = self.topPresentedViewController(from: host) else {
+                        return false
+                    }
+                    return !vc.isBeingPresented && !vc.isBeingDismissed
+                        && vc.transitionCoordinator == nil
+                }
+
+                let presented = try #require(topPresentedViewController(from: host))
+                presented.view.setNeedsLayout()
+                presented.view.layoutIfNeeded()
+                window.layoutIfNeeded()
+
+                let popoverController = presented.popoverPresentationController
+                let presentedFrame = presented.view.convert(presented.view.bounds, to: window)
+                let sceneBounds = scene.coordinateSpace.bounds
+                let effectiveWidth = min(entry.size.width, sceneBounds.width)
+
+                #expect(
+                    popoverController != nil,
+                    Comment(
+                        rawValue: "\(entry.name) did not present as UIPopoverPresentationController"
+                    ))
+                let hasSource =
+                    popoverController?.sourceItem != nil
+                    || popoverController?.barButtonItem != nil
+                    || popoverController?.sourceView != nil
+                #expect(
+                    hasSource,
+                    Comment(
+                        rawValue:
+                            "\(entry.name) popover lost sourceItem/barButtonItem/sourceView"))
+                #expect(
+                    presentedFrame.width >= 200 && presentedFrame.height >= 200,
+                    Comment(
+                        rawValue:
+                            "\(entry.name) popover laid out empty frame \(presentedFrame)"))
+                #expect(
+                    presentedFrame.maxX > effectiveWidth * 0.5,
+                    Comment(
+                        rawValue:
+                            "\(entry.name) popover anchored on leading side (\(presentedFrame)) instead of trailing filter button (\(filterFrame))"
+                    ))
+                if filterFrame.maxX <= sceneBounds.width + 1 {
+                    #expect(
+                        presentedFrame.maxX > filterFrame.minX,
+                        Comment(
+                            rawValue:
+                                "\(entry.name) popover (\(presentedFrame)) did not anchor beside filter button (\(filterFrame))"
+                        ))
+                    #expect(
+                        abs(presentedFrame.minY - filterFrame.minY) <= 120,
+                        Comment(
+                            rawValue:
+                                "\(entry.name) popover Y (\(presentedFrame.minY)) drifted far from filter button (\(filterFrame.minY))"
+                        ))
+                }
+                #expect(
+                    !(presentedFrame.minX < 20 && presentedFrame.minY < 60),
+                    Comment(
+                        rawValue:
+                            "\(entry.name) popover anchored at top-left (0,0): \(presentedFrame)"))
+
+                if cycle == 2 {
+                    model.setFilter(.unmarked)
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+
+                await withCheckedContinuation { continuation in
+                    presented.dismiss(animated: false) {
+                        continuation.resume()
+                    }
+                }
+                try await waitFor("\(entry.name) popover did not dismiss on cycle \(cycle)") {
+                    self.topPresentedViewController(from: host) == nil
+                        && host.transitionCoordinator == nil
+                }
+                try await Task.sleep(for: .milliseconds(60))
+            }
+        }
+    }
+
+    private func triggerToolbarButton(
+        identifier: String, expectedFrame: CGRect, in host: UIViewController, window: UIWindow
+    ) throws {
+        let navBar = findNavigationBar(in: window)
+        let navItem =
+            navBar?.topItem ?? findNavigationController(in: host)?.topViewController?.navigationItem
+        let topVC = findNavigationController(in: host)?.topViewController
+        let allItems =
+            (navItem?.leadingItemGroups.flatMap(\.barButtonItems) ?? [])
+            + (navItem?.trailingItemGroups.flatMap(\.barButtonItems) ?? [])
+            + (topVC?.toolbarItems ?? [])
+        if let item = allItems.first(where: {
+            $0.accessibilityIdentifier == identifier
+                || ((identifier == "clove.detail.filter" || identifier == "clove.grid.filter")
+                    && ($0.title == "Filter" || $0.accessibilityLabel == "Filter"))
+        }) {
+            if let action = item.action, let target = item.target {
+                UIApplication.shared.sendAction(action, to: target, from: item, for: nil)
+                return
+            }
+            if let primaryAction = item.primaryAction {
+                primaryAction.performWithSender(item, target: nil)
+                return
+            }
+        }
+        func findControl(in view: UIView) -> UIControl? {
+            if let control = view as? UIControl {
+                let frame = control.convert(control.bounds, to: window)
+                if control.accessibilityIdentifier == identifier
+                    || abs(frame.midX - expectedFrame.midX) < 4
+                        && abs(frame.midY - expectedFrame.midY) < 4
+                {
+                    return control
+                }
+            }
+            for child in view.subviews {
+                if let found = findControl(in: child) { return found }
+            }
+            return nil
+        }
+        if let control = findControl(in: window) {
+            control.sendActions(for: .touchUpInside)
+            return
+        }
+        Issue.record(
+            Comment(
+                rawValue:
+                    "Could not trigger toolbar item '\(identifier)': \(describeToolbarState(in: host, window: window))"
+            ))
     }
 
     private struct ToolbarSnapshot {
@@ -2674,25 +2925,37 @@ struct BrowsingLayoutTests {
             return nil
         }
 
+        let isDetailScreen =
+            overlayIdentifiers["clove.detail.preview"] != nil
+            || overlayIdentifiers["clove.detail.empty"] != nil
+            || overlayIdentifiers["clove.duo.focus"] != nil
+            || overlayIdentifiers["clove.duo.photoPreview"] != nil
+
         func knownIdentifier(forText text: String) -> String? {
             switch text {
             case "Back": return "clove.nav.back"
-            case "Filter": return "clove.grid.filter"
+            case "Filter": return isDetailScreen ? "clove.detail.filter" : "clove.grid.filter"
             case "More": return "clove.grid.more"
             case "Compare": return "clove.detail.compare"
             case "Info": return "clove.detail.info"
             case "Undo": return usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo"
+            case "Reject", "Rejected": return "clove.duo.reject"
             case "Move rejects": return "clove.grid.moveRejects"
             case "Done": return "clove.grid.batch.done"
             case "Select All", "Deselect All", "Select all", "Deselect all":
                 return "clove.grid.selectAll"
             case "Hide photo grid", "Show photo grid": return "clove.detail.gridToggle"
             case "Focus regions": return "clove.detail.focusToggle"
-            default: return nil
+            default:
+                if text.hasPrefix("Rating") { return "clove.duo.rating" }
+                if text.hasPrefix("Label") { return "clove.duo.label" }
+                return nil
             }
         }
 
-        func itemIdentifier(_ item: UIBarButtonItem, isLeading: Bool) -> String? {
+        func itemIdentifier(_ item: UIBarButtonItem, isLeading: Bool, indexInTrailing: Int = 0)
+            -> String?
+        {
             if let id = item.accessibilityIdentifier, !id.isEmpty { return id }
             if let custom = item.customView {
                 if let id = firstIdentifiedDescendant(in: custom) { return id }
@@ -2709,7 +2972,14 @@ struct BrowsingLayoutTests {
             if let custom = item.customView,
                 String(describing: type(of: custom)).contains("BarItemHost")
             {
-                return isLeading ? "clove.detail.gridToggle" : "clove.grid.filter"
+                if isLeading { return "clove.detail.gridToggle" }
+                if isDetailScreen {
+                    // Expanded Duo Detail puts photoGridToggle first (before spacer & Filter);
+                    // Duo Cover Detail puts Focus regions after Filter.
+                    return indexInTrailing == 0
+                        ? "clove.detail.gridToggle" : "clove.detail.focusToggle"
+                }
+                return "clove.grid.filter"
             }
             return nil
         }
@@ -2717,7 +2987,7 @@ struct BrowsingLayoutTests {
         let navBarMaxY = navBar.map { $0.convert($0.bounds, to: window).maxY } ?? 120
         let horizontalBarButtons =
             barButtonViews
-            .filter { !usesVerticalBar || $0.frame.minY <= navBarMaxY + 8 }
+            .filter { $0.frame.minY <= navBarMaxY + 8 }
             .sorted { $0.frame.minX < $1.frame.minX }
         let verticalBarButtons =
             usesVerticalBar
@@ -2726,12 +2996,28 @@ struct BrowsingLayoutTests {
                 .sorted { $0.frame.minY < $1.frame.minY }
             : []
 
-        let allItemsInOrder: [(item: UIBarButtonItem, isLeading: Bool)] =
+        let trailingFlatItems = trailingGroups.flatMap(\.barButtonItems)
+        let trailingIndexMap: [ObjectIdentifier: Int] = Dictionary(
+            uniqueKeysWithValues: trailingFlatItems.enumerated().map {
+                (ObjectIdentifier($0.element), $0.offset)
+            })
+        func resolvedIdentifier(_ item: UIBarButtonItem, isLeading: Bool) -> String? {
+            itemIdentifier(
+                item, isLeading: isLeading,
+                indexInTrailing: trailingIndexMap[ObjectIdentifier(item)] ?? 0)
+        }
+
+        let navItems: [(item: UIBarButtonItem, isLeading: Bool)] =
             leadingGroups.flatMap(\.barButtonItems).map { ($0, true) }
             + trailingGroups.flatMap(\.barButtonItems).map { ($0, false) }
-            + bottomItems.map { ($0, false) }
+        let navPlainItems = navItems.filter {
+            $0.item.customView == nil
+                && resolvedIdentifier($0.item, isLeading: $0.isLeading) != nil
+        }
+        let allItemsInOrder: [(item: UIBarButtonItem, isLeading: Bool)] =
+            navItems + bottomItems.map { ($0, false) }
         let allPlainItems = allItemsInOrder.filter {
-            $0.item.customView == nil && itemIdentifier($0.item, isLeading: $0.isLeading) != nil
+            $0.item.customView == nil && resolvedIdentifier($0.item, isLeading: $0.isLeading) != nil
         }
 
         let horizontalOnlyIDs: Set<String> = [
@@ -2739,9 +3025,21 @@ struct BrowsingLayoutTests {
         ]
         var plainItemFrames: [ObjectIdentifier: CGRect] = [:]
         if !usesVerticalBar {
-            if allPlainItems.count == horizontalBarButtons.count {
-                for (entry, barView) in zip(allPlainItems, horizontalBarButtons) {
+            if navPlainItems.count == horizontalBarButtons.count {
+                for (entry, barView) in zip(navPlainItems, horizontalBarButtons) {
                     plainItemFrames[ObjectIdentifier(entry.item)] = barView.frame
+                }
+            }
+            let bottomPlainItems = bottomItems.filter {
+                $0.customView == nil && resolvedIdentifier($0, isLeading: false) != nil
+            }
+            let bottomBarButtons =
+                barButtonViews
+                .filter { $0.frame.minY > navBarMaxY + 8 }
+                .sorted { $0.frame.minX < $1.frame.minX }
+            if bottomPlainItems.count == bottomBarButtons.count {
+                for (item, barView) in zip(bottomPlainItems, bottomBarButtons) {
+                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
                 }
             }
         } else if horizontalBarButtons.isEmpty {
@@ -2752,11 +3050,12 @@ struct BrowsingLayoutTests {
             }
         } else {
             let horizItems = allPlainItems.filter {
-                itemIdentifier($0.item, isLeading: $0.isLeading).map(horizontalOnlyIDs.contains)
+                resolvedIdentifier($0.item, isLeading: $0.isLeading).map(horizontalOnlyIDs.contains)
                     ?? false
             }
             let vertItems = allPlainItems.filter {
-                !(itemIdentifier($0.item, isLeading: $0.isLeading).map(horizontalOnlyIDs.contains)
+                !(resolvedIdentifier($0.item, isLeading: $0.isLeading).map(
+                    horizontalOnlyIDs.contains)
                     ?? false)
             }
             if horizItems.count == horizontalBarButtons.count {
@@ -2775,7 +3074,7 @@ struct BrowsingLayoutTests {
             if let matched = plainItemFrames[ObjectIdentifier(item)] {
                 return matched
             }
-            if let id = itemIdentifier(item, isLeading: isLeading) {
+            if let id = resolvedIdentifier(item, isLeading: isLeading) {
                 if let found = overlayIdentifiers[id] { return found }
                 if let match = rawBarViews.first(where: { $0.view.accessibilityIdentifier == id }) {
                     return match.frame
@@ -2811,12 +3110,12 @@ struct BrowsingLayoutTests {
         var groupIdx = 0
         var leadingGroupIDs: [[String]] = []
         for group in leadingGroups {
-            let ids = group.barButtonItems.compactMap { itemIdentifier($0, isLeading: true) }
+            let ids = group.barButtonItems.compactMap { resolvedIdentifier($0, isLeading: true) }
             if !ids.isEmpty {
                 leadingGroupIDs.append(ids)
             }
             for item in group.barButtonItems {
-                if let id = itemIdentifier(item, isLeading: true) {
+                if let id = resolvedIdentifier(item, isLeading: true) {
                     entries.append(
                         ToolbarSnapshot.Entry(
                             identifier: id, groupIndex: groupIdx,
@@ -2828,9 +3127,9 @@ struct BrowsingLayoutTests {
         var trailingGroupIDs: [[String]] = []
         var trailingRawTokens: [String] = []
         for group in trailingGroups {
-            let ids = group.barButtonItems.compactMap { itemIdentifier($0, isLeading: false) }
+            let ids = group.barButtonItems.compactMap { resolvedIdentifier($0, isLeading: false) }
             for item in group.barButtonItems {
-                if let id = itemIdentifier(item, isLeading: false) {
+                if let id = resolvedIdentifier(item, isLeading: false) {
                     trailingRawTokens.append(id)
                     entries.append(
                         ToolbarSnapshot.Entry(
@@ -2847,7 +3146,7 @@ struct BrowsingLayoutTests {
         }
         var bottomIDs: [String] = []
         for item in bottomItems {
-            if let id = itemIdentifier(item, isLeading: false) {
+            if let id = resolvedIdentifier(item, isLeading: false) {
                 bottomIDs.append(id)
                 entries.append(
                     ToolbarSnapshot.Entry(

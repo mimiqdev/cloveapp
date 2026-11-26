@@ -344,9 +344,6 @@ struct TapPickerTests {
                         browsing: browsing,
                         duo: DuoDetailLayout(
                             presentation: $presentation.value,
-                            filter: AnyView(EmptyView()),
-                            more: AnyView(EmptyView()),
-                            bottom: AnyView(EmptyView()),
                             showsGrid: true))
                 }
                 .environment(store)

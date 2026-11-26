@@ -745,9 +745,6 @@ struct FolderPreparationPresentationTests {
                         images: SampleDetailImages(),
                         duo: DuoDetailLayout(
                             presentation: $presentation.value,
-                            filter: AnyView(EmptyView()),
-                            more: AnyView(EmptyView()),
-                            bottom: AnyView(EmptyView()),
                             showsGrid: true))
                 }
                 .environment(SettingsStore.sample)

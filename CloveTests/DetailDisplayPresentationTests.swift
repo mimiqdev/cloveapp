@@ -1359,8 +1359,7 @@ struct DetailDisplayPresentationTests {
                 DetailScreen(
                     browsing: browsing, images: images,
                     duo: DuoDetailLayout(
-                        presentation: .constant(.focus), filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()), bottom: AnyView(EmptyView()),
+                        presentation: .constant(.focus),
                         showsGrid: true))
             }
         } else {
@@ -2615,9 +2614,6 @@ struct DetailDisplayPresentationTests {
                     browsing: browsing,
                     duo: DuoDetailLayout(
                         presentation: presentation,
-                        filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()),
-                        bottom: AnyView(EmptyView()),
                         showsGrid: true))
             }
             .environment(store)
@@ -3122,9 +3118,6 @@ struct DetailDisplayPresentationTests {
                         presentation: Binding(
                             get: { presentationBox.value },
                             set: { presentationBox.value = $0 }),
-                        filter: AnyView(EmptyView()),
-                        more: AnyView(EmptyView()),
-                        bottom: AnyView(EmptyView()),
                         showsGrid: true))
             }
             .environment(store)
@@ -4672,9 +4665,6 @@ struct DetailDisplayPresentationTests {
                         images: SampleDetailImages(),
                         duo: DuoDetailLayout(
                             presentation: $presentation.value,
-                            filter: AnyView(EmptyView()),
-                            more: AnyView(EmptyView()),
-                            bottom: AnyView(EmptyView()),
                             showsGrid: true))
                 }
                 .environment(store)
@@ -4880,9 +4870,6 @@ struct DetailDisplayPresentationTests {
                         images: SampleDetailImages(),
                         duo: DuoDetailLayout(
                             presentation: $presentation.value,
-                            filter: AnyView(EmptyView()),
-                            more: AnyView(EmptyView()),
-                            bottom: AnyView(EmptyView()),
                             showsGrid: true))
                 }
                 .environment(store)
@@ -5817,9 +5804,6 @@ struct DetailDisplayPresentationTests {
                                 presentation: Binding(
                                     get: { presentationBox.value },
                                     set: { presentationBox.value = $0 }),
-                                filter: AnyView(EmptyView()),
-                                more: AnyView(EmptyView()),
-                                bottom: AnyView(EmptyView()),
                                 showsGrid: false))
                     }
                 } else {
@@ -8423,9 +8407,6 @@ private struct TestDuoDetailHost: View {
                 browsing: browsing, images: images,
                 duo: DuoDetailLayout(
                     presentation: $presentation.value,
-                    filter: AnyView(EmptyView()),
-                    more: AnyView(EmptyView()),
-                    bottom: AnyView(EmptyView()),
                     showsGrid: true))
         }
         .environment(settingsStore)
@@ -8487,9 +8468,6 @@ private struct TestDuoPoseDetailHost: View {
                 browsing: browsing, images: images,
                 duo: DuoDetailLayout(
                     presentation: $presentation.value,
-                    filter: AnyView(EmptyView()),
-                    more: AnyView(EmptyView()),
-                    bottom: AnyView(EmptyView()),
                     showsGrid: showsGrid))
         }
         .environment(settingsStore ?? fallbackStore)
