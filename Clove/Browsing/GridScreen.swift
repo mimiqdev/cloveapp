@@ -894,52 +894,16 @@ struct GridScreen: View {
     }
 
     private var filterButton: some View {
-        Group {
-            if usesSystemToolbar {
-                Button(
-                    AppLocalization.string("Filter", language: language),
-                    systemImage: "line.3.horizontal.decrease"
-                ) {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.toggleFilters()
-                }
-                .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
-                .accessibilityIdentifier("clove.grid.filter")
-            } else {
-                GlassIconButton(
-                    label: AppLocalization.string("Filter", language: language),
-                    symbol: "line.3.horizontal.decrease", isActive: hasFilter,
-                    size: isRegular ? .pad : .phone, identifier: "clove.grid.filter"
-                ) {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.toggleFilters()
-                }
-            }
-        }
-        .popover(
-            isPresented: Binding(
-                get: { filterHandoff.showsFilters && isFilterAnchorReady && scenePhase == .active },
-                set: { presented in
-                    if presented {
-                        cancelPendingMetadataFiltersHandoff()
-                    }
-                    filterHandoff.setFiltersPresented(presented)
-                })
-        ) {
-            filterMenu
-                .presentationCompactAdaptation(.popover)
-                .onDisappear {
-                    completeMetadataFiltersHandoffIfPending()
-                }
-        }
-        .onAppear {
-            filterAnchorAttachments += 1
-        }
-        .onDisappear {
-            filterAnchorAttachments = max(0, filterAnchorAttachments - 1)
-            if filterAnchorAttachments == 0 {
-                filterHandoff.setFiltersPresented(false)
-            }
+        PhotoFilterPopoverButton(
+            browsing: browsing,
+            controlSize: isRegular ? .pad : .phone,
+            identifierPrefix: "clove.grid.filter",
+            filterHandoff: $filterHandoff,
+            canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
+            onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
+            onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
+        ) { delta in
+            filterAnchorAttachments = max(0, filterAnchorAttachments + delta)
         }
     }
 
@@ -993,126 +957,6 @@ struct GridScreen: View {
         }
         .accessibilityLabel(AppLocalization.string("More", language: language))
         .accessibilityIdentifier("clove.grid.more")
-    }
-
-    private var filterMenu: some View {
-        VStack(spacing: 0) {
-            filterRow(
-                AppLocalization.string("All", language: language), filter: .all, identifier: "all")
-            filterRow(
-                AppLocalization.string("Unmarked", language: language), filter: .unmarked,
-                identifier: "unmarked")
-            filterRow(
-                AppLocalization.string("Rejected", language: language), filter: .rejected,
-                identifier: "rejected")
-            Divider().overlay(Color.clove.separator)
-            HStack {
-                Text(AppLocalization.string("Rating ≥", language: language))
-                Spacer()
-                FilterStarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") {
-                    rating in
-                    browsing.setFilter(rating == .unrated ? .all : .ratedAtLeast(rating))
-                    filterHandoff.setFiltersPresented(false)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            HStack(spacing: 12) {
-                Text(AppLocalization.string("Label", language: language))
-                Spacer()
-                ForEach(LabelColour.allCases.filter { !$0.isExtended }, id: \.self) { label in
-                    Button {
-                        browsing.setLabelFilter(label)
-                        filterHandoff.setFiltersPresented(false)
-                    } label: {
-                        Circle().fill(Color.clove.label.colour(for: label))
-                            .frame(width: 16, height: 16)
-                            .frame(height: 32)
-                    }
-                    .accessibilityLabel(
-                        AppLocalization.format(
-                            "Label, %@", language: language,
-                            AppLocalization.colourName(label, language: language))
-                    )
-                    .accessibilityIdentifier(
-                        "clove.grid.filter.label.\(label.rawValue.lowercased())")
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            if browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty {
-                Divider().overlay(Color.clove.separator)
-                Button {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.requestMetadataFiltersFromPopover(folder: browsing.state.folder)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "slider.horizontal.3")
-                            .frame(width: 16)
-                            .foregroundStyle(
-                                browsing.metadataFilter.isEmpty
-                                    ? Color.clove.text.secondary : Color.clove.accent)
-                        Text(AppLocalization.string("More filters", language: language))
-                        Spacer()
-                        if !browsing.metadataFilter.isEmpty {
-                            Text(
-                                browsing.metadataFilter.activeCount.formatted(
-                                    .number.locale(language.locale))
-                            )
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Color.clove.accent, in: Capsule())
-                            .accessibilityIdentifier("clove.grid.filter.more.badge")
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.clove.text.secondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 42)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("clove.grid.filter.more")
-            }
-        }
-        .font(.subheadline)
-        .foregroundStyle(Color.clove.text.primary)
-        .frame(width: 280)
-        .background(Color.clove.surface.sheet)
-    }
-
-    private func filterRow(_ name: String, filter: PhotoFilter, identifier: String) -> some View {
-        Button {
-            browsing.setFilter(filter)
-            filterHandoff.setFiltersPresented(false)
-        } label: {
-            HStack {
-                Image(systemName: "checkmark")
-                    .opacity(browsing.state.filter == filter && browsing.labelFilter == nil ? 1 : 0)
-                    .frame(width: 16)
-                Text(name)
-                Spacer()
-                Text(
-                    browsing.allPlacedPhotos.filter {
-                        filter.matches($0.marks, relativeFolderPath: $0.id.relativeFolderPath)
-                    }.count.formatted(.number.locale(language.locale))
-                )
-                .foregroundStyle(Color.clove.text.secondary)
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 40)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("clove.grid.filter.\(identifier)")
-    }
-
-    private var minimumRating: Rating {
-        if case .ratedAtLeast(let rating) = browsing.state.filter { return rating }
-        return .unrated
     }
 
     private var hasFilter: Bool { browsing.hasActiveFilter }
@@ -1272,7 +1116,7 @@ struct GridScreen: View {
     private var canPresentMetadataFiltersFromPopover: Bool {
         !isRegular
             && (browsing.state.route == .grid
-                || (isDuoExpanded && browsing.state.route == .detail
+                || (usesDock && browsing.state.route == .detail
                     && browsing.compareSession == nil))
     }
 
@@ -1290,19 +1134,19 @@ struct GridScreen: View {
 
     private func completeMetadataFiltersHandoffIfPending() {
         guard filterHandoff.pendingMetadataFiltersAfterPopover else { return }
-        popoverHandoffTask?.cancel()
-        popoverHandoffTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            if filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
-                currentFolder: browsing.state.folder,
-                isSceneActive: scenePhase == .active,
-                canPresent: canPresentMetadataFiltersFromPopover)
-            {
-                activeSheet = .metadataFilters
-            }
-            popoverHandoffTask = nil
-        }
+        let expectedFolder = browsing.state.folder
+        PhotoFilterPopoverButton.scheduleMetadataFiltersHandoff(
+            handoffTask: &popoverHandoffTask,
+            canPresent: { true },
+            consume: {
+                filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
+                    currentFolder: browsing.state.folder,
+                    isSceneActive: scenePhase == .active,
+                    canPresent: canPresentMetadataFiltersFromPopover
+                        && browsing.state.folder == expectedFolder)
+            },
+            present: { activeSheet = .metadataFilters },
+            clearTask: { popoverHandoffTask = nil })
     }
 
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {

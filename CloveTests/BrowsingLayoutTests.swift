@@ -1640,13 +1640,14 @@ struct BrowsingLayoutTests {
                     identifier: "clove.detail.gridToggle", in: host, window: window)
                 && self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
                 && self.hasToolbarItem(identifier: "clove.grid.more", in: host, window: window)
-                && self.hasToolbarItem(identifier: "clove.detail.info", in: host, window: window)
                 && (self.hasToolbarItem(identifier: "clove.duo.undo", in: host, window: window)
                     || self.hasToolbarItem(
                         identifier: "clove.detail.undo", in: host, window: window))
         }
 
         let snapshot = inspectToolbarState(in: host, window: window)
+        #expect(!snapshot.contains("clove.detail.info"))
+        #expect(!snapshot.contains("clove.detail.preparation"))
         let backFrame = try #require(
             snapshot.frame(for: "clove.nav.back"),
             Comment(rawValue: "missing back in \(snapshot.description)"))
@@ -1659,9 +1660,6 @@ struct BrowsingLayoutTests {
         let moreFrame = try #require(
             snapshot.frame(for: "clove.grid.more"),
             Comment(rawValue: "missing more in \(snapshot.description)"))
-        let infoFrame = try #require(
-            snapshot.frame(for: "clove.detail.info"),
-            Comment(rawValue: "missing info in \(snapshot.description)"))
         let moveRejectsFrame = try #require(
             snapshot.frame(for: "clove.grid.moveRejects"),
             Comment(rawValue: "missing moveRejects in \(snapshot.description)"))
@@ -1689,18 +1687,16 @@ struct BrowsingLayoutTests {
                     rawValue:
                         "expected standalone gap between gridToggle and tools capsule: \(snapshot.description)"
                 ))
-            // Filter -> More -> Info share a single capsule (~14pt internal gap); Compare & Focus live
-            // in the bottom-left Detail inspection pill instead of the dock (#463).
+            // Filter -> More share the view tools capsule (~14pt internal gap); Compare & Focus live
+            // in the bottom-left Detail inspection pill and Info lives on the viewport scrim (#462, #463).
             #expect(filterFrame.maxY < moreFrame.minY)
             #expect(moreFrame.minY - filterFrame.maxY <= 16)
-            #expect(moreFrame.maxY < infoFrame.minY)
-            #expect(infoFrame.minY - moreFrame.maxY <= 16)
             #expect(!snapshot.contains("clove.detail.compare"))
-            #expect(infoFrame.maxY < undoFrame.minY)
+            #expect(moreFrame.maxY < undoFrame.minY)
             #expect(undoFrame.maxY < moveRejectsFrame.minY)
             #expect(moveRejectsFrame.minY - undoFrame.maxY <= 16)
 
-            // Toolbar tokens verify photoGridToggle sits before a spacer preceding Filter/More/Info.
+            // Toolbar tokens verify photoGridToggle sits before a spacer preceding Filter/More.
             #expect(snapshot.leadingIDs == ["clove.nav.back"])
             let toggleIdx = try #require(
                 snapshot.trailingRawTokens.firstIndex(of: "clove.detail.gridToggle"))
@@ -1712,7 +1708,6 @@ struct BrowsingLayoutTests {
             #expect(
                 snapshot.trailingIDs == [
                     "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
-                    "clove.detail.info",
                 ])
             #expect(snapshot.bottomToolbarIDs == ["clove.duo.undo", "clove.grid.moveRejects"])
         } else {
@@ -1722,17 +1717,16 @@ struct BrowsingLayoutTests {
             #expect(backFrame.maxX <= toggleFrame.minX + 2)
             #expect(toggleFrame.maxX < filterFrame.minX)
             #expect(filterFrame.maxX <= moreFrame.minX + 2)
-            #expect(moreFrame.maxX <= infoFrame.minX + 2)
             #expect(!snapshot.contains("clove.detail.compare"))
             #expect(
                 snapshot.trailingIDs == [
-                    "clove.grid.filter", "clove.grid.more", "clove.detail.info",
+                    "clove.grid.filter", "clove.grid.more",
                     "clove.detail.undo", "clove.grid.moveRejects",
                 ])
         }
 
-        // Non-system BrowsingHeader fallback keeps photoGridToggle/Back in header while Focus and
-        // Compare live in the bottom-left inspection pill (#463).
+        // Non-system BrowsingHeader fallback keeps photoGridToggle/Back leading, centered tappable
+        // filename Info button (>= 44 pt), Filter + Undo trailing, and Focus/Compare in bottom pill (#462, #463).
         let fallbackFrames = TestHeaderFramesBox()
         let fallbackWindow = UIWindow(windowScene: scene)
         fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
@@ -1756,15 +1750,20 @@ struct BrowsingLayoutTests {
         try await waitFor("fallback detail header did not mount") {
             fallbackFrames.frames["clove.nav.back"] != nil
                 && fallbackFrames.frames["clove.detail.info"] != nil
+                && fallbackFrames.frames["clove.detail.fileName"] != nil
+                && fallbackFrames.frames["clove.detail.filter"] != nil
                 && fallbackFrames.frames["clove.detail.focusToggle"] != nil
                 && fallbackFrames.frames["clove.detail.compare"] != nil
         }
         if let fBack = fallbackFrames.frames["clove.nav.back"],
             let fFocus = fallbackFrames.frames["clove.detail.focusToggle"],
             let fCompare = fallbackFrames.frames["clove.detail.compare"],
-            let fInfo = fallbackFrames.frames["clove.detail.info"]
+            let fInfo = fallbackFrames.frames["clove.detail.info"],
+            let fFilter = fallbackFrames.frames["clove.detail.filter"]
         {
             #expect(fBack.maxX <= fInfo.minX)
+            #expect(fInfo.width >= 44 && fInfo.height >= 44)
+            #expect(fInfo.maxX <= fFilter.minX + 1)
             #expect(fFocus.minY > fBack.maxY)
             #expect(fCompare.minY > fBack.maxY)
             #expect(fFocus.maxX <= fCompare.minX + 2)
@@ -2069,7 +2068,8 @@ struct BrowsingLayoutTests {
             #expect(!snapshot.contains("clove.grid.undo"))
         }
 
-        // 4. Native iPad Detail keeps navigationTools (Back + photoGridToggle) without top Focus/Compare (#463).
+        // 4. Native iPad Detail keeps navigationTools (Back + photoGridToggle) and Filter without
+        // top Focus/Compare/standalone Info (#462, #463).
         do {
             let photo = try #require(model.photos.first?.id)
             model.openPhoto(photo)
@@ -2099,10 +2099,90 @@ struct BrowsingLayoutTests {
                 ) {
                     let state = self.inspectToolbarState(in: host, window: window)
                     return state.rawLeadingItemCount == 2
-                        && state.contains("clove.detail.info")
+                        && (state.contains("clove.grid.filter")
+                            || state.contains("clove.detail.filter"))
+                        && state.contains("clove.detail.undo")
+                        && !state.entries.contains { $0.identifier == "clove.detail.info" }
                         && !state.contains("clove.detail.compare")
                         && !state.contains("clove.detail.focusToggle")
                 }
+                let navBar = try #require(findNavigationBar(in: window))
+                let titleFrame = try #require(centerBarGroupFrame(in: navBar, relativeTo: window))
+                #expect(titleFrame.width >= 44 && titleFrame.height >= 44)
+            }
+        }
+
+        // 5. Native iPhone Detail exposes Filter alongside Undo without standalone Info,
+        //    and live filter updates in Detail handle matching, non-matching, and empty results.
+        do {
+            let photo = try #require(model.photos.first?.id)
+            model.openPhoto(photo)
+            defer {
+                model.clearAllFilters()
+                model.back()
+            }
+            let frames = TestHeaderFramesBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            let host = UIHostingController(
+                rootView: NavigationStack {
+                    DetailScreen(browsing: model)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, false)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames.frames = $0 })
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "iPhone Detail toolbar did not mount: \(self.describeToolbarState(in: host, window: window))"
+            ) {
+                let state = self.inspectToolbarState(in: host, window: window)
+                return state.rawLeadingItemCount == 2
+                    && state.leadingIDs.first == "clove.nav.back"
+                    && (state.contains("clove.grid.filter")
+                        || state.contains("clove.detail.filter"))
+                    && state.contains("clove.detail.undo")
+                    && !state.entries.contains { $0.identifier == "clove.detail.info" }
+            }
+            let navBar = try #require(findNavigationBar(in: window))
+            let titleFrame = try #require(centerBarGroupFrame(in: navBar, relativeTo: window))
+            #expect(titleFrame.width >= 44 && titleFrame.height >= 44)
+
+            // Filtering to Rejected snaps Detail live onto a matching photo, and an unmatched
+            // filter combination displays empty-filtered Detail cleanly without crashing.
+            model.setFilter(.rejected)
+            try await waitFor("Detail did not snap onto matching filtered photo") {
+                model.state.currentPhoto != nil
+                    && model.photos.contains(where: { $0.id == model.state.currentPhoto })
+            }
+            let five = try #require(Rating(rawValue: 5))
+            model.setFilter(.ratedAtLeast(five))
+            model.setLabelFilter(.purple)
+            model.toggleCameraFilter("NonExistentCameraModel")
+            try await waitFor("Detail empty filtered state did not render") {
+                model.photos.isEmpty
+                    && (self.inspectToolbarState(in: host, window: window)
+                        .contains("clove.detail.empty")
+                        || self.inspectToolbarState(in: host, window: window)
+                            .contains("clove.detail.empty.clearFilters")
+                        || !self.inspectToolbarState(in: host, window: window)
+                            .contains("clove.detail.undo"))
+            }
+            model.clearAllFilters()
+            try await waitFor("Detail did not restore after clearing filters") {
+                !model.photos.isEmpty
+                    && model.state.currentPhoto != nil
+                    && self.inspectToolbarState(in: host, window: window)
+                        .contains("clove.detail.undo")
             }
         }
     }
@@ -2317,7 +2397,7 @@ struct BrowsingLayoutTests {
             }
         }
 
-        func itemIdentifier(_ item: UIBarButtonItem) -> String? {
+        func itemIdentifier(_ item: UIBarButtonItem, isLeading: Bool) -> String? {
             if let id = item.accessibilityIdentifier, !id.isEmpty { return id }
             if let custom = item.customView {
                 if let id = firstIdentifiedDescendant(in: custom) { return id }
@@ -2334,7 +2414,7 @@ struct BrowsingLayoutTests {
             if let custom = item.customView,
                 String(describing: type(of: custom)).contains("BarItemHost")
             {
-                return "clove.detail.gridToggle"
+                return isLeading ? "clove.detail.gridToggle" : "clove.grid.filter"
             }
             return nil
         }
@@ -2351,10 +2431,12 @@ struct BrowsingLayoutTests {
                 .sorted { $0.frame.minY < $1.frame.minY }
             : []
 
-        let allItemsInOrder =
-            (leadingGroups + trailingGroups).flatMap(\.barButtonItems) + bottomItems
+        let allItemsInOrder: [(item: UIBarButtonItem, isLeading: Bool)] =
+            leadingGroups.flatMap(\.barButtonItems).map { ($0, true) }
+            + trailingGroups.flatMap(\.barButtonItems).map { ($0, false) }
+            + bottomItems.map { ($0, false) }
         let allPlainItems = allItemsInOrder.filter {
-            $0.customView == nil && itemIdentifier($0) != nil
+            $0.item.customView == nil && itemIdentifier($0.item, isLeading: $0.isLeading) != nil
         }
 
         let horizontalOnlyIDs: Set<String> = [
@@ -2363,40 +2445,42 @@ struct BrowsingLayoutTests {
         var plainItemFrames: [ObjectIdentifier: CGRect] = [:]
         if !usesVerticalBar {
             if allPlainItems.count == horizontalBarButtons.count {
-                for (item, barView) in zip(allPlainItems, horizontalBarButtons) {
-                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                for (entry, barView) in zip(allPlainItems, horizontalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(entry.item)] = barView.frame
                 }
             }
         } else if horizontalBarButtons.isEmpty {
             if allPlainItems.count == verticalBarButtons.count {
-                for (item, barView) in zip(allPlainItems, verticalBarButtons) {
-                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                for (entry, barView) in zip(allPlainItems, verticalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(entry.item)] = barView.frame
                 }
             }
         } else {
             let horizItems = allPlainItems.filter {
-                itemIdentifier($0).map(horizontalOnlyIDs.contains) ?? false
+                itemIdentifier($0.item, isLeading: $0.isLeading).map(horizontalOnlyIDs.contains)
+                    ?? false
             }
             let vertItems = allPlainItems.filter {
-                !(itemIdentifier($0).map(horizontalOnlyIDs.contains) ?? false)
+                !(itemIdentifier($0.item, isLeading: $0.isLeading).map(horizontalOnlyIDs.contains)
+                    ?? false)
             }
             if horizItems.count == horizontalBarButtons.count {
-                for (item, barView) in zip(horizItems, horizontalBarButtons) {
-                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                for (entry, barView) in zip(horizItems, horizontalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(entry.item)] = barView.frame
                 }
             }
             if vertItems.count == verticalBarButtons.count {
-                for (item, barView) in zip(vertItems, verticalBarButtons) {
-                    plainItemFrames[ObjectIdentifier(item)] = barView.frame
+                for (entry, barView) in zip(vertItems, verticalBarButtons) {
+                    plainItemFrames[ObjectIdentifier(entry.item)] = barView.frame
                 }
             }
         }
 
-        func frameForBarItem(_ item: UIBarButtonItem) -> CGRect? {
+        func frameForBarItem(_ item: UIBarButtonItem, isLeading: Bool) -> CGRect? {
             if let matched = plainItemFrames[ObjectIdentifier(item)] {
                 return matched
             }
-            if let id = itemIdentifier(item) {
+            if let id = itemIdentifier(item, isLeading: isLeading) {
                 if let found = overlayIdentifiers[id] { return found }
                 if let match = rawBarViews.first(where: { $0.view.accessibilityIdentifier == id }) {
                     return match.frame
@@ -2432,15 +2516,16 @@ struct BrowsingLayoutTests {
         var groupIdx = 0
         var leadingGroupIDs: [[String]] = []
         for group in leadingGroups {
-            let ids = group.barButtonItems.compactMap(itemIdentifier)
+            let ids = group.barButtonItems.compactMap { itemIdentifier($0, isLeading: true) }
             if !ids.isEmpty {
                 leadingGroupIDs.append(ids)
             }
             for item in group.barButtonItems {
-                if let id = itemIdentifier(item) {
+                if let id = itemIdentifier(item, isLeading: true) {
                     entries.append(
                         ToolbarSnapshot.Entry(
-                            identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+                            identifier: id, groupIndex: groupIdx,
+                            frame: frameForBarItem(item, isLeading: true)))
                 }
             }
             if !ids.isEmpty { groupIdx += 1 }
@@ -2448,13 +2533,14 @@ struct BrowsingLayoutTests {
         var trailingGroupIDs: [[String]] = []
         var trailingRawTokens: [String] = []
         for group in trailingGroups {
-            let ids = group.barButtonItems.compactMap(itemIdentifier)
+            let ids = group.barButtonItems.compactMap { itemIdentifier($0, isLeading: false) }
             for item in group.barButtonItems {
-                if let id = itemIdentifier(item) {
+                if let id = itemIdentifier(item, isLeading: false) {
                     trailingRawTokens.append(id)
                     entries.append(
                         ToolbarSnapshot.Entry(
-                            identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+                            identifier: id, groupIndex: groupIdx,
+                            frame: frameForBarItem(item, isLeading: false)))
                 } else if item.customView == nil {
                     trailingRawTokens.append("<spacer>")
                 }
@@ -2466,11 +2552,12 @@ struct BrowsingLayoutTests {
         }
         var bottomIDs: [String] = []
         for item in bottomItems {
-            if let id = itemIdentifier(item) {
+            if let id = itemIdentifier(item, isLeading: false) {
                 bottomIDs.append(id)
                 entries.append(
                     ToolbarSnapshot.Entry(
-                        identifier: id, groupIndex: groupIdx, frame: frameForBarItem(item)))
+                        identifier: id, groupIndex: groupIdx,
+                        frame: frameForBarItem(item, isLeading: false)))
             }
         }
 

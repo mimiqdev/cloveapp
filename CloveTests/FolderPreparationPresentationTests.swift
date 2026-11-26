@@ -713,7 +713,8 @@ struct FolderPreparationPresentationTests {
         }
     }
 
-    @Test func inlineDetailRingDoesNotCollideWithDuoFocusToggleAndKeeps44PtHitTarget() async throws
+    @Test func inlineDetailProgressBarDoesNotCollideWithDuoFocusToggleAndHidesWhenComplete()
+        async throws
     {
         guard #available(iOS 27.1, *) else { return }
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
@@ -771,8 +772,9 @@ struct FolderPreparationPresentationTests {
             window.rootViewController = nil
         }
 
-        try await waitFor("Duo viewport preparation and focus controls laid out") {
-            frameBox.frames["clove.detail.preparation"] != nil
+        try await waitFor("Duo viewport inline preparation bar and identity laid out") {
+            frameBox.frames["clove.detail.preparation.progress"] != nil
+                && frameBox.frames["clove.detail.info"] != nil
                 && frameBox.frames["clove.detail.focusToggle"] != nil
                 && frameBox.frames["clove.detail.photoCornerOverlay"] != nil
                 && frameBox.frames["clove.detail.fileName"] != nil
@@ -783,30 +785,35 @@ struct FolderPreparationPresentationTests {
         let preview = try #require(findPreview(in: window))
         let previewRect = preview.convert(preview.bounds, to: window)
         let overlay = try #require(frameBox.frames["clove.detail.photoCornerOverlay"])
-        let prep = try #require(frameBox.frames["clove.detail.preparation"])
+        let infoButton = try #require(frameBox.frames["clove.detail.info"])
+        let prepBar = try #require(frameBox.frames["clove.detail.preparation.progress"])
         let focus = try #require(frameBox.frames["clove.detail.focusToggle"])
         let fileName = try #require(frameBox.frames["clove.detail.fileName"])
         let zoom = try #require(frameBox.frames["clove.detail.zoom"])
 
         #expect(frameBox.frames["clove.detail.photoHeader"] == nil)
-        #expect(prep.width >= 43)
-        #expect(prep.height >= 43)
-        #expect(!prep.intersects(focus))
-        #expect(!prep.intersects(overlay))
-        #expect(overlay.maxX < prep.minX)
+        #expect(frameBox.frames["clove.detail.preparation"] == nil)
+        #expect(infoButton.width >= 44 && infoButton.height >= 44)
+        #expect(prepBar.width >= 28 && prepBar.width <= 40)
+        #expect(abs(prepBar.height - 3) <= 0.5)
+        #expect(prepBar.minY >= fileName.maxY - 1)
+        #expect(prepBar.minX >= zoom.maxX)
+        #expect(prepBar.maxX <= overlay.maxX)
+        #expect(!overlay.intersects(focus))
+        #expect(!prepBar.intersects(focus))
         #expect(abs(overlay.minX - (previewRect.minX + 16)) <= 1.5)
         #expect(abs(overlay.minY - (previewRect.minY + 12)) <= 1.5)
-        #expect(focus.minY > prep.maxY)
-        #expect(abs(prep.minY - (previewRect.minY + 12)) <= 1.5)
+        #expect(focus.minY > overlay.maxY)
         #expect(fileName.maxY <= zoom.minY + 1)
         #expect(abs(fileName.minX - zoom.minX) <= 2)
         #expect(frameBox.frames["clove.detail.saveState"] == nil)
-        // Floating preparation button receives hits cleanly over the viewport.
-        let prepHit = window.hitTest(CGPoint(x: prep.midX, y: prep.midY), with: nil)
-        #expect(prepHit != nil)
-        #expect(prepHit?.isDescendant(of: preview) == false)
 
-        // Switching to Focus View preserves the floating viewport controls without collision.
+        // Tappable identity badge intercepts hits cleanly over the viewport.
+        let infoHit = window.hitTest(CGPoint(x: overlay.midX, y: overlay.midY), with: nil)
+        #expect(infoHit != nil)
+        #expect(infoHit?.isDescendant(of: preview) == false)
+
+        // Switching to Focus View preserves the inline preparation bar and tappable badge.
         presentationBox.value = .focus
         let photoPreviewOverlayMinX = overlay.minX
         try await waitFor("Focus View viewport overlay did not lay out") {
@@ -824,36 +831,182 @@ struct FolderPreparationPresentationTests {
         let previewInFocus = try #require(findPreview(in: window))
         let focusPreviewRect = previewInFocus.convert(previewInFocus.bounds, to: window)
         let overlayInFocus = try #require(frameBox.frames["clove.detail.photoCornerOverlay"])
-        let prepInFocus = try #require(frameBox.frames["clove.detail.preparation"])
+        let prepBarInFocus = try #require(frameBox.frames["clove.detail.preparation.progress"])
         let focusInFocus = try #require(frameBox.frames["clove.detail.focusToggle"])
         let fileInFocus = try #require(frameBox.frames["clove.detail.fileName"])
         let zoomInFocus = try #require(frameBox.frames["clove.detail.zoom"])
 
         #expect(frameBox.frames["clove.detail.photoHeader"] == nil)
-        #expect(prepInFocus.width >= 43)
-        #expect(prepInFocus.height >= 43)
-        #expect(!prepInFocus.intersects(focusInFocus))
-        #expect(!prepInFocus.intersects(overlayInFocus))
-        #expect(overlayInFocus.maxX < prepInFocus.minX)
-        #expect(focusInFocus.minY > prepInFocus.maxY)
+        #expect(frameBox.frames["clove.detail.preparation"] == nil)
+        #expect(!overlayInFocus.intersects(focusInFocus))
+        #expect(prepBarInFocus.minY >= fileInFocus.maxY - 1)
+        #expect(prepBarInFocus.minX >= zoomInFocus.maxX)
+        #expect(focusInFocus.minY > overlayInFocus.maxY)
         #expect(abs(overlayInFocus.minX - (focusPreviewRect.minX + 16)) <= 1.5)
         #expect(abs(overlayInFocus.minY - (focusPreviewRect.minY + 12)) <= 1.5)
-        #expect(abs(prepInFocus.minY - (focusPreviewRect.minY + 12)) <= 1.5)
-        #expect(fileInFocus.maxY <= zoomInFocus.minY + 1)
 
-        // Dismissing preparation completion does not resize the stage or shift the fitted image.
-        let stageBeforeDismiss = previewInFocus.convert(previewInFocus.bounds, to: window)
-        let fitBeforeDismiss = previewInFocus.imageRectAtFit()
-        browsing.dismissPreparationCompletion(
-            folder: browsing.preparationStatus.folder,
-            generation: browsing.preparationStatus.generation)
-        try await Task.sleep(for: .milliseconds(80))
-        let stageAfterDismiss = previewInFocus.convert(previewInFocus.bounds, to: window)
-        let fitAfterDismiss = previewInFocus.imageRectAtFit()
-        #expect(abs(stageAfterDismiss.minY - stageBeforeDismiss.minY) <= 0.5)
-        #expect(abs(stageAfterDismiss.height - stageBeforeDismiss.height) <= 0.5)
-        #expect(abs(fitAfterDismiss.width - fitBeforeDismiss.width) <= 0.5)
-        #expect(abs(fitAfterDismiss.height - fitBeforeDismiss.height) <= 0.5)
+        // Completing preparation removes the transient inline bar automatically without resizing stage.
+        let stageBeforeComplete = previewInFocus.convert(previewInFocus.bounds, to: window)
+        let fitBeforeComplete = previewInFocus.imageRectAtFit()
+        let stageAfter = previewInFocus.convert(previewInFocus.bounds, to: window)
+        let fitAfter = previewInFocus.imageRectAtFit()
+        #expect(abs(stageAfter.minY - stageBeforeComplete.minY) <= 0.5)
+        #expect(abs(stageAfter.height - stageBeforeComplete.height) <= 0.5)
+        #expect(abs(fitAfter.width - fitBeforeComplete.width) <= 0.5)
+        #expect(abs(fitAfter.height - fitBeforeComplete.height) <= 0.5)
+    }
+
+    @Test func inlineProgressBarShowsDuringGroupingAndHidesWhenPreparationFinishesOnPhoneHeader()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let stubLibrary = GroupingPresentationStubLibrary(initialPhaseIdle: false)
+        let browsing = BrowsingModel(library: stubLibrary)
+        browsing.openFolder()
+        try await waitFor("stub folder opened") {
+            browsing.preparationStatus.totalPhotos == 12
+        }
+        let sampleLibrary = TestLibrary.sample()
+        let stubPhoto = try #require(sampleLibrary.photos.first)
+        var initialPreparing = FolderPreparationStatus(
+            folder: stubLibrary.folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: nil,
+            totalPhotos: 12,
+            analysis: FolderPreparationTaskCounts(completed: 6),
+            previews: FolderPreparationTaskCounts(completed: 6),
+            readyForBothCount: 6,
+            bothSettledCount: 6,
+            issues: [])
+        stubLibrary.emit(.preparation(initialPreparing))
+        try await waitFor("stub folder entered preparing phase") {
+            browsing.preparationStatus.phase == .preparing
+        }
+
+        let frameBox = FrameStoreBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let timeline = DetailTimeline(photos: [stubPhoto], groups: [], groupsEnabled: false)
+        let host = UIHostingController(
+            rootView: DetailMarkingView(
+                browsing: browsing,
+                photo: stubPhoto,
+                settings: SettingsStore.sample.settings,
+                images: SampleDetailImages(),
+                timeline: timeline,
+                expandedGroup: nil,
+                order: [stubPhoto],
+                actions: DetailMarkingActions(
+                    apply: { _, _ in }, marked: { _, _, _ in }, step: { _ in },
+                    markingSwipeBegan: {})
+            )
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .environment(\.usesSystemBrowsingToolbar, false)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frameBox.frames = $0 })
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("phone detail header inline progress bar laid out") {
+            frameBox.frames["clove.detail.preparation.progress"] != nil
+                && frameBox.frames["clove.detail.info"] != nil
+                && frameBox.frames["clove.detail.zoom"] != nil
+                && frameBox.frames["clove.detail.filter"] != nil
+        }
+        #expect(frameBox.frames["clove.detail.preparation"] == nil)
+        let info = try #require(frameBox.frames["clove.detail.info"])
+        let zoom = try #require(frameBox.frames["clove.detail.zoom"])
+        let progress = try #require(frameBox.frames["clove.detail.preparation.progress"])
+        #expect(info.width >= 44 && info.height >= 44)
+        #expect(progress.minX >= zoom.maxX)
+        #expect(abs(progress.height - 3) <= 0.5)
+
+        // Finishing preparation removes the transient Row 2 progress bar immediately.
+        initialPreparing.analysis.completed = 12
+        initialPreparing.previews.completed = 12
+        initialPreparing.readyForBothCount = 12
+        initialPreparing.bothSettledCount = 12
+        stubLibrary.emit(.preparation(initialPreparing))
+        try await waitFor("inline progress bar did not disappear upon completion") {
+            browsing.preparationStatus.phase == .complete
+                && frameBox.frames["clove.detail.preparation.progress"] == nil
+        }
+    }
+
+    @Test func preparationAccessibilityHelpersMatchActivePausedAndIssueStates() {
+        let idle = FolderPreparationStatus.idle
+        #expect(!FolderPreparationAccessibility.isActive(for: idle, isGroupingInProgress: false))
+        #expect(
+            !FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                for: idle, isGroupingInProgress: false))
+        #expect(FolderPreparationAccessibility.isActive(for: idle, isGroupingInProgress: true))
+        #expect(
+            FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                for: idle, isGroupingInProgress: true))
+
+        var preparing = FolderPreparationStatus.idle
+        preparing.totalPhotos = 10
+        preparing.readyForBothCount = 4
+        #expect(
+            FolderPreparationAccessibility.isActive(for: preparing, isGroupingInProgress: false))
+        #expect(
+            FolderPreparationAccessibility.inlineProgressFraction(
+                for: preparing, isGroupingInProgress: false, groupingProgress: .idle) == 0.4)
+        #expect(
+            FolderPreparationAccessibility.infoSheetSummaryText(
+                for: preparing, isGroupingInProgress: false, groupingProgress: .idle)
+                == "4 of 10 ready")
+
+        var paused = preparing
+        paused.waitingReason = .memoryPressure
+        #expect(!FolderPreparationAccessibility.isActive(for: paused, isGroupingInProgress: false))
+        #expect(
+            FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                for: paused, isGroupingInProgress: false))
+        #expect(
+            FolderPreparationAccessibility.infoSheetSummaryText(
+                for: paused, isGroupingInProgress: false, groupingProgress: .idle)
+                == "Paused for memory")
+
+        var complete = FolderPreparationStatus.idle
+        complete.totalPhotos = 10
+        complete.readyForBothCount = 10
+        complete.bothSettledCount = 10
+        #expect(
+            !FolderPreparationAccessibility.isActive(for: complete, isGroupingInProgress: false))
+        #expect(
+            !FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                for: complete, isGroupingInProgress: false))
+
+        var completeWithIssues = complete
+        completeWithIssues.analysis.failed = 2
+        completeWithIssues.issues = [
+            FolderPreparationIssue(
+                photo: PhotoIdentity(
+                    folderID: FolderIdentity(rawValue: "f"), relativeFolderPath: "", stem: "a"),
+                fileName: "a.ARW",
+                task: .analysis,
+                reason: "Failed")
+        ]
+        #expect(
+            !FolderPreparationAccessibility.isActive(
+                for: completeWithIssues, isGroupingInProgress: false))
+        #expect(
+            FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                for: completeWithIssues, isGroupingInProgress: false))
+        #expect(
+            FolderPreparationAccessibility.infoSheetSummaryText(
+                for: completeWithIssues, isGroupingInProgress: false, groupingProgress: .idle)
+                == "2 issues")
     }
 
     @Test func floatingDuoPreparationRingOpensPopoverAndHidingItDoesNotResizeStage() async throws {

@@ -179,4 +179,27 @@ struct PhotoInformationSheetTests {
         #expect(implicitHost.view != nil)
         #expect(explicitHost.view != nil)
     }
+
+    @Test func infoSheetHostsPreparationRowForPreparingPausedIssuesAndHiddenWhenComplete() throws {
+        for mode in ["preparing", "waiting_pressure", "waiting_disconnected", "issues", "complete"]
+        {
+            let library = TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    TestLibrary.preparationVariable: mode,
+                ])
+            let model = BrowsingModel(library: library)
+            model.openFolder()
+            let photo = try #require(model.photos.first)
+            let expectedVisible = mode != "complete"
+            #expect(
+                FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                    for: model.preparationStatus,
+                    isGroupingInProgress: model.isGroupingInProgress) == expectedVisible)
+            let host = UIHostingController(
+                rootView: PhotoInformationSheet(browsing: model, photo: photo))
+            host.loadViewIfNeeded()
+            #expect(host.view != nil)
+        }
+    }
 }

@@ -202,11 +202,11 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.detail.filmstrip.mmq02680").tap()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
 
-        if #available(iOS 27.1, *) {
-            XCTAssertTrue(element(app, "clove.detail.info").isHittable)
-        } else {
-            XCTAssertEqual(element(app, "clove.detail.info").frame.width, 40, accuracy: 1)
-        }
+        let infoButton = element(app, "clove.detail.info")
+        XCTAssertTrue(infoButton.isHittable)
+        XCTAssertGreaterThanOrEqual(infoButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(infoButton.frame.height, 44)
+        XCTAssertTrue(element(app, "clove.detail.filter").isHittable)
         rate(3, in: app)
         XCTAssertTrue(String(describing: capsule.value).contains("3 stars"))
         rate(3, in: app)
@@ -252,10 +252,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), capsule))
         XCTAssertGreaterThan(preview.frame.height, stageFrame.height)
-        XCTAssertFalse(element(app, "clove.detail.info").exists)
+        XCTAssertFalse(element(app, "clove.detail.filter").exists)
         centre.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), capsule))
+        XCTAssertTrue(element(app, "clove.detail.filter").exists)
         assertSameFrame(preview.frame, stageFrame, "restoring chrome resized iPad stage")
         assertSameFrame(capsule.frame, capsuleFrame, "restoring chrome moved iPad MarkingToolbar")
         centre.doubleTap()
@@ -1562,16 +1563,18 @@ final class CloveFlowTests: XCTestCase {
         let dockBack = element(app, "clove.nav.back")
         let dockFilter = element(app, "clove.grid.filter")
         let dockMore = element(app, "clove.grid.more")
-        let dockInfo = element(app, "clove.detail.info")
+        let viewportInfo = element(app, "clove.detail.info")
         let dockUndo = element(app, "clove.duo.undo")
         XCTAssertTrue(
-            dockBack.exists && dockFilter.exists && dockMore.exists && dockInfo.exists
+            dockBack.exists && dockFilter.exists && dockMore.exists && viewportInfo.exists
                 && dockUndo.exists)
         XCTAssertLessThan(dockBack.frame.maxY, gridToggle.frame.minY)
         XCTAssertLessThan(gridToggle.frame.maxY, dockFilter.frame.minY)
         XCTAssertLessThan(dockFilter.frame.maxY, dockMore.frame.minY)
-        XCTAssertLessThan(dockMore.frame.maxY, dockInfo.frame.minY)
-        XCTAssertLessThan(dockInfo.frame.maxY, dockUndo.frame.minY)
+        XCTAssertLessThan(dockMore.frame.maxY, dockUndo.frame.minY)
+        XCTAssertLessThan(viewportInfo.frame.maxX, preview.frame.midX)
+        XCTAssertGreaterThanOrEqual(viewportInfo.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(viewportInfo.frame.height, 44)
         let inspectionPill = element(app, "clove.detail.inspectionPill")
         let focusToggles = app.buttons.matching(identifier: "clove.detail.focusToggle")
         XCTAssertEqual(focusToggles.count, 1)
@@ -3236,50 +3239,116 @@ final class CloveFlowTests: XCTestCase {
         }
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), details))
 
-        // Open Detail and verify inline ring beside filename without colliding with #292's focus toggle.
+        // Open Detail and verify inline progress bar beside position without separate prep ring.
         element(app, "clove.grid.photo.mmq02680").tap()
         let fileName = element(app, "clove.detail.fileName")
         XCTAssertTrue(fileName.waitForExistence(timeout: 5))
-        let detailPrep = element(app, "clove.detail.preparation")
-        XCTAssertTrue(detailPrep.waitForExistence(timeout: 5))
-        XCTAssertTrue(detailPrep.isHittable)
-        XCTAssertEqual(detailPrep.value as? String, "15 of 36 ready")
-        XCTAssertGreaterThanOrEqual(detailPrep.frame.width, 43)
-        XCTAssertGreaterThanOrEqual(detailPrep.frame.height, 43)
+        XCTAssertFalse(element(app, "clove.detail.preparation").exists)
+        let detailPrepBar = element(app, "clove.detail.preparation.progress")
+        XCTAssertTrue(detailPrepBar.waitForExistence(timeout: 5))
+        XCTAssertEqual(detailPrepBar.value as? String, "15 of 36 ready")
 
         let focusToggle = element(app, "clove.detail.focusToggle")
-        XCTAssertTrue(focusToggle.exists)
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            XCTAssertGreaterThan(focusToggle.frame.minY, detailPrep.frame.maxY)
-        } else {
-            XCTAssertLessThan(focusToggle.frame.maxX, detailPrep.frame.minX)
+        let zoom = element(app, "clove.detail.zoom")
+        XCTAssertTrue(zoom.exists)
+        XCTAssertGreaterThanOrEqual(detailPrepBar.frame.minX, zoom.frame.maxX - 2)
+        if focusToggle.exists {
+            XCTAssertFalse(focusToggle.frame.intersects(detailPrepBar.frame))
         }
-        XCTAssertFalse(focusToggle.frame.intersects(detailPrep.frame))
-        XCTAssertGreaterThanOrEqual(detailPrep.frame.midX, fileName.frame.maxX - 4)
-        XCTAssertTrue(element(app, "clove.detail.zoom").exists)
 
+        // Tapping filename opens Info sheet with Folder preparation row -> details -> Done.
         let info = element(app, "clove.detail.info")
-        if info.exists {
-            XCTAssertLessThanOrEqual(detailPrep.frame.maxX, info.frame.minX + 16)
-        }
-
-        detailPrep.tap()
+        XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(info.isHittable)
+        XCTAssertGreaterThanOrEqual(info.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(info.frame.height, 44)
+        info.tap()
+        XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        let prepRow = element(app, "clove.detail.info.preparation")
+        XCTAssertTrue(prepRow.waitForExistence(timeout: 5))
+        prepRow.tap()
         XCTAssertTrue(details.waitForExistence(timeout: 5))
         XCTAssertEqual(element(app, "clove.preparation.title").label, "Preparing folder")
         XCTAssertEqual(
             element(app, "clove.preparation.summary").label, "15 photos ready for both")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            XCTAssertFalse(doneButton.exists)
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)).tap()
-        } else {
-            doneButton.tap()
-        }
+        let sheetDone = element(app, "clove.preparation.done")
+        XCTAssertTrue(sheetDone.waitForExistence(timeout: 5))
+        sheetDone.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), details))
 
-        // Culling remains active and responsive with preparation ring shown.
+        // Culling remains active and responsive with inline preparation bar shown.
         let rejectButton = element(app, "clove.detail.capsule.reject")
         rejectButton.tap()
         XCTAssertTrue(waitForLabel("MMQ02682.ARW", fileName))
+    }
+
+    @MainActor
+    func testDetailCompactIdentityAndLiveFilterAcrossDevices() throws {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_METADATA_SAMPLES": "1"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        XCTAssertEqual(fileName.label, "MMQ02680.ARW")
+        XCTAssertFalse(element(app, "clove.detail.preparation").exists)
+
+        // Legacy + JPG / + HIF companion suffixes are removed from Detail subtitle.
+        let zoom = element(app, "clove.detail.zoom")
+        XCTAssertTrue(zoom.waitForExistence(timeout: 5))
+        XCTAssertFalse(zoom.label.contains("+ JPG"))
+        XCTAssertFalse(zoom.label.contains("+ HIF"))
+
+        // Tapping the unified filename Info button (>= 44 pt hit target) opens Info sheet.
+        let info = element(app, "clove.detail.info")
+        XCTAssertTrue(info.isHittable)
+        XCTAssertGreaterThanOrEqual(info.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(info.frame.height, 44)
+        info.tap()
+        XCTAssertTrue(element(app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.info.preparation").exists)
+        element(app, "clove.detail.info.done").tap()
+        XCTAssertTrue(
+            wait(NSPredicate(format: "exists == false"), element(app, "clove.detail.info.sheet")))
+
+        // Detail Filter switches filters live without returning to Grid.
+        let filterButton = element(app, "clove.detail.filter")
+        XCTAssertTrue(filterButton.waitForExistence(timeout: 5))
+        XCTAssertEqual(filterButton.value as? String, "Off")
+        filterButton.tap()
+        let rejectedRow = element(app, "clove.detail.filter.rejected")
+        XCTAssertTrue(rejectedRow.waitForExistence(timeout: 5))
+        rejectedRow.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), rejectedRow))
+        XCTAssertEqual(filterButton.value as? String, "On")
+        XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
+
+        // More filters hands off from Detail Filter popover cleanly into MetadataFilterSheet.
+        filterButton.tap()
+        let moreFilters = element(app, "clove.detail.filter.more")
+        XCTAssertTrue(moreFilters.waitForExistence(timeout: 5))
+        moreFilters.tap()
+        let metadataSheet = element(app, "clove.grid.metadataFilter.sheet")
+        XCTAssertTrue(metadataSheet.waitForExistence(timeout: 5))
+        let cameraOption = element(app, "clove.grid.metadataFilter.camera.ILCE-1M2")
+        XCTAssertTrue(cameraOption.waitForExistence(timeout: 5))
+        cameraOption.tap()
+        let summary = element(app, "clove.grid.metadataFilter.summary")
+        XCTAssertTrue(summary.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForLabel("Showing 0 of 36", summary))
+        element(app, "clove.grid.metadataFilter.done").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), metadataSheet))
+
+        // 0 matching photos under combined Rejected + ILCE-1M2 shows empty Detail with Clear filters.
+        let emptyDetail = element(app, "clove.detail.empty")
+        XCTAssertTrue(emptyDetail.waitForExistence(timeout: 5))
+        let clearDetail = element(app, "clove.detail.empty.clearFilters")
+        XCTAssertTrue(clearDetail.waitForExistence(timeout: 5))
+        clearDetail.tap()
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), emptyDetail))
+        XCTAssertTrue(fileName.waitForExistence(timeout: 5))
+        XCTAssertEqual(filterButton.value as? String, "Off")
     }
 
     @MainActor
@@ -3434,33 +3503,36 @@ final class CloveFlowTests: XCTestCase {
         let back = element(app, "clove.nav.back")
         let focus = element(app, "clove.detail.focusToggle")
         let fileName = element(app, "clove.detail.fileName")
-        let rejectPill = element(app, "clove.detail.rejectUnmarked")
         let info = element(app, "clove.detail.info")
+        let rejectPill = element(app, "clove.detail.rejectUnmarked")
+        let filter = element(app, "clove.detail.filter")
         let undo = element(app, "clove.detail.undo")
         XCTAssertTrue(back.exists)
         XCTAssertTrue(focus.exists)
         XCTAssertTrue(fileName.exists)
-        XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
         XCTAssertTrue(info.exists)
+        XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
+        XCTAssertTrue(filter.exists)
         XCTAssertTrue(undo.exists)
         XCTAssertLessThanOrEqual(back.frame.maxX, focus.frame.minX + 1)
-        XCTAssertLessThanOrEqual(focus.frame.maxX, fileName.frame.minX + 1)
-        XCTAssertLessThanOrEqual(fileName.frame.maxX, rejectPill.frame.minX + 1)
-        XCTAssertLessThanOrEqual(rejectPill.frame.maxX, info.frame.minX + 1)
-        XCTAssertLessThanOrEqual(info.frame.maxX, undo.frame.minX + 1)
+        XCTAssertLessThanOrEqual(focus.frame.maxX, info.frame.minX + 1)
+        XCTAssertLessThanOrEqual(info.frame.maxX, rejectPill.frame.minX + 1)
+        XCTAssertLessThanOrEqual(rejectPill.frame.maxX, filter.frame.minX + 1)
+        XCTAssertLessThanOrEqual(filter.frame.maxX, undo.frame.minX + 1)
 
         // Single tap on stage in landscapeLeft hides top nav bar and bottom row, second tap restores cleanly.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), bottomRow))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), back))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), fileName))
-        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), info))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), filter))
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undo))
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
         XCTAssertTrue(bottomRow.waitForExistence(timeout: 5))
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         XCTAssertTrue(fileName.waitForExistence(timeout: 5))
         XCTAssertTrue(info.waitForExistence(timeout: 5))
+        XCTAssertTrue(filter.waitForExistence(timeout: 5))
         XCTAssertTrue(undo.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(back.frame.minX, 0)
         XCTAssertLessThanOrEqual(undo.frame.maxX, app.frame.maxX)

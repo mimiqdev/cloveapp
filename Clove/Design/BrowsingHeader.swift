@@ -1,3 +1,4 @@
+import CloveCore
 import SwiftUI
 
 /// The handoff's compact navigation title and subtitle, between Back and the view tools.
@@ -11,6 +12,10 @@ struct BrowsingHeader<
     var usesInlineFlow = false
     var height: CGFloat = 64
     var background: CloveColour = Color.clove.bg.canvas
+    var titleTrailingSymbol: String? = nil
+    var titleActionIdentifier: String? = nil
+    var titleActionLabel: String? = nil
+    var titleAction: (() -> Void)? = nil
     let back: () -> Void
     @ViewBuilder let subtitle: () -> Subtitle
     @ViewBuilder let titleAccessory: () -> TitleAccessory
@@ -27,6 +32,10 @@ struct BrowsingHeader<
         usesInlineFlow: Bool = false,
         height: CGFloat = 64,
         background: CloveColour = Color.clove.bg.canvas,
+        titleTrailingSymbol: String? = nil,
+        titleActionIdentifier: String? = nil,
+        titleActionLabel: String? = nil,
+        titleAction: (() -> Void)? = nil,
         back: @escaping () -> Void,
         @ViewBuilder subtitle: @escaping () -> Subtitle,
         @ViewBuilder titleAccessory: @escaping () -> TitleAccessory = { EmptyView() },
@@ -40,6 +49,10 @@ struct BrowsingHeader<
         self.usesInlineFlow = usesInlineFlow
         self.height = height
         self.background = background
+        self.titleTrailingSymbol = titleTrailingSymbol
+        self.titleActionIdentifier = titleActionIdentifier
+        self.titleActionLabel = titleActionLabel
+        self.titleAction = titleAction
         self.back = back
         self.subtitle = subtitle
         self.titleAccessory = titleAccessory
@@ -92,21 +105,51 @@ struct BrowsingHeader<
         .reportHeaderControlFrame("clove.browsing.header")
     }
 
+    @ViewBuilder
     private var titleBlock: some View {
-        VStack(alignment: (usesInlineFlow && !showsBack) ? .leading : .center, spacing: 0) {
-            HStack(spacing: 0) {
+        let content = VStack(
+            alignment: (usesInlineFlow && !showsBack) ? .leading : .center, spacing: 0
+        ) {
+            HStack(spacing: titleTrailingSymbol != nil ? 4 : 0) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .accessibilityIdentifier(titleIdentifier)
                     .reportHeaderControlFrame(titleIdentifier)
+                if let titleTrailingSymbol {
+                    Image(systemName: titleTrailingSymbol)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .layoutPriority(1)
+                        .accessibilityHidden(true)
+                }
                 titleAccessory()
                     .layoutPriority(1)
             }
             subtitle()
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.secondary)
+        }
+        if let titleAction {
+            content
+                .padding(.horizontal, 6)
+                .frame(minWidth: 44, minHeight: 44)
+                .allowsHitTesting(false)
+                .background {
+                    Button(action: titleAction) {
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(titleActionLabel ?? title)
+                    .accessibilityIdentifier(titleActionIdentifier ?? titleIdentifier)
+                }
+                .accessibilityElement(children: .contain)
+                .reportHeaderControlFrame(titleActionIdentifier ?? titleIdentifier)
+        } else {
+            content
         }
     }
 
