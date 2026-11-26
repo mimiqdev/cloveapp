@@ -18,6 +18,110 @@ struct TapPickerTests {
         )
         #expect(
             LabelPicker.preferredSize(for: .vertical, count: 6) == CGSize(width: 52, height: 288))
+        #expect(LabelPicker.targetExtent == 44)
+        #expect(LabelPicker.dotExtent == 16)
+        #expect(LabelPicker.selectionRingExtent == 24)
+        #expect(LabelPicker.selectionRingLineWidth == 2)
+    }
+
+    @Test func labelPickerDraws16PtDotsAnd24PtSelectionRingsInside44PtTargets() throws {
+        let theme = CloveTheme.light
+        let expectedGreen = try renderedColourPixel(Color.clove.label.green, theme: theme)
+        let expectedRed = try renderedColourPixel(Color.clove.label.red, theme: theme)
+        let expectedRing = try renderedColourPixel(Color.clove.text.primary, theme: theme)
+
+        for axis in [Axis.horizontal, Axis.vertical] {
+            let picker = LabelPicker(selection: .green, onPick: { _ in }, axis: axis)
+                .environment(\.cloveTheme, theme)
+            let expectedSize = LabelPicker.preferredSize(for: axis, count: 6)
+            let host = UIHostingController(rootView: picker)
+            host.safeAreaRegions = []
+            #expect(host.sizeThatFits(in: CGSize(width: 500, height: 500)) == expectedSize)
+
+            let renderer = ImageRenderer(content: picker)
+            renderer.scale = 2
+            let image = try #require(renderer.cgImage)
+            #expect(image.width == Int(expectedSize.width * 2))
+            #expect(image.height == Int(expectedSize.height * 2))
+            let pixels = try rgbaPixels(from: image)
+
+            let step = LabelPicker.targetExtent + LabelPicker.itemSpacing
+            let halfTarget = LabelPicker.containerPadding + LabelPicker.targetExtent / 2
+
+            func slotCenter(index: Int) -> CGPoint {
+                let major = halfTarget + CGFloat(index) * step
+                return axis == .horizontal
+                    ? CGPoint(x: major, y: halfTarget)
+                    : CGPoint(x: halfTarget, y: major)
+            }
+
+            // Index 1 is `.red` (unselected): sample glass background outside the 16 pt dot.
+            let redCenter = slotCenter(index: 1)
+            let rx = Int((redCenter.x * 2).rounded())
+            let ry = Int((redCenter.y * 2).rounded())
+            let glassBackground = pixels.pixel(x: rx + 28, y: ry)
+
+            // Index 3 is `.green` (0: None, 1: Red, 2: Yellow, 3: Green).
+            let greenCenter = slotCenter(index: 3)
+            let cx = Int((greenCenter.x * 2).rounded())
+            let cy = Int((greenCenter.y * 2).rounded())
+
+            // Inside 16 pt dot (radius <= 7 pt = 14 px): filled green.
+            #expect(colorsClose(pixels.pixel(x: cx, y: cy), expectedGreen))
+            #expect(colorsClose(pixels.pixel(x: cx + 12, y: cy), expectedGreen))
+            // 9 pt from center (18 px): clear gap between 16 pt dot and 24 pt ring (inner edge 10 pt).
+            #expect(colorsClose(pixels.pixel(x: cx + 18, y: cy), glassBackground))
+            // 11 pt from center (22 px): 2 pt selection ring at 24 pt outer diameter (10..12 pt).
+            #expect(colorsClose(pixels.pixel(x: cx + 22, y: cy), expectedRing))
+            // 14 pt from center (28 px): outside 24 pt ring (the old 34 pt ring was at 15..17 pt).
+            #expect(colorsClose(pixels.pixel(x: cx + 28, y: cy), glassBackground))
+
+            // Index 1 `.red` (unselected): 16 pt fill with no selection ring at 11 pt.
+            #expect(colorsClose(pixels.pixel(x: rx, y: ry), expectedRed))
+            #expect(colorsClose(pixels.pixel(x: rx + 12, y: ry), expectedRed))
+            #expect(colorsClose(pixels.pixel(x: rx + 18, y: ry), glassBackground))
+            #expect(colorsClose(pixels.pixel(x: rx + 22, y: ry), glassBackground))
+
+            // Index 0 is None (`circle.slash`): unselected here, so no ring at 11 pt and non-empty
+            // glyph pixels inside the 16 pt area.
+            let noneCenter = slotCenter(index: 0)
+            let nx = Int((noneCenter.x * 2).rounded())
+            let ny = Int((noneCenter.y * 2).rounded())
+            #expect(colorsClose(pixels.pixel(x: nx + 22, y: ny), glassBackground))
+            var hasNoneGlyphPixels = false
+            for dy in -18...18 {
+                for dx in -18...18
+                where !colorsClose(pixels.pixel(x: nx + dx, y: ny + dy), glassBackground) {
+                    hasNoneGlyphPixels = true
+                }
+            }
+            #expect(hasNoneGlyphPixels)
+            // Verify `circle.slash` clears the inner edge of the 24 pt ring (radius 10 pt = 20 px).
+            #expect(colorsClose(pixels.pixel(x: nx + 19, y: ny), glassBackground))
+            #expect(colorsClose(pixels.pixel(x: nx, y: ny + 19), glassBackground))
+        }
+
+        // Selected None (`selection == nil`) shows the 24 pt ring around `circle.slash` without
+        // overlapping the ring; mixed shows no ring on any slot.
+        let noneSelectedRenderer = ImageRenderer(
+            content: LabelPicker(selection: nil) { _ in }.environment(\.cloveTheme, theme))
+        noneSelectedRenderer.scale = 2
+        let noneSelectedPixels = try rgbaPixels(from: try #require(noneSelectedRenderer.cgImage))
+        let noneCenterPx = Int(
+            ((LabelPicker.containerPadding + LabelPicker.targetExtent / 2) * 2).rounded())
+        let noneGlass = noneSelectedPixels.pixel(x: noneCenterPx + 28, y: noneCenterPx)
+        #expect(
+            colorsClose(
+                noneSelectedPixels.pixel(x: noneCenterPx + 22, y: noneCenterPx), expectedRing))
+        #expect(!colorsClose(noneGlass, expectedRing))
+
+        let mixedRenderer = ImageRenderer(
+            content: LabelPicker(selection: nil, isMixed: true) { _ in }
+                .environment(\.cloveTheme, theme))
+        mixedRenderer.scale = 2
+        let mixedPixels = try rgbaPixels(from: try #require(mixedRenderer.cgImage))
+        let mixedGlass = mixedPixels.pixel(x: noneCenterPx + 28, y: noneCenterPx)
+        #expect(colorsClose(mixedPixels.pixel(x: noneCenterPx + 22, y: noneCenterPx), mixedGlass))
     }
 
     // MARK: - Adaptive placement
@@ -1484,6 +1588,58 @@ struct TapPickerTests {
             }
             try await Task.sleep(for: .milliseconds(25))
         }
+    }
+
+    private func renderedColourPixel(_ style: CloveColour, theme: CloveTheme) throws -> RGBA {
+        let swatch = Rectangle()
+            .fill(style)
+            .frame(width: 8, height: 8)
+            .environment(\.cloveTheme, theme)
+        let renderer = ImageRenderer(content: swatch)
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        return try rgbaPixels(from: image).pixel(x: 4, y: 4)
+    }
+
+    private func rgbaPixels(from image: CGImage) throws -> PixelBuffer {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return PixelBuffer(width: width, height: height, bytes: bytes)
+    }
+
+    private func colorsClose(_ actual: RGBA, _ expected: RGBA, tolerance: Int = 10) -> Bool {
+        abs(Int(actual.r) - Int(expected.r)) <= tolerance
+            && abs(Int(actual.g) - Int(expected.g)) <= tolerance
+            && abs(Int(actual.b) - Int(expected.b)) <= tolerance
+            && abs(Int(actual.a) - Int(expected.a)) <= tolerance
+    }
+}
+
+private struct RGBA {
+    let r: UInt8
+    let g: UInt8
+    let b: UInt8
+    let a: UInt8
+}
+
+private struct PixelBuffer {
+    let width: Int
+    let height: Int
+    let bytes: [UInt8]
+
+    func pixel(x: Int, y: Int) -> RGBA {
+        let offset = (y * width + x) * 4
+        return RGBA(
+            r: bytes[offset], g: bytes[offset + 1], b: bytes[offset + 2], a: bytes[offset + 3])
     }
 }
 

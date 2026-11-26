@@ -556,9 +556,8 @@ struct DetailFocusResultIndicators: Equatable, Sendable {
             y: (viewSize.height - fitted.height) / 2,
             width: fitted.width,
             height: fitted.height)
-        let badgeWidth: CGFloat =
-            (indicators.face != nil && indicators.missingAutofocusMetadata) ? 52 : 30
-        let badgeRect = CGRect(origin: origin, size: CGSize(width: badgeWidth, height: 24))
+        let badgeSize = DetailFocusResultIndicatorsView.layoutSize(for: indicators)
+        let badgeRect = CGRect(origin: origin, size: badgeSize)
         return fittedRect.intersects(badgeRect)
     }
 }
@@ -590,45 +589,70 @@ struct SlashedViewfinderGlyph: View {
 }
 
 struct DetailFocusResultIndicatorsView: View {
+    nonisolated static let tileSize: CGFloat = 22
+    nonisolated static let tileCornerRadius: CGFloat = 5
+    nonisolated static let tileGap: CGFloat = 4
+    nonisolated static let photoBackingOpacity: Double = 0.68
+
     let indicators: DetailFocusResultIndicators
     let usesPhotoBacking: Bool
     let language: ResolvedAppLanguage
 
+    nonisolated static func layoutSize(for indicators: DetailFocusResultIndicators) -> CGSize {
+        let count =
+            (indicators.face != nil ? 1 : 0) + (indicators.missingAutofocusMetadata ? 1 : 0)
+        guard count > 0 else { return .zero }
+        let width = CGFloat(count) * tileSize + CGFloat(count - 1) * tileGap
+        return CGSize(width: width, height: tileSize)
+    }
+
+    static func photoBackingColour() -> Color {
+        Color.black.opacity(photoBackingOpacity)
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Self.tileGap) {
             if let face = indicators.face {
-                Image(systemName: face.systemImageName)
-                    .font(.system(size: 16, weight: .medium))
-                    .accessibilityAddTraits(.isImage)
-                    .accessibilityLabel(face.accessibilityLabel(language: language))
-                    .accessibilityIdentifier("clove.detail.focusIndicator.face")
+                indicatorTile {
+                    Image(systemName: face.systemImageName)
+                        .font(.system(size: 16, weight: .medium))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isImage)
+                .accessibilityLabel(face.accessibilityLabel(language: language))
+                .accessibilityIdentifier("clove.detail.focusIndicator.face")
             }
             if indicators.missingAutofocusMetadata {
-                SlashedViewfinderGlyph()
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityAddTraits(.isImage)
-                    .accessibilityLabel(
-                        indicators.missingAutofocusAccessibilityLabel(language: language)
-                    )
-                    .accessibilityIdentifier("clove.detail.focusIndicator.autofocus")
+                indicatorTile {
+                    SlashedViewfinderGlyph()
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isImage)
+                .accessibilityLabel(
+                    indicators.missingAutofocusAccessibilityLabel(language: language)
+                )
+                .accessibilityIdentifier("clove.detail.focusIndicator.autofocus")
             }
         }
         .foregroundStyle(
             usesPhotoBacking
                 ? AnyShapeStyle(Color.clove.focus.outline)
-                : AnyShapeStyle(Color.clove.text.primary)
+                : AnyShapeStyle(Color.clove.text.secondary)
         )
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background {
-            if usesPhotoBacking {
-                Capsule()
-                    .fill(Color.clove.focus.edge)
-            }
-        }
         .allowsHitTesting(false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.focusIndicators")
         .reportHeaderControlFrame("clove.detail.focusIndicators")
+    }
+
+    private func indicatorTile<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(width: Self.tileSize, height: Self.tileSize)
+            .background {
+                if usesPhotoBacking {
+                    RoundedRectangle(cornerRadius: Self.tileCornerRadius, style: .continuous)
+                        .fill(Self.photoBackingColour())
+                }
+            }
     }
 }
