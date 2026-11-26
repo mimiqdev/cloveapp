@@ -10,6 +10,7 @@ struct BrowsingHeader<
     var showsBack = true
     var usesInlineFlow = false
     var height: CGFloat = 64
+    var background: CloveColour = Color.clove.bg.canvas
     let back: () -> Void
     @ViewBuilder let subtitle: () -> Subtitle
     @ViewBuilder let titleAccessory: () -> TitleAccessory
@@ -25,6 +26,7 @@ struct BrowsingHeader<
         showsBack: Bool = true,
         usesInlineFlow: Bool = false,
         height: CGFloat = 64,
+        background: CloveColour = Color.clove.bg.canvas,
         back: @escaping () -> Void,
         @ViewBuilder subtitle: @escaping () -> Subtitle,
         @ViewBuilder titleAccessory: @escaping () -> TitleAccessory = { EmptyView() },
@@ -37,6 +39,7 @@ struct BrowsingHeader<
         self.showsBack = showsBack
         self.usesInlineFlow = usesInlineFlow
         self.height = height
+        self.background = background
         self.back = back
         self.subtitle = subtitle
         self.titleAccessory = titleAccessory
@@ -85,7 +88,7 @@ struct BrowsingHeader<
         }
         .frame(height: height)
         .foregroundStyle(Color.clove.text.primary)
-        .background(Color.clove.bg.canvas)
+        .background(background)
         .reportHeaderControlFrame("clove.browsing.header")
     }
 

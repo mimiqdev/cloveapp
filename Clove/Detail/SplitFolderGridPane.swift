@@ -61,6 +61,7 @@ struct SplitFolderGridPane: View {
                     columnCount: 2,
                     highlightsCurrentPhoto: true,
                     followsCurrentPhoto: true,
+                    stackCardToken: .stage,
                     foldExpandedGroup: { _ in collapseGroup() },
                     openPhoto: { tapped in
                         // Group Focus draws only the active group's members, so a tile there is
@@ -74,9 +75,21 @@ struct SplitFolderGridPane: View {
                 .opacity(browsing.folderLocationLoss == nil ? 1 : 0.35)
             }
         }
-        .background(Color.clove.bg.canvas)
+        .background(Color.clove.bg.stage)
+        .splitGridScrollEdgeEffectHidden()
         .ignoresSafeArea(.container, edges: isDuoExpanded ? .bottom : [])
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.detail.photoGrid")
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func splitGridScrollEdgeEffectHidden() -> some View {
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
     }
 }

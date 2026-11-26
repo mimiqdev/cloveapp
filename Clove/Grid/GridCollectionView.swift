@@ -59,6 +59,9 @@ struct GridCollectionView: UIViewRepresentable {
     /// member, and its grid opens where the person left off (#225).
     var followsCurrentPhoto = false
 
+    /// Background colour token behind peeking stack covers (canvas in Grid, stage in 30/70 split).
+    var stackCardToken: ThemeToken = .canvas
+
     /// Folds Group Focus back into the folder's Timeline run (issue #309).
     var foldExpandedGroup: (GroupID) -> Void = { _ in }
 
@@ -91,7 +94,8 @@ struct GridCollectionView: UIViewRepresentable {
             thumbnails: thumbnails, openPhoto: openPhoto, openGroup: openGroup,
             beginSelection: beginSelection, toggleSelection: toggleSelection,
             setSelection: setSelection, keepSelectingWhenEmpty: keepSelectingWhenEmpty,
-            selection: selection, foldExpandedGroup: foldExpandedGroup,
+            selection: selection, stackCardToken: stackCardToken,
+            foldExpandedGroup: foldExpandedGroup,
             areGroupsUnfolded: areGroupsUnfolded,
             completeGroupUnfold: completeGroupUnfold)
     }
@@ -141,6 +145,7 @@ struct GridCollectionView: UIViewRepresentable {
         context.coordinator.thumbnails = thumbnails
         context.coordinator.highlightsCurrentPhoto = highlightsCurrentPhoto
         context.coordinator.followsCurrentPhoto = followsCurrentPhoto
+        context.coordinator.stackCardToken = stackCardToken
         context.coordinator.foldExpandedGroup = foldExpandedGroup
         context.coordinator.openPhoto = openPhoto
         context.coordinator.openGroup = openGroup
@@ -370,6 +375,7 @@ extension GridCollectionView {
         var placeholderCount = 0
         var columnCount: Int?
         var highlightsCurrentPhoto = false
+        var stackCardToken: ThemeToken = .canvas
         /// The current photo the cell registration reads when it configures a cell (#225).
         private var currentPhoto: PhotoIdentity?
         /// The current photo and highlight flag the visible cells were configured with,
@@ -408,6 +414,7 @@ extension GridCollectionView {
             setSelection: ((Set<PhotoIdentity>) -> Void)?,
             keepSelectingWhenEmpty: @escaping () -> Void,
             selection: Set<PhotoIdentity>,
+            stackCardToken: ThemeToken,
             foldExpandedGroup: @escaping (GroupID) -> Void,
             areGroupsUnfolded: Bool,
             completeGroupUnfold: @escaping () -> Void
@@ -420,6 +427,7 @@ extension GridCollectionView {
             self.setSelection = setSelection
             self.keepSelectingWhenEmpty = keepSelectingWhenEmpty
             self.selection = selection
+            self.stackCardToken = stackCardToken
             self.foldExpandedGroup = foldExpandedGroup
             self.areGroupsUnfolded = areGroupsUnfolded
             self.completeGroupUnfold = completeGroupUnfold
@@ -586,6 +594,7 @@ extension GridCollectionView {
                     isCurrent: self.highlightsCurrentPhoto && self.highlightedCellID == item.id,
                     isSelecting: self.isSelecting,
                     trayPosition: self.trayPositionsByID[id],
+                    stackCardToken: self.stackCardToken,
                     thumbnails: self.thumbnails,
                     theme: self.theme,
                     language: self.language

@@ -348,13 +348,21 @@ final class CloveFlowTests: XCTestCase {
         capture("ipad-detail-toolbar-dark")
         element(app, "clove.nav.back").tap()
         element(app, "clove.grid.photo.mmq02683").tap()
+        let inspectionPill = element(app, "clove.detail.inspectionPill")
         let focusToggle = element(app, "clove.detail.focusToggle")
+        let compareButton = element(app, "clove.detail.compare")
         let overlapAF = element(app, "clove.detail.region.af.0")
         let separatedEye = element(app, "clove.detail.region.face.4-1")
         let focusIndicators = element(app, "clove.detail.focusIndicators")
         let faceIndicator = element(app, "clove.detail.focusIndicator.face")
         let missingAFIndicator = element(app, "clove.detail.focusIndicator.autofocus")
+        XCTAssertTrue(inspectionPill.waitForExistence(timeout: 5))
         XCTAssertTrue(focusToggle.waitForExistence(timeout: 5))
+        XCTAssertTrue(compareButton.exists)
+        XCTAssertTrue(compareButton.isEnabled)
+        XCTAssertEqual(app.buttons.matching(identifier: "clove.detail.compare").count, 1)
+        XCTAssertEqual(inspectionPill.frame.width, 96, accuracy: 2)
+        XCTAssertEqual(inspectionPill.frame.height, 44, accuracy: 2)
         XCTAssertEqual(focusToggle.value as? String, "On")
         XCTAssertTrue(overlapAF.waitForExistence(timeout: 5))
         XCTAssertTrue(separatedEye.exists)
@@ -365,12 +373,16 @@ final class CloveFlowTests: XCTestCase {
         // Corner tap & double-tap on a focus-region photo never step photos and keep filmstrip at zoom.
         gridToggle.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxY, strip.frame.minY - 10)
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), strip))
+        XCTAssertFalse(inspectionPill.exists)
         XCTAssertFalse(focusIndicators.exists)
         XCTAssertEqual(element(app, "clove.detail.fileName").label, "MMQ02683.ARW")
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.08)).tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == true"), strip))
+        XCTAssertTrue(inspectionPill.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxY, strip.frame.minY - 10)
         XCTAssertTrue(faceIndicator.waitForExistence(timeout: 5))
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.4)).doubleTap()
         XCTAssertTrue(element(app, "clove.detail.zoom").label.contains("100%"))
@@ -422,14 +434,19 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.grid.group.burst-2678").tap()
         let preview = element(app, "clove.detail.preview")
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        let inspectionPill = element(app, "clove.detail.inspectionPill")
         let pill = element(app, "clove.detail.rejectUnmarked")
         let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(inspectionPill.waitForExistence(timeout: 5))
         XCTAssertTrue(pill.waitForExistence(timeout: 5))
         XCTAssertTrue(capsule.waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.detail.filmstrip").exists)
-        // Photo Preview places the pill inside the 84 pt bottom band, top-aligned with MarkingToolbar.
+        // Photo Preview places all three controls on one horizontal row inside the 84 pt bottom band.
         XCTAssertLessThanOrEqual(preview.frame.maxY, pill.frame.minY + 1)
-        XCTAssertEqual(pill.frame.minY, capsule.frame.minY, accuracy: 1.5)
+        XCTAssertLessThanOrEqual(preview.frame.maxY, inspectionPill.frame.minY + 1)
+        XCTAssertEqual(inspectionPill.frame.midY, capsule.frame.midY, accuracy: 1.5)
+        XCTAssertEqual(pill.frame.midY, capsule.frame.midY, accuracy: 1.5)
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxX, pill.frame.minX - 10)
         XCTAssertLessThanOrEqual(pill.frame.maxX, capsule.frame.minX - 10)
         XCTAssertTrue(pill.isHittable)
 
@@ -1555,14 +1572,20 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertLessThan(dockFilter.frame.maxY, dockMore.frame.minY)
         XCTAssertLessThan(dockMore.frame.maxY, dockInfo.frame.minY)
         XCTAssertLessThan(dockInfo.frame.maxY, dockUndo.frame.minY)
+        let inspectionPill = element(app, "clove.detail.inspectionPill")
         let focusToggles = app.buttons.matching(identifier: "clove.detail.focusToggle")
         XCTAssertEqual(focusToggles.count, 1)
+        XCTAssertTrue(inspectionPill.waitForExistence(timeout: 5))
         let focusToggle = element(app, "clove.detail.focusToggle")
+        let compareButton = element(app, "clove.detail.compare")
         XCTAssertTrue(focusToggle.isHittable)
+        XCTAssertTrue(compareButton.isHittable)
         XCTAssertEqual(focusToggle.value as? String, "On")
+        XCTAssertGreaterThanOrEqual(inspectionPill.frame.width, 94)
+        XCTAssertGreaterThanOrEqual(inspectionPill.frame.height, 43)
         XCTAssertGreaterThanOrEqual(focusToggle.frame.width, 43)
         XCTAssertGreaterThanOrEqual(focusToggle.frame.height, 43)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxY, filmstrip.frame.minY - 10)
         let cornerFileName = element(app, "clove.detail.fileName")
         let cornerZoom = element(app, "clove.detail.zoom")
         XCTAssertTrue(cornerFileName.exists)
@@ -1570,7 +1593,6 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(cornerFileName.frame.minY, preview.frame.minY + 11)
         XCTAssertGreaterThanOrEqual(cornerFileName.frame.minX, preview.frame.minX + 15)
         XCTAssertGreaterThanOrEqual(cornerZoom.frame.minY, cornerFileName.frame.maxY - 1)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, cornerFileName.frame.maxX)
         // #200: the marking capsule reserves its own row beneath the fitted photo, and
         // the side toolbar carries no duplicate marking items.
         let capsule = element(app, "clove.duo.capsule")
@@ -1596,10 +1618,10 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(
             grid.frame.width / (grid.frame.width + photoPreview.frame.width), 0.3, accuracy: 0.02)
         XCTAssertEqual(focusToggles.count, 1)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, grid.frame.maxX - 1)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
+        XCTAssertGreaterThanOrEqual(inspectionPill.frame.minX, grid.frame.maxX - 1)
+        XCTAssertEqual(inspectionPill.frame.midY, capsule.frame.midY, accuracy: 1.5)
+        XCTAssertLessThan(inspectionPill.frame.maxX, capsule.frame.minX)
         XCTAssertGreaterThanOrEqual(cornerFileName.frame.minX, preview.frame.minX + 15)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minX, cornerFileName.frame.maxX)
         XCTAssertEqual(capsule.frame.maxX, photoPreview.frame.maxX - 16, accuracy: 1)
         capture("duo-photo-preview")
         rate(3, toolbar: "clove.duo.capsule", in: app)
@@ -1622,7 +1644,7 @@ final class CloveFlowTests: XCTestCase {
             wait(
                 NSPredicate(format: "label CONTAINS[c] %@", "green"),
                 element(app, "clove.duo.capsule.label")))
-        // Off survives Photo Preview <-> Focus View and Focus View keeps a single header toggle.
+        // Off survives Photo Preview <-> Focus View and Focus View keeps a single bottom-left toggle.
         focusToggle.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Off"), focusToggle))
         // Native toggle switches Photo Preview <-> Focus View cleanly; then return to Photo Preview
@@ -1634,7 +1656,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(gridToggle.value as? String, "Focus View")
         XCTAssertEqual(focusToggles.count, 1)
         XCTAssertEqual(focusToggle.value as? String, "Off")
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxY, filmstrip.frame.minY - 10)
         XCTAssertGreaterThanOrEqual(
             element(app, "clove.detail.fileName").frame.minY, preview.frame.minY + 11)
         XCTAssertTrue(element(app, "clove.detail.zoom").exists)
@@ -1654,7 +1676,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(
             element(app, "clove.detail.fileName").frame.minY, preview.frame.minY + 11)
         XCTAssertEqual(focusToggles.count, 1)
-        XCTAssertGreaterThanOrEqual(focusToggle.frame.minY, preview.frame.minY + 11)
+        XCTAssertLessThanOrEqual(inspectionPill.frame.maxY, filmstrip.frame.minY - 10)
         // In Focus View, the capsule stays beneath the photo and beside the narrowed filmstrip.
         XCTAssertGreaterThanOrEqual(capsule.frame.minY, preview.frame.maxY)
         XCTAssertGreaterThan(capsule.frame.midX, element(app, "clove.duo.focus").frame.midX)
@@ -3227,7 +3249,11 @@ final class CloveFlowTests: XCTestCase {
 
         let focusToggle = element(app, "clove.detail.focusToggle")
         XCTAssertTrue(focusToggle.exists)
-        XCTAssertLessThan(focusToggle.frame.maxX, detailPrep.frame.minX)
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            XCTAssertGreaterThan(focusToggle.frame.minY, detailPrep.frame.maxY)
+        } else {
+            XCTAssertLessThan(focusToggle.frame.maxX, detailPrep.frame.minX)
+        }
         XCTAssertFalse(focusToggle.frame.intersects(detailPrep.frame))
         XCTAssertGreaterThanOrEqual(detailPrep.frame.midX, fileName.frame.maxX - 4)
         XCTAssertTrue(element(app, "clove.detail.zoom").exists)

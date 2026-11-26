@@ -29,6 +29,7 @@ final class GridPhotoCell: UICollectionViewCell {
     private var language = ResolvedAppLanguage.english
     private var isSelecting = false
     private(set) var trayPosition: GridGroupTrayPosition?
+    private var stackCardToken: ThemeToken = .canvas
     private var onOpenGroup: (GroupID) -> Void = { _ in }
     private var pixelLoadSignpost: (token: UUID, state: OSSignpostIntervalState)?
     private(set) var hostingConfigurationCount = 0
@@ -61,6 +62,7 @@ final class GridPhotoCell: UICollectionViewCell {
     func configure(
         with item: GridCellItem, isSelected: Bool, isCurrent: Bool = false, isSelecting: Bool,
         trayPosition: GridGroupTrayPosition? = nil,
+        stackCardToken: ThemeToken = .canvas,
         thumbnails: any GridThumbnailSource, theme: CloveTheme,
         language: ResolvedAppLanguage = .english,
         onOpenGroup: @escaping (GroupID) -> Void
@@ -78,6 +80,7 @@ final class GridPhotoCell: UICollectionViewCell {
         self.language = language
         self.isSelecting = isSelecting
         self.trayPosition = trayPosition
+        self.stackCardToken = stackCardToken
         applyClipping()
         self.onOpenGroup = onOpenGroup
         if changesPhoto {
@@ -168,7 +171,8 @@ final class GridPhotoCell: UICollectionViewCell {
             item: item, thumbnail: thumbnail, peekingThumbnails: peeking,
             companions: currentCompanions,
             isUnavailable: isUnavailable, isSelected: showsSelection, isCurrent: showsCurrent,
-            isSelecting: isSelecting, trayPosition: trayPosition, openGroup: onOpenGroup)
+            isSelecting: isSelecting, trayPosition: trayPosition,
+            stackCardToken: stackCardToken, openGroup: onOpenGroup)
         let theme = theme
         let language = language
         contentConfiguration = UIHostingConfiguration {
@@ -339,6 +343,7 @@ private struct GridTile: View {
     var isCurrent = false
     let isSelecting: Bool
     var trayPosition: GridGroupTrayPosition? = nil
+    var stackCardToken: ThemeToken = .canvas
     let openGroup: (GroupID) -> Void
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
@@ -378,11 +383,14 @@ private struct GridTile: View {
             } else {
                 Group {
                     if isCover {
-                        GroupStack(peekingImages: peekingThumbnails) { image }
-                            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
-                            .overlay(alignment: .bottomLeading) { rating }
-                            .overlay(alignment: .bottomTrailing) { label }
-                            .overlay(alignment: .bottomTrailing) { bottomMarkers }
+                        GroupStack(
+                            peekingImages: peekingThumbnails,
+                            cardBacking: CloveColour(stackCardToken)
+                        ) { image }
+                        .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
+                        .overlay(alignment: .bottomLeading) { rating }
+                        .overlay(alignment: .bottomTrailing) { label }
+                        .overlay(alignment: .bottomTrailing) { bottomMarkers }
                     } else {
                         photoContent(width: proxy.size.width, height: proxy.size.height)
                     }
