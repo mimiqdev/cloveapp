@@ -272,6 +272,168 @@ enum FolderPreparationAccessibility {
         }
         return base
     }
+
+    static func isActive(
+        for status: FolderPreparationStatus,
+        isGroupingInProgress: Bool
+    ) -> Bool {
+        guard status.waitingReason == nil else { return false }
+        if isGroupingInProgress { return true }
+        return status.phase == .enumeratingUnknown || status.phase == .preparing
+    }
+
+    static func shouldShowInfoSheetPreparationRow(
+        for status: FolderPreparationStatus,
+        isGroupingInProgress: Bool
+    ) -> Bool {
+        isActive(for: status, isGroupingInProgress: isGroupingInProgress)
+            || status.waitingReason != nil
+            || status.phase == .completeWithIssues
+            || !status.issues.isEmpty
+    }
+
+    static func inlineProgressFraction(
+        for status: FolderPreparationStatus,
+        isGroupingInProgress: Bool,
+        groupingProgress: FolderGroupingProgress
+    ) -> Double? {
+        guard isActive(for: status, isGroupingInProgress: isGroupingInProgress) else { return nil }
+        if status.phase == .preparing {
+            return status.readyFraction ?? 0
+        }
+        if isGroupingInProgress {
+            if case .analyzing(let completed, let total) = groupingProgress, total > 0 {
+                return min(max(Double(completed) / Double(total), 0), 1)
+            }
+            return nil
+        }
+        return nil
+    }
+
+    static func infoSheetSummaryText(
+        for status: FolderPreparationStatus,
+        isGroupingInProgress: Bool,
+        groupingProgress: FolderGroupingProgress,
+        language: ResolvedAppLanguage = .english
+    ) -> String {
+        if let reason = status.waitingReason {
+            return waitingTitle(for: reason, language: language)
+        }
+        if status.phase == .completeWithIssues
+            || (!isActive(for: status, isGroupingInProgress: isGroupingInProgress)
+                && !status.issues.isEmpty)
+        {
+            return AppLocalization.format(
+                "%lld issue", language: language, Int64(status.totalIssueCount))
+        }
+        if status.phase == .enumeratingUnknown {
+            return AppLocalization.string("Scanning folder…", language: language)
+        }
+        if status.phase == .preparing {
+            return summaryText(for: status, language: language)
+        }
+        if isGroupingInProgress {
+            if case .analyzing(let completed, let total) = groupingProgress, total > 0 {
+                return AppLocalization.format(
+                    "%lld of %lld analyzed", language: language, Int64(completed), Int64(total))
+            }
+            return AppLocalization.string("Finding similar shots…", language: language)
+        }
+        return summaryText(for: status, language: language)
+    }
+}
+
+/// Compact inline capsule bar shown beside Detail's position counter while preparation or grouping
+/// is actively running, and removed immediately once finished.
+struct InlineFolderPreparationBar: View {
+    let browsing: BrowsingModel
+    var identifier = "clove.detail.preparation.progress"
+    var usesDarkScrim = false
+    var width: CGFloat = 32
+    var height: CGFloat = 3
+
+    @Environment(\.cloveTheme) private var theme
+    @Environment(\.appLanguage) private var language
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweepsRight = false
+
+    private var status: FolderPreparationStatus {
+        browsing.preparationStatus
+    }
+
+    private var isActive: Bool {
+        FolderPreparationAccessibility.isActive(
+            for: status, isGroupingInProgress: browsing.isGroupingInProgress)
+    }
+
+    private var fraction: Double? {
+        FolderPreparationAccessibility.inlineProgressFraction(
+            for: status,
+            isGroupingInProgress: browsing.isGroupingInProgress,
+            groupingProgress: browsing.groupingProgress)
+    }
+
+    private var trackColor: Color {
+        usesDarkScrim
+            ? Color.white.opacity(0.28)
+            : theme.tokens.secondaryText.color.opacity(0.24)
+    }
+
+    var body: some View {
+        if isActive {
+            let accessibilityValue = FolderPreparationAccessibility.indicatorAccessibilityValue(
+                for: status,
+                isFindingSimilarShots: browsing.isGroupingInProgress,
+                groupingProgress: browsing.isGroupingInProgress ? browsing.groupingProgress : .idle,
+                language: language)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(trackColor)
+                    .frame(width: width, height: height)
+                if let fraction {
+                    Capsule()
+                        .fill(theme.tokens.accent.color)
+                        .frame(
+                            width: max(width * min(max(fraction, 0), 1), height * 2), height: height
+                        )
+                        .animation(
+                            CloveMotion.progress(reduceMotion: reduceMotion), value: fraction)
+                } else {
+                    let pillWidth = width * 0.42
+                    Capsule()
+                        .fill(theme.tokens.accent.color)
+                        .frame(width: pillWidth, height: height)
+                        .offset(
+                            x: reduceMotion
+                                ? (width - pillWidth) * 0.5
+                                : (sweepsRight ? width - pillWidth : 0))
+                }
+            }
+            .frame(width: width, height: height)
+            .onAppear {
+                guard fraction == nil, !reduceMotion else { return }
+                sweepsRight = false
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    sweepsRight = true
+                }
+            }
+            .onChange(of: fraction == nil) { _, isIndeterminate in
+                guard isIndeterminate, !reduceMotion else {
+                    sweepsRight = false
+                    return
+                }
+                sweepsRight = false
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                    sweepsRight = true
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AppLocalization.string("Folder preparation", language: language))
+            .accessibilityValue(accessibilityValue)
+            .accessibilityIdentifier(identifier)
+            .reportHeaderControlFrame(identifier)
+        }
+    }
 }
 
 private struct PreparationCompletionKey: Equatable {
@@ -642,6 +804,7 @@ struct FolderPreparationDetails: View {
         @MainActor
         init(
             browsing: BrowsingModel, showsDoneButton: Bool,
+            embedsNavigationStack: Bool = true,
             language: ResolvedAppLanguage = .english
         ) {
             let status = browsing.preparationStatus
@@ -649,7 +812,7 @@ struct FolderPreparationDetails: View {
                 status.folderName.isEmpty
                 ? browsing.localizedFolderTitle(language: language) : status.folderName
             self.heading = FolderPreparationAccessibility.detailsHeading(language: language)
-            self.showsPopoverHeading = !showsDoneButton
+            self.showsPopoverHeading = !showsDoneButton && embedsNavigationStack
             self.headerSummary = FolderPreparationAccessibility.headerSummaryText(
                 folderName: folderName, status: status, language: language)
             self.analysisTitle = FolderPreparationAccessibility.analysisRowTitle(
@@ -692,6 +855,8 @@ struct FolderPreparationDetails: View {
 
     let browsing: BrowsingModel
     let showsDoneButton: Bool
+    var embedsNavigationStack = true
+    var onDone: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
@@ -739,6 +904,37 @@ struct FolderPreparationDetails: View {
                 }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+            } else if !embedsNavigationStack {
+                ScrollView {
+                    detailsContent
+                        .padding(16)
+                }
+                .background(Color.clove.surface.sheet)
+                .navigationTitle(
+                    FolderPreparationAccessibility.detailsHeading(language: language)
+                )
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Text(
+                            FolderPreparationAccessibility.detailsHeading(language: language)
+                        )
+                        .font(.headline)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("clove.preparation.title")
+                        .reportHeaderControlFrame("clove.preparation.title")
+                    }
+                    if let onDone {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button(
+                                AppLocalization.string("Done", language: language), action: onDone
+                            )
+                            .foregroundStyle(Color.clove.accent)
+                            .accessibilityIdentifier("clove.preparation.done")
+                        }
+                    }
+                }
             } else {
                 ViewThatFits(in: .vertical) {
                     detailsContent
@@ -760,7 +956,7 @@ struct FolderPreparationDetails: View {
 
     private var detailsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if !showsDoneButton {
+            if !showsDoneButton && embedsNavigationStack {
                 Text(FolderPreparationAccessibility.detailsHeading(language: language))
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)

@@ -90,6 +90,12 @@ struct PhotoInformationSheet: View {
                     }
                     .listRowBackground(theme.tokens.card.color)
                 }
+                if FolderPreparationAccessibility.shouldShowInfoSheetPreparationRow(
+                    for: browsing.preparationStatus,
+                    isGroupingInProgress: browsing.isGroupingInProgress)
+                {
+                    folderPreparationSection
+                }
             }
             .environment(\.defaultMinListRowHeight, 36)
             .listSectionSpacing(12)
@@ -135,6 +141,74 @@ struct PhotoInformationSheet: View {
             groupsEnabled: true
         )
         .activeGroup(containing: photo.id)?.visibleMembers.count
+    }
+
+    private var folderPreparationSection: some View {
+        Section {
+            NavigationLink {
+                FolderPreparationDetails(
+                    browsing: browsing,
+                    showsDoneButton: false,
+                    embedsNavigationStack: false,
+                    onDone: { dismiss() })
+            } label: {
+                HStack(spacing: 10) {
+                    preparationRowIcon
+                    Text(AppLocalization.string("Folder preparation", language: language))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(
+                        FolderPreparationAccessibility.infoSheetSummaryText(
+                            for: browsing.preparationStatus,
+                            isGroupingInProgress: browsing.isGroupingInProgress,
+                            groupingProgress: browsing.groupingProgress,
+                            language: language)
+                    )
+                    .foregroundStyle(preparationSummaryColour)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                }
+                .font(.subheadline)
+                .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
+            }
+            .listRowBackground(theme.tokens.card.color)
+            .accessibilityIdentifier("clove.detail.info.preparation")
+        }
+    }
+
+    @ViewBuilder
+    private var preparationRowIcon: some View {
+        let status = browsing.preparationStatus
+        if let reason = status.waitingReason {
+            Image(systemName: FolderPreparationAccessibility.waitingSymbol(for: reason))
+                .foregroundStyle(Color.clove.text.secondary)
+                .accessibilityHidden(true)
+        } else if !status.issues.isEmpty,
+            !FolderPreparationAccessibility.isActive(
+                for: status, isGroupingInProgress: browsing.isGroupingInProgress)
+        {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(Color.clove.status.failed)
+                .accessibilityHidden(true)
+        } else {
+            InlineFolderPreparationBar(
+                browsing: browsing,
+                identifier: "clove.detail.info.preparation.progress",
+                width: 28,
+                height: 3)
+        }
+    }
+
+    private var preparationSummaryColour: CloveColour {
+        let status = browsing.preparationStatus
+        if status.waitingReason == nil,
+            !status.issues.isEmpty,
+            !FolderPreparationAccessibility.isActive(
+                for: status, isGroupingInProgress: browsing.isGroupingInProgress)
+        {
+            return Color.clove.status.failed
+        }
+        return Color.clove.text.secondary
     }
 
     @ToolbarContentBuilder

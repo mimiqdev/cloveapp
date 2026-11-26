@@ -780,7 +780,7 @@ extension CloveFlowTests {
 
         element(in: app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(element(in: app, "clove.detail").waitForExistence(timeout: 10))
-        XCTAssertEqual(element(in: app, "clove.detail.info").label, "信息")
+        XCTAssertEqual(element(in: app, "clove.detail.info").label, "MMQ02680.ARW，信息")
         let capsuleReject = element(in: app, "clove.detail.capsule.reject")
         if capsuleReject.exists {
             XCTAssertEqual(capsuleReject.label, "淘汰")
@@ -815,7 +815,7 @@ extension CloveFlowTests {
 
         element(in: app, "clove.grid.photo.mmq02680").tap()
         XCTAssertTrue(element(in: app, "clove.detail").waitForExistence(timeout: 10))
-        XCTAssertEqual(element(in: app, "clove.detail.info").label, "資訊")
+        XCTAssertEqual(element(in: app, "clove.detail.info").label, "MMQ02680.ARW，資訊")
         element(in: app, "clove.detail.info").tap()
         XCTAssertTrue(element(in: app, "clove.detail.info.sheet").waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["檔案"].waitForExistence(timeout: 5))

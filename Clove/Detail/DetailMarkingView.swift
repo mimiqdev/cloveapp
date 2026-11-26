@@ -119,7 +119,24 @@ struct DetailMarkingView: View {
     @State private var previousPhoto: PhotoIdentity?
     @State private var keepsPosition = false
     @State private var isLoadingFit = false
-    @State private var showsInformation = false
+    private enum DetailSheetRoute: Identifiable, Equatable {
+        case information
+        case metadataFilters
+
+        var id: String {
+            switch self {
+            case .information: "information"
+            case .metadataFilters: "metadataFilters"
+            }
+        }
+    }
+
+    @State private var activeSheet: DetailSheetRoute?
+    @State private var filterHandoff = GridFilterSheetHandoff()
+    @State private var popoverHandoffTask: Task<Void, Never>?
+    @State private var filterAnchorAttachments = 0
+    @State private var emptyFromFilterSelection = false
+    private var showsInformation: Bool { activeSheet == .information }
     @State private var showsToolbarStars = false
     @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
@@ -250,6 +267,17 @@ struct DetailMarkingView: View {
             .onChange(of: browsing.state.folder) { _, _ in
                 focusTracking.reset()
                 inspectedFocusRegionID = nil
+                emptyFromFilterSelection = false
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
+                activeSheet = nil
+            }
+            .onChange(of: detailFilterSelectionKey) { _, _ in
+                handleDetailFilterSelectionChange()
+            }
+            .onChange(of: detailFilterDismissTrigger) { _, _ in
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
             }
             .onChange(of: duoPopoverDismissTrigger) { _, _ in
                 showsToolbarStars = false
@@ -262,6 +290,8 @@ struct DetailMarkingView: View {
                 if phase != .active {
                     showsToolbarStars = false
                     toolbarDragRating = nil
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.dismissFiltersAndCancelPending()
                 }
             }
             .task(id: photo.id) {
@@ -279,6 +309,8 @@ struct DetailMarkingView: View {
             .onDisappear {
                 showsToolbarStars = false
                 toolbarDragRating = nil
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
                 upgradeTask?.cancel()
                 shown = nil
                 shownPhoto = nil
@@ -504,11 +536,16 @@ struct DetailMarkingView: View {
                 showsZoomChip = false
             }
         }
-        .sheet(isPresented: $showsInformation) {
-            PhotoInformationSheet(
-                browsing: browsing,
-                photo: photo,
-                groupMemberCount: activePhotoGroupCount)
+        .sheet(item: $activeSheet) { route in
+            switch route {
+            case .information:
+                PhotoInformationSheet(
+                    browsing: browsing,
+                    photo: photo,
+                    groupMemberCount: activePhotoGroupCount)
+            case .metadataFilters:
+                MetadataFilterSheet(browsing: browsing)
+            }
         }
     }
 
@@ -542,44 +579,46 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsUndo: chromeIsVisible,
+                    showsUndo: chromeIsVisible && !emptyFromFilterSelection,
                     backTitle: detailBackTitle,
-                    showsNavigationTools: true,
+                    showsNavigationTools: !emptyFromFilterSelection,
                     showsTools: chromeIsVisible,
                     showsBottom: false
                 ) {
-                    if presentationPolicy.supportsPhotoPreview {
-                        photoGridToggle
-                    }
-                    if !usesInspectionPill {
-                        focusRegionsToggle
+                    if !emptyFromFilterSelection {
+                        if presentationPolicy.supportsPhotoPreview {
+                            photoGridToggle
+                        }
+                        if !usesInspectionPill {
+                            focusRegionsToggle
+                        }
                     }
                 } tools: {
                     if chromeIsVisible {
-                        if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
-                            Button(pill.title, action: pill.action)
-                                .tint(
-                                    pill.tone == .destructive
-                                        ? Color.clove.reject : Color.clove.text.primary
-                                )
-                                .accessibilityIdentifier(pill.identifier)
+                        if !emptyFromFilterSelection {
+                            if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
+                                Button(pill.title, action: pill.action)
+                                    .tint(
+                                        pill.tone == .destructive
+                                            ? Color.clove.reject : Color.clove.text.primary
+                                    )
+                                    .accessibilityIdentifier(pill.identifier)
+                            }
+                            if !usesInspectionPill, canEnterCompare {
+                                compareToolbarButton
+                            }
                         }
-                        if !usesInspectionPill, canEnterCompare {
-                            compareToolbarButton
-                        }
-                        Button(
-                            AppLocalization.string("Info", language: language),
-                            systemImage: "info.circle"
-                        ) { showsInformation = true }
-                        .accessibilityIdentifier("clove.detail.info")
+                        detailFilterButton
                     }
                 } marks: {
                     Optional<ToolbarItem<Void, EmptyView>>.none
                 } bottom: {
                     EmptyView()
                 }
-                ToolbarItem(placement: .principal) { detailToolbarTitle }
-                    .axisBehavior(.horizontalOnly)
+                if !emptyFromFilterSelection {
+                    ToolbarItem(placement: .principal) { detailToolbarTitle }
+                        .axisBehavior(.horizontalOnly)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(
@@ -657,9 +696,29 @@ struct DetailMarkingView: View {
         }
     }
 
+    private var infoButtonAccessibilityLabel: String {
+        AppLocalization.format(
+            "%@, %@", language: language, photo.fileName,
+            AppLocalization.string("Info", language: language))
+    }
+
+    private var detailFilterButton: some View {
+        PhotoFilterPopoverButton(
+            browsing: browsing,
+            controlSize: isWidePadLayout ? .pad : .phone,
+            identifierPrefix: "clove.detail.filter",
+            filterHandoff: $filterHandoff,
+            canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
+            onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
+            onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
+        ) { delta in
+            filterAnchorAttachments = max(0, filterAnchorAttachments + delta)
+        }
+    }
+
     private var detailToolbarTitle: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            HStack(spacing: 4) {
                 Text(photo.fileName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color.clove.text.primary)
@@ -667,29 +726,51 @@ struct DetailMarkingView: View {
                     .truncationMode(.middle)
                     .accessibilityIdentifier("clove.detail.fileName")
                     .reportHeaderControlFrame("clove.detail.fileName")
-                FolderPreparationIndicator(
-                    browsing: browsing,
-                    identifierPrefix: "clove.detail.preparation"
-                )
-                .layoutPriority(1)
+                Image(systemName: "info.circle")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .layoutPriority(1)
+                    .accessibilityHidden(true)
             }
-            HStack(spacing: 0) {
+            HStack(spacing: 6) {
                 Text(detailSubtitle)
                     .lineLimit(1)
                     .accessibilityIdentifier("clove.detail.zoom")
                     .reportHeaderControlFrame("clove.detail.zoom")
+                InlineFolderPreparationBar(
+                    browsing: browsing,
+                    identifier: "clove.detail.preparation.progress")
                 SaveStatusIndicator(
                     browsing: browsing, identifierPrefix: "clove.detail.saveState")
             }
             .font(.caption)
             .foregroundStyle(Color.clove.text.secondary)
         }
+        .padding(.horizontal, 6)
+        .frame(minWidth: 44, minHeight: 44)
+        .allowsHitTesting(false)
+        .background {
+            Button {
+                activeSheet = .information
+            } label: {
+                Rectangle()
+                    .fill(Color.clear)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(infoButtonAccessibilityLabel)
+            .accessibilityIdentifier("clove.detail.info")
+            .reportHeaderControlFrame("clove.detail.info")
+        }
+        .accessibilityElement(children: .contain)
     }
 
     @ViewBuilder private func expandedLayout(_ duo: DuoDetailLayout) -> some View {
         if #available(iOS 27.1, *) {
             Group {
-                if duo.showsGrid && showsPhotoGrid {
+                if emptyFromFilterSelection {
+                    filteredEmptyStage
+                } else if duo.showsGrid && showsPhotoGrid {
                     PhotoArrangement(
                         grid: AnyView(splitGridPane),
                         presentation: duo.presentation,
@@ -704,38 +785,38 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
+                    showsUndo: !emptyFromFilterSelection,
                     showsNavigationTools: false,
-                    showsStandaloneDockTool: duo.showsGrid
+                    showsStandaloneDockTool: !emptyFromFilterSelection && duo.showsGrid
                         && presentationPolicy.supportsPhotoPreview,
                     showsTools: true,
                     showsBottom: duo.showsGrid
                 ) {
                     EmptyView()
                 } standaloneDockTool: {
-                    if duo.showsGrid && presentationPolicy.supportsPhotoPreview {
+                    if !emptyFromFilterSelection && duo.showsGrid
+                        && presentationPolicy.supportsPhotoPreview
+                    {
                         photoGridToggle
                     }
                 } tools: {
+                    duo.filter
                     if duo.showsGrid {
-                        duo.filter
                         duo.more
                     }
-                    if !isDuoExpanded {
-                        focusRegionsToggle
+                    if !emptyFromFilterSelection {
+                        if !isDuoExpanded {
+                            focusRegionsToggle
+                        }
+                        if !usesInspectionPill, canEnterCompare {
+                            compareToolbarButton
+                        }
                     }
-                    if !usesInspectionPill, canEnterCompare {
-                        compareToolbarButton
-                    }
-                    Button(
-                        AppLocalization.string("Info", language: language),
-                        systemImage: "info.circle"
-                    ) { showsInformation = true }
-                    .accessibilityIdentifier("clove.detail.info")
                 } marks: {
                     // Expanded Duo marks live in the capsule row beneath the photo, so
                     // system status activity cannot push them into overflow (#200). The
                     // cover keeps the compact dock controls.
-                    if isDuoExpanded {
+                    if emptyFromFilterSelection || isDuoExpanded {
                         Optional<ToolbarItem<Void, EmptyView>>.none
                     } else {
                         DuoMarkControls(
@@ -751,7 +832,9 @@ struct DetailMarkingView: View {
                         duo.bottom
                     }
                 }
-                if !usesExpandedDuoViewportOverlay && (!duo.showsGrid || !showsPhotoGrid) {
+                if !emptyFromFilterSelection && !usesExpandedDuoViewportOverlay
+                    && (!duo.showsGrid || !showsPhotoGrid)
+                {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
@@ -966,75 +1049,84 @@ struct DetailMarkingView: View {
         VStack(spacing: 0) {
             if !usesSystemToolbar && (!isOrdinaryPhoneLandscape || chromeIsVisible) {
                 BrowsingHeader(
-                    title: photo.fileName,
+                    title: emptyFromFilterSelection ? "" : photo.fileName,
                     titleIdentifier: "clove.detail.fileName",
                     backTitle: detailBackTitle,
                     usesInlineFlow: isOrdinaryPhoneLandscape,
                     height: isOrdinaryPhoneLandscape ? 44 : 64,
                     background: usesUnifiedStageBackground
                         ? Color.clove.bg.stage : Color.clove.bg.canvas,
+                    titleTrailingSymbol: emptyFromFilterSelection ? nil : "info.circle",
+                    titleActionIdentifier: emptyFromFilterSelection ? nil : "clove.detail.info",
+                    titleActionLabel: emptyFromFilterSelection ? nil : infoButtonAccessibilityLabel,
+                    titleAction: emptyFromFilterSelection ? nil : { activeSheet = .information },
                     back: { browsing.back() }
                 ) {
-                    HStack(spacing: 0) {
-                        Text(detailSubtitle)
-                            .lineLimit(1)
-                            .accessibilityIdentifier("clove.detail.zoom")
-                            .reportHeaderControlFrame("clove.detail.zoom")
-                        SaveStatusIndicator(
-                            browsing: browsing, identifierPrefix: "clove.detail.saveState")
+                    if !emptyFromFilterSelection {
+                        HStack(spacing: 6) {
+                            Text(detailSubtitle)
+                                .lineLimit(1)
+                                .accessibilityIdentifier("clove.detail.zoom")
+                                .reportHeaderControlFrame("clove.detail.zoom")
+                            InlineFolderPreparationBar(
+                                browsing: browsing,
+                                identifier: "clove.detail.preparation.progress")
+                            SaveStatusIndicator(
+                                browsing: browsing, identifierPrefix: "clove.detail.saveState")
+                        }
                     }
-                } titleAccessory: {
-                    FolderPreparationIndicator(
-                        browsing: browsing,
-                        identifierPrefix: "clove.detail.preparation")
                 } leadingTools: {
-                    if presentationPolicy.supportsPhotoPreview {
-                        photoGridToggle
-                    }
-                    if !usesInspectionPill {
-                        focusRegionsToggle
+                    if !emptyFromFilterSelection {
+                        if presentationPolicy.supportsPhotoPreview {
+                            photoGridToggle
+                        }
+                        if !usesInspectionPill {
+                            focusRegionsToggle
+                        }
                     }
                 } tools: {
                     if chromeIsVisible {
-                        if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
-                            pill
-                                .fixedSize()
-                                .reportHeaderControlFrame(pill.identifier)
-                        }
-                        if !usesInspectionPill, canEnterCompare {
-                            GlassIconButton(
-                                label: AppLocalization.string("Compare", language: language),
-                                symbol: "rectangle.split.2x1",
-                                size: isWidePadLayout ? .pad : .phone,
-                                identifier: "clove.detail.compare"
-                            ) {
-                                dismissGestureGuide()
-                                tapPickerDismissToken += 1
-                                actions.markingSwipeBegan()
-                                browsing.enterCompareFromDetail(timeline: timeline)
+                        if !emptyFromFilterSelection {
+                            if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
+                                pill
+                                    .fixedSize()
+                                    .reportHeaderControlFrame(pill.identifier)
                             }
-                            .reportHeaderControlFrame("clove.detail.compare")
+                            if !usesInspectionPill, canEnterCompare {
+                                GlassIconButton(
+                                    label: AppLocalization.string("Compare", language: language),
+                                    symbol: "rectangle.split.2x1",
+                                    size: isWidePadLayout ? .pad : .phone,
+                                    identifier: "clove.detail.compare"
+                                ) {
+                                    dismissGestureGuide()
+                                    tapPickerDismissToken += 1
+                                    actions.markingSwipeBegan()
+                                    browsing.enterCompareFromDetail(timeline: timeline)
+                                }
+                                .reportHeaderControlFrame("clove.detail.compare")
+                            }
                         }
-                        GlassIconButton(
-                            label: AppLocalization.string("Info", language: language),
-                            symbol: "info.circle", size: isWidePadLayout ? .pad : .phone,
-                            identifier: "clove.detail.info"
-                        ) { showsInformation = true }
-                        .reportHeaderControlFrame("clove.detail.info")
-                        GlassIconButton(
-                            label: AppLocalization.string("Undo", language: language),
-                            symbol: "arrow.uturn.backward",
-                            size: isWidePadLayout ? .pad : .phone,
-                            identifier: "clove.detail.undo",
-                            action: undo
-                        )
-                        .disabled(!browsing.canUndoMark)
-                        .reportHeaderControlFrame("clove.detail.undo")
+                        detailFilterButton
+                            .reportHeaderControlFrame("clove.detail.filter")
+                        if !emptyFromFilterSelection {
+                            GlassIconButton(
+                                label: AppLocalization.string("Undo", language: language),
+                                symbol: "arrow.uturn.backward",
+                                size: isWidePadLayout ? .pad : .phone,
+                                identifier: "clove.detail.undo",
+                                action: undo
+                            )
+                            .disabled(!browsing.canUndoMark)
+                            .reportHeaderControlFrame("clove.detail.undo")
+                        }
                     }
                 }
             }
             Group {
-                if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
+                if emptyFromFilterSelection {
+                    filteredEmptyStage
+                } else if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
                     PhotoArrangement(
                         grid: AnyView(splitGridPane),
                         presentation: presentationBinding,
@@ -1055,6 +1147,38 @@ struct DetailMarkingView: View {
                 }
             }
         }
+    }
+
+    private var filteredEmptyStage: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 44))
+                .foregroundStyle(Color.clove.text.secondary)
+                .accessibilityHidden(true)
+            VStack(spacing: 6) {
+                Text(AppLocalization.string("No photos", language: language))
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color.clove.text.primary)
+                Text(AppLocalization.string("No photos match this filter.", language: language))
+                    .font(.subheadline)
+                    .foregroundStyle(Color.clove.text.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("clove.detail.empty")
+            if browsing.hasActiveFilter {
+                Button(AppLocalization.string("Clear filters", language: language)) {
+                    browsing.clearAllFilters()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.clove.accent)
+                .accessibilityIdentifier("clove.detail.empty.clearFilters")
+                .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clove.bg.stage)
     }
 
     private var standardDetailStage: some View {
@@ -1500,10 +1624,6 @@ struct DetailMarkingView: View {
         }
         if scale > DetailFitScale.tolerance {
             parts.append(zoomName)
-        } else {
-            let companions = browsing.thumbnails.companions(for: photo.id)
-            if companions.hasJPEG { parts.append("+ JPG") }
-            if companions.hasHEIF { parts.append("+ HIF") }
         }
         return parts.joined(separator: " · ")
     }
@@ -1707,26 +1827,18 @@ struct DetailMarkingView: View {
                             isGroupFocus: isCornerGroupFocus,
                             zoomText: scale > DetailFitScale.tolerance
                                 ? zoomName : nil,
-                            language: language
+                            language: language,
+                            browsing: browsing,
+                            onInfoTap: { activeSheet = .information }
                         )
                         .layoutPriority(0)
                         .transition(.opacity)
                     }
-                    HStack(alignment: .center, spacing: 8) {
-                        FolderPreparationIndicator(
-                            browsing: browsing,
-                            identifierPrefix: "clove.detail.preparation",
-                            usesCompactLayoutPadding: false,
-                            usesFloatingBackdrop: true
-                        )
-                        .layoutPriority(2)
-                        SaveStatusIndicator(
-                            browsing: browsing,
-                            identifierPrefix: "clove.detail.saveState",
-                            usesFloatingBackdrop: true
-                        )
-                        .layoutPriority(2)
-                    }
+                    SaveStatusIndicator(
+                        browsing: browsing,
+                        identifierPrefix: "clove.detail.saveState",
+                        usesFloatingBackdrop: true
+                    )
                     .layoutPriority(2)
                 }
                 if !indicators.isEmpty {
@@ -2675,6 +2787,77 @@ struct DetailMarkingView: View {
         return MarkingInputRules(settings: inputSettings)
     }
 
+    private var detailFilterSelectionKey: DetailFilterSelectionKey {
+        DetailFilterSelectionKey(
+            filter: browsing.state.filter,
+            labelFilter: browsing.labelFilter,
+            metadataFilter: browsing.metadataFilter)
+    }
+
+    private var detailFilterDismissTrigger: DetailFilterDismissTrigger {
+        DetailFilterDismissTrigger(
+            route: browsing.state.route,
+            folder: browsing.state.folder,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
+            usesVerticalToolbar: usesVerticalToolbar,
+            hasFoldRegion: hasFoldRegion,
+            isComparing: browsing.compareSession != nil,
+            showsPhotoGrid: showsPhotoGrid,
+            horizontalSizeClass: horizontalSizeClass,
+            verticalSizeClass: verticalSizeClass,
+            isLandscapeContainer: isLandscapeContainer)
+    }
+
+    private var canPresentMetadataFiltersFromPopover: Bool {
+        duo == nil && browsing.compareSession == nil
+    }
+
+    private func cancelPendingMetadataFiltersHandoff() {
+        popoverHandoffTask?.cancel()
+        popoverHandoffTask = nil
+        filterHandoff.cancelPendingMetadataFilters()
+    }
+
+    private func completeMetadataFiltersHandoffIfPending() {
+        guard filterHandoff.pendingMetadataFiltersAfterPopover else { return }
+        let expectedFolder = browsing.state.folder
+        PhotoFilterPopoverButton.scheduleMetadataFiltersHandoff(
+            handoffTask: &popoverHandoffTask,
+            canPresent: { true },
+            consume: {
+                filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
+                    currentFolder: browsing.state.folder,
+                    isSceneActive: scenePhase == .active,
+                    canPresent: canPresentMetadataFiltersFromPopover
+                        && browsing.state.folder == expectedFolder)
+            },
+            present: { activeSheet = .metadataFilters },
+            clearTask: { popoverHandoffTask = nil })
+    }
+
+    private func handleDetailFilterSelectionChange() {
+        guard browsing.compareSession == nil else { return }
+        if browsing.photos.isEmpty {
+            if browsing.hasActiveFilter && !browsing.allPlacedPhotos.isEmpty {
+                actions.markingSwipeBegan()
+                emptyFromFilterSelection = true
+            } else {
+                emptyFromFilterSelection = false
+            }
+            return
+        }
+        emptyFromFilterSelection = false
+        guard !browsing.photos.contains(where: { $0.id == photo.id }) else { return }
+        let refreshedTimeline = DetailTimeline(
+            photos: browsing.photos,
+            groups: browsing.groups,
+            groupsEnabled: settings.similarGroupsEnabled && !browsing.isScanning)
+        if let target = refreshedTimeline.slots.first?.stagePhoto.id ?? browsing.photos.first?.id {
+            actions.openPhoto(target)
+        }
+    }
+
     private var tapPickerDismissTrigger: DetailTapPickerDismissTrigger {
         DetailTapPickerDismissTrigger(
             photoID: photo.id,
@@ -2800,6 +2983,26 @@ private struct DetailDuoPopoverDismissTrigger: Equatable {
     let hasDuo: Bool
 }
 
+private struct DetailFilterSelectionKey: Equatable {
+    let filter: PhotoFilter
+    let labelFilter: LabelColour?
+    let metadataFilter: PhotoMetadataFilter
+}
+
+private struct DetailFilterDismissTrigger: Equatable {
+    let route: BrowserRoute
+    let folder: FolderIdentity?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
+    let usesVerticalToolbar: Bool
+    let hasFoldRegion: Bool
+    let isComparing: Bool
+    let showsPhotoGrid: Bool
+    let horizontalSizeClass: UserInterfaceSizeClass?
+    let verticalSizeClass: UserInterfaceSizeClass?
+    let isLandscapeContainer: Bool
+}
+
 /// Filtering a group can change neighbours without changing its current photo.
 private struct DetailDisplayOrder: Hashable {
     let photo: PhotoIdentity
@@ -2895,14 +3098,16 @@ struct DetailHeaderFileNameParts: Equatable, Sendable {
     }
 }
 
-/// Passive two-line photo identity badge pinned to the upper-leading corner of the photo viewport
-/// on expanded Duo.
+/// Tappable two-line photo identity badge pinned to the upper-leading corner of the photo viewport
+/// on expanded Duo Landscape.
 struct DetailPhotoCornerOverlay: View {
     let fileName: String
     let positionText: String?
     let isGroupFocus: Bool
     let zoomText: String?
     let language: ResolvedAppLanguage
+    var browsing: BrowsingModel? = nil
+    var onInfoTap: (() -> Void)? = nil
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .caption) private var fileNameSize: CGFloat = 12
@@ -2927,6 +3132,13 @@ struct DetailPhotoCornerOverlay: View {
         return (visible, accessible)
     }
 
+    private var showsInlinePreparation: Bool {
+        guard let browsing else { return false }
+        return FolderPreparationAccessibility.isActive(
+            for: browsing.preparationStatus,
+            isGroupingInProgress: browsing.isGroupingInProgress)
+    }
+
     var body: some View {
         let parts = DetailHeaderFileNameParts(fileName)
         let strings = Self.metadataStrings(
@@ -2937,46 +3149,66 @@ struct DetailPhotoCornerOverlay: View {
         let metadataText = strings.visible
         let accessibleMetadata = strings.accessible
 
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 0) {
-                Text(parts.stem)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .layoutPriority(0)
-                if !parts.extensionSuffix.isEmpty {
-                    Text(parts.extensionSuffix)
+        let scrim = VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                HStack(spacing: 0) {
+                    Text(parts.stem)
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(1)
-                        .reportHeaderControlFrame("clove.detail.fileName.extension")
-                }
-            }
-            .font(.system(size: fileNameSize, weight: .semibold))
-            .foregroundStyle(Color.white)
-            .accessibilityElement(children: .ignore)
-            .accessibilityAddTraits(.isStaticText)
-            .accessibilityLabel(fileName)
-            .accessibilityIdentifier("clove.detail.fileName")
-            .reportHeaderControlFrame("clove.detail.fileName")
-
-            if let metadataText {
-                HStack(alignment: .center, spacing: 4) {
-                    if isGroupFocus {
-                        Image(systemName: "square.stack")
-                            .font(.system(size: metadataSize, weight: .medium))
-                            .accessibilityHidden(true)
+                        .truncationMode(.middle)
+                        .layoutPriority(0)
+                    if !parts.extensionSuffix.isEmpty {
+                        Text(parts.extensionSuffix)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .layoutPriority(1)
+                            .reportHeaderControlFrame("clove.detail.fileName.extension")
                     }
-                    Text(metadataText)
-                        .font(.system(size: metadataSize).monospacedDigit())
-                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .truncationMode(.tail)
                 }
-                .foregroundStyle(Color.white.opacity(0.86))
+                .font(.system(size: fileNameSize, weight: .semibold))
+                .foregroundStyle(Color.white)
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isStaticText)
-                .accessibilityLabel(accessibleMetadata)
-                .accessibilityIdentifier("clove.detail.zoom")
-                .reportHeaderControlFrame("clove.detail.zoom")
+                .accessibilityLabel(fileName)
+                .accessibilityIdentifier("clove.detail.fileName")
+                .reportHeaderControlFrame("clove.detail.fileName")
+
+                Image(systemName: "info.circle")
+                    .font(.system(size: max(fileNameSize - 1, 10), weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.76))
+                    .layoutPriority(1)
+                    .accessibilityHidden(true)
+            }
+
+            if metadataText != nil || showsInlinePreparation {
+                HStack(alignment: .center, spacing: 6) {
+                    if let metadataText {
+                        HStack(alignment: .center, spacing: 4) {
+                            if isGroupFocus {
+                                Image(systemName: "square.stack")
+                                    .font(.system(size: metadataSize, weight: .medium))
+                                    .accessibilityHidden(true)
+                            }
+                            Text(metadataText)
+                                .font(.system(size: metadataSize).monospacedDigit())
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                                .truncationMode(.tail)
+                        }
+                        .foregroundStyle(Color.white.opacity(0.86))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityAddTraits(.isStaticText)
+                        .accessibilityLabel(accessibleMetadata)
+                        .accessibilityIdentifier("clove.detail.zoom")
+                        .reportHeaderControlFrame("clove.detail.zoom")
+                    }
+                    if let browsing {
+                        InlineFolderPreparationBar(
+                            browsing: browsing,
+                            identifier: "clove.detail.preparation.progress",
+                            usesDarkScrim: true,
+                            width: 32,
+                            height: 3)
+                    }
+                }
             }
         }
         .padding(.horizontal, 9)
@@ -2985,7 +3217,30 @@ struct DetailPhotoCornerOverlay: View {
             Color.black.opacity(0.62),
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        .allowsHitTesting(false)
         .reportHeaderControlFrame("clove.detail.photoCornerOverlay")
+
+        if let onInfoTap {
+            let infoLabel = AppLocalization.format(
+                "%@, %@", language: language, fileName,
+                AppLocalization.string("Info", language: language))
+            scrim
+                .allowsHitTesting(false)
+                .frame(minWidth: 44, minHeight: 44, alignment: .topLeading)
+                .background {
+                    Button(action: onInfoTap) {
+                        Rectangle()
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(infoLabel)
+                    .accessibilityIdentifier("clove.detail.info")
+                    .reportHeaderControlFrame("clove.detail.info")
+                }
+                .accessibilityElement(children: .contain)
+        } else {
+            scrim
+                .allowsHitTesting(false)
+        }
     }
 }

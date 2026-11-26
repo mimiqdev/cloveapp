@@ -3162,7 +3162,8 @@ struct DetailDisplayPresentationTests {
         if let cornerOverlay = overlayFrames.frames["clove.detail.photoCornerOverlay"] {
             let cornerCenterInWindow = CGPoint(x: cornerOverlay.midX, y: cornerOverlay.midY)
             let hitThroughCorner = window.hitTest(cornerCenterInWindow, with: nil)
-            #expect(hitThroughCorner?.isDescendant(of: preview) == true)
+            #expect(hitThroughCorner != nil)
+            #expect(hitThroughCorner?.isDescendant(of: preview) == false)
         }
         let leftBlank = CGPoint(x: imageRect.minX * 0.3, y: preview.bounds.midY)
         let rightBlank = CGPoint(
@@ -3909,8 +3910,9 @@ struct DetailDisplayPresentationTests {
                     headerFrames.frames["clove.nav.back"] != nil
                         && headerFrames.frames["clove.detail.focusToggle"] != nil
                         && headerFrames.frames["clove.detail.fileName"] != nil
-                        && headerFrames.frames["clove.detail.expandGroup"] != nil
                         && headerFrames.frames["clove.detail.info"] != nil
+                        && headerFrames.frames["clove.detail.expandGroup"] != nil
+                        && headerFrames.frames["clove.detail.filter"] != nil
                         && headerFrames.frames["clove.detail.undo"] != nil
                         && tapFrames.frames["clove.detail.filmstrip"] != nil
                         && tapFrames.frames["clove.detail.capsule"] != nil
@@ -3920,14 +3922,17 @@ struct DetailDisplayPresentationTests {
                     let back = try #require(headerFrames.frames["clove.nav.back"])
                     let focus = try #require(headerFrames.frames["clove.detail.focusToggle"])
                     let file = try #require(headerFrames.frames["clove.detail.fileName"])
-                    let pill = try #require(headerFrames.frames[pillID])
                     let info = try #require(headerFrames.frames["clove.detail.info"])
+                    let pill = try #require(headerFrames.frames[pillID])
+                    let filter = try #require(headerFrames.frames["clove.detail.filter"])
                     let undo = try #require(headerFrames.frames["clove.detail.undo"])
+                    #expect(info.width >= 44 && info.height >= 44)
                     #expect(back.maxX <= focus.minX + 1)
-                    #expect(focus.maxX <= file.minX + 1)
-                    #expect(file.maxX <= pill.minX + 1)
-                    #expect(pill.maxX <= info.minX + 1)
-                    #expect(info.maxX <= undo.minX + 1)
+                    #expect(focus.maxX <= info.minX + 1)
+                    #expect(file.minX >= info.minX - 1 && file.maxX <= info.maxX + 1)
+                    #expect(info.maxX <= pill.minX + 1)
+                    #expect(pill.maxX <= filter.minX + 1)
+                    #expect(filter.maxX <= undo.minX + 1)
                 }
 
                 try expectHeaderOrder("clove.detail.expandGroup")
@@ -4260,6 +4265,8 @@ struct DetailDisplayPresentationTests {
             try await waitFor("portrait detail did not settle") {
                 headerFrames.frames["clove.browsing.header"] != nil
                     && headerFrames.frames["clove.detail.info"] != nil
+                    && headerFrames.frames["clove.detail.filter"] != nil
+                    && headerFrames.frames["clove.detail.undo"] != nil
                     && tapFrames.frames["clove.detail.filmstrip"] != nil
             }
             let portraitHeader = try #require(headerFrames.frames["clove.browsing.header"])
@@ -4269,7 +4276,8 @@ struct DetailDisplayPresentationTests {
             preview.onChromeToggle?()
             try await waitFor("portrait chrome did not hide bottom controls and trailing tools") {
                 tapFrames.frames["clove.detail.filmstrip"] == nil
-                    && headerFrames.frames["clove.detail.info"] == nil
+                    && headerFrames.frames["clove.detail.filter"] == nil
+                    && headerFrames.frames["clove.detail.undo"] == nil
             }
             let portraitHeaderHiddenChrome = try #require(
                 headerFrames.frames["clove.browsing.header"])
@@ -5681,14 +5689,16 @@ struct DetailDisplayPresentationTests {
         #expect(limitationFrame.minY >= indicatorsFrame.maxY + 4)
         #expect(focusToggleFrame.minY > limitationFrame.maxY)
 
-        // Focus region placed under the upper-leading corner (x=0.08, y=0.08) still receives hits
-        // right through the passive corner overlay, while passive indicators, limitation note, and
-        // empty area pass through to the preview and the bottom focus toggle receives its own tap.
+        // Tappable identity badge intercepts its own taps (>= 44 pt), while passive indicators,
+        // limitation note, and empty stage pass through to the preview, and the bottom focus toggle
+        // and corner focus region receive their taps.
         let cornerRegion = try #require(findFocusControl(in: preview))
-        let regionCenterInWindow = cornerRegion.convert(
-            CGPoint(x: cornerRegion.bounds.midX, y: cornerRegion.bounds.midY), to: window)
-        let hitView = window.hitTest(regionCenterInWindow, with: nil)
-        #expect(hitView === cornerRegion)
+        let cornerInfoButton = try #require(framesBox.frames["clove.detail.info"])
+        #expect(cornerInfoButton.width >= 44 && cornerInfoButton.height >= 44)
+        let cornerInfoHit = window.hitTest(
+            CGPoint(x: cornerOverlay.midX, y: cornerOverlay.midY), with: nil)
+        #expect(cornerInfoHit != nil)
+        #expect(cornerInfoHit?.isDescendant(of: preview) == false)
 
         let indicatorHit = window.hitTest(
             CGPoint(x: indicatorsFrame.midX, y: indicatorsFrame.midY), with: nil)
@@ -5696,54 +5706,53 @@ struct DetailDisplayPresentationTests {
         let limitationHit = window.hitTest(
             CGPoint(x: limitationFrame.midX, y: limitationFrame.midY), with: nil)
         #expect(limitationHit?.isDescendant(of: preview) == true)
-        let trailingControlsEdge = max(
-            cornerOverlay.maxX,
-            framesBox.frames["clove.detail.preparation"]?.maxX ?? 0)
         let emptyAreaHit = window.hitTest(
-            CGPoint(x: trailingControlsEdge + 40, y: cornerOverlay.midY), with: nil)
+            CGPoint(x: cornerOverlay.maxX + 40, y: cornerOverlay.midY), with: nil)
         #expect(emptyAreaHit?.isDescendant(of: preview) == true)
         let toggleHit = window.hitTest(
             CGPoint(x: focusToggleFrame.midX, y: focusToggleFrame.midY), with: nil)
         #expect(toggleHit != nil)
         #expect(toggleHit?.isDescendant(of: preview) == false)
 
-        // Double-tap through the corner overlay area zooms to 100% and returns to fit.
-        let overlayCenterInPreview = window.convert(
-            CGPoint(x: cornerOverlay.midX, y: cornerOverlay.midY), to: preview)
-        preview.doubleTap(at: overlayCenterInPreview)
-        try await waitFor("double tap through corner overlay zoomed") { preview.isZoomed }
-        preview.doubleTap(at: overlayCenterInPreview)
-        try await waitFor("double tap through corner overlay returned to fit") { !preview.isZoomed }
+        // Double-tap on pass-through indicator area zooms to 100% and returns to fit.
+        let passThroughInPreview = window.convert(
+            CGPoint(x: indicatorsFrame.midX, y: indicatorsFrame.midY), to: preview)
+        preview.doubleTap(at: passThroughInPreview)
+        try await waitFor("double tap through indicator area zoomed") { preview.isZoomed }
+        preview.doubleTap(at: passThroughInPreview)
+        try await waitFor("double tap through indicator area returned to fit") { !preview.isZoomed }
 
-        // Tapping the corner focus region through the corner area enters 100% inspection on it.
+        // Corner focus region action enters 100% inspection on it cleanly.
         cornerRegion.sendActions(for: .touchUpInside)
         try await waitFor("corner focus region tap zoomed") { preview.isZoomed }
         try await Task.sleep(for: .milliseconds(250))
         let regionSnapshot = try #require(preview.zoomSnapshot)
         #expect(regionSnapshot.anchor.x < 0.25)
         #expect(regionSnapshot.anchor.y < 0.25)
-        preview.doubleTap(at: overlayCenterInPreview)
+        preview.doubleTap(at: passThroughInPreview)
         try await waitFor("returned to fit after region tap") { !preview.isZoomed }
 
-        // Vertical marking swipe and horizontal navigation swipe starting inside the corner overlay
-        // work normally through the passive overlay.
+        // Vertical marking swipe and horizontal navigation swipe starting inside pass-through area
+        // work normally.
         try sendSwipe(
             to: preview,
-            start: overlayCenterInPreview,
+            start: passThroughInPreview,
             travel: CGPoint(x: 0, y: -130))
         #expect(browsing.shownMarks(for: first.id).rating != .unrated)
 
         let stepTravel = -max(180, preview.bounds.width * 0.3)
         try sendSwipe(
             to: preview,
-            start: overlayCenterInPreview,
+            start: passThroughInPreview,
             travel: CGPoint(x: stepTravel, y: 0))
         #expect(browsing.state.currentPhoto == next.id)
         #expect(preview.chromeTapIsEnabled)
     }
 
     @Test
-    func nonExpandedDuoCoverHalfFoldIPhoneAndIPadKeepToolbarHeadersWithCompanions() async throws {
+    func nonExpandedDuoCoverHalfFoldIPhoneAndIPadKeepToolbarHeadersWithoutCompanions()
+        async throws
+    {
         guard #available(iOS 27.1, *) else { return }
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let browsing = BrowsingModel(library: TestLibrary.sample())
@@ -5853,12 +5862,20 @@ struct DetailDisplayPresentationTests {
             #expect(
                 framesBox.frames["clove.detail.photoCornerOverlay"] == nil,
                 Comment(rawValue: "\(pose.name) must not render expanded Duo corner overlay"))
+            #expect(
+                framesBox.frames["clove.detail.info"] != nil,
+                Comment(rawValue: "\(pose.name) must expose tappable title Info button"))
+            if let infoFrame = framesBox.frames["clove.detail.info"] {
+                #expect(infoFrame.width >= 44 && infoFrame.height >= 44)
+            }
             if let zoomLabel = findAccessibilityElement(
                 withIdentifier: "clove.detail.zoom", in: window)?.accessibilityLabel
             {
                 #expect(
-                    zoomLabel.contains("+ JPG"),
-                    Comment(rawValue: "\(pose.name) must preserve + JPG in header subtitle"))
+                    !zoomLabel.contains("+ JPG") && !zoomLabel.contains("+ HIF"),
+                    Comment(
+                        rawValue: "\(pose.name) must omit companion suffixes in header subtitle")
+                )
             }
         }
 
