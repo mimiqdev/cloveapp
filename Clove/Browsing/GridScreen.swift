@@ -12,16 +12,13 @@ struct GridScreen: View {
     @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
-    @State private var moveSheet: MoveSheetRoute?
+    @State private var activeSheet: GridSheetRoute?
     @State private var renameFlow: BatchRenameFlow?
-    @State private var showsKeywordsSheet = false
-    @State private var showsRenameDetails = false
     @State private var pendingPhotosConfirmationPlan: PhotosSavePlan?
-    @State private var pendingPhotosConfirmationSheetRequest: PhotosSaveSheetRequest?
     @State private var showsNoEligiblePhotosAlert = false
     @State private var isPickingEmptyFolder = false
-    @State private var showsFilters = false
-    @State private var showsMetadataFilters = false
+    @State private var filterHandoff = GridFilterSheetHandoff()
+    @State private var popoverHandoffTask: Task<Void, Never>?
     @State private var filterAnchorAttachments = 0
     @State private var selectsEmpty = false
     @State private var areGroupsUnfolded: Bool
@@ -42,15 +39,45 @@ struct GridScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var filterPopoverTrigger: Int = 0
 
-    private enum MoveSheetRoute: Identifiable {
-        case flow(MoveRejectsFlow)
-        case details(CompletedRejectMove)
+    private enum GridSheetRoute: Identifiable {
+        case renameDetails
+        case keywords
+        case photosConfirmation(PhotosSaveSheetRequest)
+        case metadataFilters
+        case moveFlow(MoveRejectsFlow)
+        case moveDetails(CompletedRejectMove)
 
         var id: String {
             switch self {
-            case .flow(let flow): "flow-\(flow.id)"
-            case .details(let completed): "details-\(completed.id)"
+            case .renameDetails: "renameDetails"
+            case .keywords: "keywords"
+            case .photosConfirmation(let request): "photosConfirmation-\(request.id)"
+            case .metadataFilters: "metadataFilters"
+            case .moveFlow(let flow): "moveFlow-\(flow.id)"
+            case .moveDetails(let completed): "moveDetails-\(completed.id)"
             }
+        }
+
+        var isMove: Bool {
+            switch self {
+            case .moveFlow, .moveDetails: true
+            case .renameDetails, .keywords, .photosConfirmation, .metadataFilters: false
+            }
+        }
+
+        var isKeywords: Bool {
+            if case .keywords = self { return true }
+            return false
+        }
+
+        var isMetadataFilters: Bool {
+            if case .metadataFilters = self { return true }
+            return false
+        }
+
+        var isPhotosConfirmation: Bool {
+            if case .photosConfirmation = self { return true }
+            return false
         }
     }
 
@@ -158,14 +185,21 @@ struct GridScreen: View {
                 selectsEmpty = false
                 areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
-                pendingPhotosConfirmationSheetRequest = nil
                 showsNoEligiblePhotosAlert = false
-                showsMetadataFilters = false
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
+                if activeSheet?.isPhotosConfirmation == true
+                    || activeSheet?.isMetadataFilters == true
+                {
+                    activeSheet = nil
+                }
             }
             .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
                 if isLost {
                     pendingPhotosConfirmationPlan = nil
-                    pendingPhotosConfirmationSheetRequest = nil
+                    if activeSheet?.isPhotosConfirmation == true {
+                        activeSheet = nil
+                    }
                     showsNoEligiblePhotosAlert = false
                 }
             }
@@ -177,21 +211,28 @@ struct GridScreen: View {
             }
             .onChange(of: filterPopoverTrigger) { _, _ in
                 if isFilterAnchorReady, scenePhase == .active {
-                    showsFilters = true
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.setFiltersPresented(true)
                 }
             }
             .onChange(of: filterDismissTrigger) { _, _ in
-                showsFilters = false
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active {
-                    showsFilters = false
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.dismissFiltersAndCancelPending()
                 }
+            }
+            .onDisappear {
+                cancelPendingMetadataFiltersHandoff()
+                filterHandoff.dismissFiltersAndCancelPending()
             }
             .overlay(alignment: .bottomTrailing) {
                 if !isRegular, !usesDock, showsMoveRejects {
                     MoveRejectsButton(identifier: "clove.grid.moveRejects") {
-                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                        presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
                     .padding(16)
                     .transition(
@@ -214,7 +255,7 @@ struct GridScreen: View {
                         onSelectAll: completeGroupUnfoldImmediately,
                         onDeselectAll: { selectsEmpty = true },
                         onRename: { renameFlow = BatchRenameFlow(browsing: browsing) },
-                        onKeywords: { showsKeywordsSheet = true },
+                        onKeywords: { presentSheet(.keywords) },
                         onSaveToPhotos: startSaveToPhotos,
                         showsCompare: browsing.batchTargets.count == 2 && supportsCompare,
                         onCompare: { browsing.enterCompareFromBatchSelection() }
@@ -279,7 +320,7 @@ struct GridScreen: View {
                         CloveMotion.slideTransition(
                             edge: .bottom, offset: 12, reduceMotion: reduceMotion))
                 } else if let completed = browsing.completedRename, browsing.isRenameToastVisible {
-                    BatchRenameToast(completed: completed) { showsRenameDetails = true }
+                    BatchRenameToast(completed: completed) { presentSheet(.renameDetails) }
                         .padding(.horizontal).padding(.bottom, 12)
                         .transition(
                             CloveMotion.slideTransition(
@@ -287,7 +328,7 @@ struct GridScreen: View {
                 } else if let completed = browsing.lastRejectMove, browsing.isRejectMoveToastVisible
                 {
                     MoveRejectsToast(browsing: browsing, completed: completed) {
-                        moveSheet = .details(completed)
+                        presentSheet(.moveDetails(completed))
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 12)
@@ -334,31 +375,28 @@ struct GridScreen: View {
             ) { flow in
                 BatchRenameOrderScreen(flow: flow)
             }
-            .sheet(isPresented: $showsRenameDetails) {
-                if let completed = browsing.completedRename {
-                    BatchRenameDetailsSheet(completed: completed)
-                }
-            }
-            .sheet(isPresented: $showsKeywordsSheet) {
-                BatchKeywordsSheet(browsing: browsing)
-            }
-            .sheet(item: $pendingPhotosConfirmationSheetRequest) { request in
-                SaveToPhotosConfirmationSheet(
-                    plan: request.plan,
-                    hiddenSelectedCount: browsing.hiddenSelectedCount
-                ) {
-                    Task {
-                        await browsing.saveToPhotos(request.plan, language: language)
-                    }
-                }
-            }
-            .sheet(isPresented: $showsMetadataFilters) {
-                MetadataFilterSheet(browsing: browsing)
-            }
-            .sheet(item: $moveSheet) { route in
+            .sheet(item: $activeSheet) { route in
                 switch route {
-                case .flow(let flow): MoveRejectsSheet(flow: flow)
-                case .details(let completed):
+                case .renameDetails:
+                    if let completed = browsing.completedRename {
+                        BatchRenameDetailsSheet(completed: completed)
+                    }
+                case .keywords:
+                    BatchKeywordsSheet(browsing: browsing)
+                case .photosConfirmation(let request):
+                    SaveToPhotosConfirmationSheet(
+                        plan: request.plan,
+                        hiddenSelectedCount: browsing.hiddenSelectedCount
+                    ) {
+                        Task {
+                            await browsing.saveToPhotos(request.plan, language: language)
+                        }
+                    }
+                case .metadataFilters:
+                    MetadataFilterSheet(browsing: browsing)
+                case .moveFlow(let flow):
+                    MoveRejectsSheet(flow: flow)
+                case .moveDetails(let completed):
                     MoveRejectsDetailsSheet(browsing: browsing, completed: completed)
                 }
             }
@@ -584,7 +622,7 @@ struct GridScreen: View {
             if !browsing.metadataFilter.isEmpty {
                 ActiveMetadataFilterBar(
                     browsing: browsing,
-                    onEdit: isRegular ? nil : { showsMetadataFilters = true })
+                    onEdit: isRegular ? nil : { presentSheet(.metadataFilters) })
             }
             if cells.isEmpty && !browsing.isFolderOpening {
                 emptyState
@@ -627,7 +665,7 @@ struct GridScreen: View {
             AppLocalization.string("Move rejects", language: language),
             systemImage: "tray.and.arrow.down"
         ) {
-            moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+            presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
         }
         .accessibilityIdentifier("clove.grid.moveRejects")
     }
@@ -733,7 +771,7 @@ struct GridScreen: View {
                     size: .phone,
                     identifier: "clove.grid.moveRejects"
                 ) {
-                    moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                    presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                 }
             }
         } tools: {
@@ -847,7 +885,7 @@ struct GridScreen: View {
                         symbol: "tray.and.arrow.down", size: .pad,
                         identifier: "clove.grid.moveRejects"
                     ) {
-                        moveSheet = .flow(MoveRejectsFlow(browsing: browsing))
+                        presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
                 }
             }
@@ -862,7 +900,8 @@ struct GridScreen: View {
                     AppLocalization.string("Filter", language: language),
                     systemImage: "line.3.horizontal.decrease"
                 ) {
-                    showsFilters.toggle()
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.toggleFilters()
                 }
                 .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
                 .accessibilityIdentifier("clove.grid.filter")
@@ -871,15 +910,27 @@ struct GridScreen: View {
                     label: AppLocalization.string("Filter", language: language),
                     symbol: "line.3.horizontal.decrease", isActive: hasFilter,
                     size: isRegular ? .pad : .phone, identifier: "clove.grid.filter"
-                ) { showsFilters.toggle() }
+                ) {
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.toggleFilters()
+                }
             }
         }
         .popover(
             isPresented: Binding(
-                get: { showsFilters && isFilterAnchorReady && scenePhase == .active },
-                set: { showsFilters = $0 })
+                get: { filterHandoff.showsFilters && isFilterAnchorReady && scenePhase == .active },
+                set: { presented in
+                    if presented {
+                        cancelPendingMetadataFiltersHandoff()
+                    }
+                    filterHandoff.setFiltersPresented(presented)
+                })
         ) {
-            filterMenu.presentationCompactAdaptation(.popover)
+            filterMenu
+                .presentationCompactAdaptation(.popover)
+                .onDisappear {
+                    completeMetadataFiltersHandoffIfPending()
+                }
         }
         .onAppear {
             filterAnchorAttachments += 1
@@ -887,7 +938,7 @@ struct GridScreen: View {
         .onDisappear {
             filterAnchorAttachments = max(0, filterAnchorAttachments - 1)
             if filterAnchorAttachments == 0 {
-                showsFilters = false
+                filterHandoff.setFiltersPresented(false)
             }
         }
     }
@@ -961,7 +1012,7 @@ struct GridScreen: View {
                 FilterStarRow(rating: minimumRating, identifier: "clove.grid.filter.stars") {
                     rating in
                     browsing.setFilter(rating == .unrated ? .all : .ratedAtLeast(rating))
-                    showsFilters = false
+                    filterHandoff.setFiltersPresented(false)
                 }
             }
             .padding(.horizontal, 16)
@@ -972,7 +1023,7 @@ struct GridScreen: View {
                 ForEach(LabelColour.allCases.filter { !$0.isExtended }, id: \.self) { label in
                     Button {
                         browsing.setLabelFilter(label)
-                        showsFilters = false
+                        filterHandoff.setFiltersPresented(false)
                     } label: {
                         Circle().fill(Color.clove.label.colour(for: label))
                             .frame(width: 16, height: 16)
@@ -992,8 +1043,8 @@ struct GridScreen: View {
             if browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty {
                 Divider().overlay(Color.clove.separator)
                 Button {
-                    showsFilters = false
-                    showsMetadataFilters = true
+                    cancelPendingMetadataFiltersHandoff()
+                    filterHandoff.requestMetadataFiltersFromPopover(folder: browsing.state.folder)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "slider.horizontal.3")
@@ -1036,7 +1087,7 @@ struct GridScreen: View {
     private func filterRow(_ name: String, filter: PhotoFilter, identifier: String) -> some View {
         Button {
             browsing.setFilter(filter)
-            showsFilters = false
+            filterHandoff.setFiltersPresented(false)
         } label: {
             HStack {
                 Image(systemName: "checkmark")
@@ -1188,7 +1239,7 @@ struct GridScreen: View {
         let plan = browsing.planSaveToPhotos()
         guard !plan.isEmpty else { return }
         if store.settings.confirmBatchActions {
-            pendingPhotosConfirmationSheetRequest = PhotosSaveSheetRequest(plan: plan)
+            presentSheet(.photosConfirmation(PhotosSaveSheetRequest(plan: plan)))
             return
         }
         if plan.eligibleCount == 0 && plan.skippedRawCount > 0 {
@@ -1212,9 +1263,46 @@ struct GridScreen: View {
             isDuoCover: isDuoCover,
             usesVerticalToolbar: usesVerticalToolbar,
             hasFoldRegion: hasFoldRegion,
+            isComparing: browsing.compareSession != nil,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer)
+    }
+
+    private var canPresentMetadataFiltersFromPopover: Bool {
+        !isRegular
+            && (browsing.state.route == .grid
+                || (isDuoExpanded && browsing.state.route == .detail
+                    && browsing.compareSession == nil))
+    }
+
+    private func presentSheet(_ route: GridSheetRoute) {
+        cancelPendingMetadataFiltersHandoff()
+        filterHandoff.dismissFiltersAndCancelPending()
+        activeSheet = route
+    }
+
+    private func cancelPendingMetadataFiltersHandoff() {
+        popoverHandoffTask?.cancel()
+        popoverHandoffTask = nil
+        filterHandoff.cancelPendingMetadataFilters()
+    }
+
+    private func completeMetadataFiltersHandoffIfPending() {
+        guard filterHandoff.pendingMetadataFiltersAfterPopover else { return }
+        popoverHandoffTask?.cancel()
+        popoverHandoffTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            if filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
+                currentFolder: browsing.state.folder,
+                isSceneActive: scenePhase == .active,
+                canPresent: canPresentMetadataFiltersFromPopover)
+            {
+                activeSheet = .metadataFilters
+            }
+            popoverHandoffTask = nil
+        }
     }
 
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {
@@ -1227,14 +1315,14 @@ struct GridScreen: View {
             labelFilter: browsing.labelFilter,
             metadataFilter: browsing.metadataFilter,
             hasBatchTargets: !browsing.batchTargets.isEmpty,
-            hasMoveSheet: moveSheet != nil,
+            hasMoveSheet: activeSheet?.isMove == true,
             hasRenameFlow: renameFlow != nil,
-            hasKeywordsSheet: showsKeywordsSheet,
-            hasMetadataFiltersSheet: showsMetadataFilters,
+            hasKeywordsSheet: activeSheet?.isKeywords == true,
+            hasMetadataFiltersSheet: activeSheet?.isMetadataFilters == true,
             hasPendingPhotosAlert: pendingPhotosConfirmationPlan != nil
-                || pendingPhotosConfirmationSheetRequest != nil
+                || activeSheet?.isPhotosConfirmation == true
                 || showsNoEligiblePhotosAlert,
-            showsFilters: showsFilters,
+            showsFilters: filterHandoff.showsFilters,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer)
@@ -1275,6 +1363,7 @@ private struct GridFilterDismissTrigger: Equatable {
     let isDuoCover: Bool
     let usesVerticalToolbar: Bool
     let hasFoldRegion: Bool
+    let isComparing: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?
     let isLandscapeContainer: Bool

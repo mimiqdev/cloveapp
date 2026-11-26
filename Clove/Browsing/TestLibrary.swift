@@ -101,6 +101,10 @@ final class TestLibrary: FolderLibrary {
     /// The launch environment value appending standalone JPEG/HEIF and RAW+HEIF sample sets.
     static let rasterSamplesVariable = "CLOVE_TEST_LIBRARY_RASTER_SAMPLES"
 
+    /// The launch environment value populating distinct camera, lens, focal-length, and keyword
+    /// metadata across the sample photos so metadata/keyword filters appear in UI tests.
+    static let metadataSamplesVariable = "CLOVE_TEST_LIBRARY_METADATA_SAMPLES"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -119,6 +123,7 @@ final class TestLibrary: FolderLibrary {
             drainDelay: Duration.milliseconds(
                 Int(environment[drainDelayVariable] ?? "") ?? 0),
             includeRasterSamples: environment[rasterSamplesVariable] == "1",
+            includeMetadataSamples: environment[metadataSamplesVariable] == "1",
             overflowGroup: environment[overflowGroupVariable] == "1",
             denseGroups: environment[denseGroupsVariable] == "1",
             simulatedPhotosAuthorization: photosAuthorization(
@@ -1147,6 +1152,7 @@ final class TestLibrary: FolderLibrary {
         locationLoss: FolderLocationLoss.Reason? = nil,
         drainDelay: Duration = .zero,
         includeRasterSamples: Bool = false,
+        includeMetadataSamples: Bool = false,
         overflowGroup: Bool = false,
         denseGroups: Bool = false,
         photosSaver: (any PhotosLibrarySaving)? = nil,
@@ -1158,6 +1164,26 @@ final class TestLibrary: FolderLibrary {
         var photos = (0..<36).map { index -> GridPhoto in
             let number = 2678 + index
             let stem = String(format: "MMQ%05d", number)
+            var marks = sampleMarks[index]
+            let metadata: PhotoFilterMetadata
+            if includeMetadataSamples {
+                if index.isMultiple(of: 4) {
+                    marks.keywords = ["Coast"]
+                } else if index % 4 == 1 {
+                    marks.keywords = ["Portrait"]
+                }
+                let camera = index.isMultiple(of: 2) ? "ILCE-1M2" : "ILCE-7M4"
+                let (lens, focalLength): (String, Double) =
+                    switch index % 3 {
+                    case 0: ("FE 35mm F1.4 GM", 35)
+                    case 1: ("FE 85mm F1.4 GM", 85)
+                    default: ("FE 24-70mm F2.8 GM II", 50)
+                    }
+                metadata = PhotoFilterMetadata(
+                    camera: camera, lens: lens, focalLengthMillimetres: focalLength)
+            } else {
+                metadata = .empty
+            }
             return GridPhoto(
                 id: samplePhoto(number),
                 fileName: "\(stem).ARW",
@@ -1165,7 +1191,8 @@ final class TestLibrary: FolderLibrary {
                     PhotoTime(
                         captureTime: captureBase.addingTimeInterval(Double(index) * 4),
                         hasUTCOffset: true)),
-                marks: sampleMarks[index])
+                marks: marks,
+                metadata: metadata)
         }
         var groups = denseGroups ? denseSampleGroups : sampleGroups
         if overflowGroup {
