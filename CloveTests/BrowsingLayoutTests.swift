@@ -434,31 +434,20 @@ struct BrowsingLayoutTests {
             }
         }
 
-        // 4. DuoMarkControls label popover dismisses on posture & inactive scene snapshot.
-        if #available(iOS 27.1, *) {
+        // 4. MarkLabelAction fallback popover dismisses on Duo Cover posture & inactive scene snapshot.
+        do {
             let box = TestToolbarHostBox(photoID: first)
             box.isDuoCover = true
             struct HostView: View {
                 let box: TestToolbarHostBox
                 var body: some View {
-                    NavigationStack {
-                        Color.clear
-                            .toolbar {
-                                DuoMarkControls(
-                                    photoID: box.photoID,
-                                    marks: PhotoMarks(),
-                                    settings: AppSettings(),
-                                    previewRating: nil,
-                                    canMark: box.isEnabled,
-                                    showsStars: .constant(false),
-                                    dragRating: .constant(nil),
-                                    rate: { _ in },
-                                    label: { _ in },
-                                    toggleReject: {},
-                                    markingBegan: {},
-                                    labelPopoverTrigger: box.popoverTrigger)
-                            }
-                    }
+                    MarkLabelAction(
+                        label: nil,
+                        photoID: box.photoID,
+                        onPick: { _ in },
+                        fallbackPopoverTrigger: box.popoverTrigger
+                    )
+                    .disabled(!box.isEnabled)
                     .environment(\.isDuoExpanded, box.isDuoExpanded)
                     .environment(\.isDuoCover, box.isDuoCover)
                     .environment(\.scenePhase, box.scenePhase)
@@ -478,7 +467,7 @@ struct BrowsingLayoutTests {
             try await Task.sleep(for: .milliseconds(80))
             window.layoutIfNeeded()
             box.popoverTrigger += 1
-            try await waitFor("duo label popover presented") {
+            try await waitFor("cover label popover presented") {
                 self.topPresentedViewController(from: host) != nil
             }
             box.isDuoCover = false
@@ -488,7 +477,7 @@ struct BrowsingLayoutTests {
                 host.view.layoutIfNeeded()
                 _ = window.snapshotView(afterScreenUpdates: true)
             }
-            try await waitFor("duo label popover dismissed on posture/scene change") {
+            try await waitFor("cover label popover dismissed on posture/scene change") {
                 self.topPresentedViewController(from: host) == nil
             }
         }
@@ -2427,8 +2416,9 @@ struct BrowsingLayoutTests {
             }
         }
 
-        // 6. Duo Cover Detail preserves Focus regions, Filter, and centered Info title while
-        // omitting permanent Undo (#461).
+        // 6. Duo Cover Detail uses strictly 3 right-rail buttons (Back, Focus regions, Filter),
+        // empty bottom rail, top-left DetailPhotoCornerOverlay, and centered bottom MarkingToolbar
+        // below DetailFilmstrip (#469).
         do {
             let photo = try #require(model.photos.first?.id)
             model.openPhoto(photo)
@@ -2436,6 +2426,7 @@ struct BrowsingLayoutTests {
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
             let headerFrames = TestHeaderFramesBox()
+            let tapFrames = TestHeaderFramesBox()
             let host = UIHostingController(
                 rootView: NavigationStack {
                     GridScreen(browsing: model, thumbnails: model.thumbnails)
@@ -2448,6 +2439,9 @@ struct BrowsingLayoutTests {
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
                     headerFrames.frames = frames
+                }
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    tapFrames.frames = frames
                 })
             host.traitOverrides.horizontalSizeClass = .compact
             window.rootViewController = host
@@ -2458,27 +2452,71 @@ struct BrowsingLayoutTests {
             }
 
             try await waitFor(
-                "Duo Cover Detail controls did not mount: \(self.describeToolbarState(in: host, window: window))"
+                "Duo Cover Detail controls did not mount: \(self.describeToolbarState(in: host, window: window, leadingBarHostIdentifier: "clove.detail.focusToggle"))"
             ) {
-                let state = self.inspectToolbarState(in: host, window: window)
+                let state = self.inspectToolbarState(
+                    in: host, window: window, leadingBarHostIdentifier: "clove.detail.focusToggle")
                 return state.contains("clove.nav.back")
+                    && state.contains("clove.detail.focusToggle")
                     && state.contains("clove.detail.filter")
                     && !state.contains("clove.duo.undo")
                     && !state.contains("clove.detail.undo")
+                    && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
                     && headerFrames.frames["clove.detail.info"] != nil
                     && headerFrames.frames["clove.detail.fileName"] != nil
                     && headerFrames.frames["clove.detail.zoom"] != nil
+                    && tapFrames.frames["clove.detail.filmstrip"] != nil
+                    && tapFrames.frames["clove.duo.capsule"] != nil
             }
-            let snapshot = inspectToolbarState(in: host, window: window)
+            let snapshot = inspectToolbarState(
+                in: host, window: window, leadingBarHostIdentifier: "clove.detail.focusToggle")
             #expect(!snapshot.contains("clove.duo.undo"))
             #expect(!snapshot.contains("clove.detail.undo"))
-            #expect(
-                snapshot.trailingIDs == ["clove.detail.filter", "clove.detail.focusToggle"],
-                Comment(rawValue: "unexpected trailingIDs: \(snapshot.description)"))
+            #expect(!snapshot.contains("clove.grid.filter"))
             #expect(!snapshot.contains("clove.grid.more"))
             #expect(!snapshot.contains("clove.grid.moveRejects"))
             #expect(!snapshot.contains("clove.detail.gridToggle"))
-            #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
+            #expect(!snapshot.contains("clove.detail.inspectionPill"))
+            #expect(!snapshot.contains("clove.duo.rating"))
+            #expect(!snapshot.contains("clove.duo.reject"))
+            #expect(!snapshot.contains("clove.duo.label"))
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.compare" })
+            #expect(!snapshot.entries.contains { $0.identifier == "clove.detail.info" })
+            #expect(snapshot.bottomToolbarIDs.isEmpty)
+
+            let backFrame = try #require(
+                snapshot.frame(for: "clove.nav.back"),
+                Comment(rawValue: "missing back in \(snapshot.description)"))
+            let focusFrame = try #require(
+                snapshot.frame(for: "clove.detail.focusToggle"),
+                Comment(rawValue: "missing focusToggle in \(snapshot.description)"))
+            let filterFrame = try #require(
+                snapshot.frame(for: "clove.detail.filter"),
+                Comment(rawValue: "missing filter in \(snapshot.description)"))
+            if host.traitCollection.verticalBarEdge != .unspecified {
+                #expect(snapshot.leadingIDs == ["clove.nav.back"])
+                #expect(
+                    snapshot.trailingIDs == ["clove.detail.focusToggle", "clove.detail.filter"])
+                #expect(backFrame.maxY < focusFrame.minY)
+                #expect(focusFrame.minY - backFrame.maxY >= 18)
+                #expect(focusFrame.maxY < filterFrame.minY)
+                #expect(filterFrame.minY - focusFrame.maxY >= 18)
+            } else {
+                #expect(snapshot.leadingIDs == ["clove.nav.back", "clove.detail.focusToggle"])
+                #expect(snapshot.trailingIDs == ["clove.detail.filter"])
+            }
+
+            let cornerOverlayFrame = try #require(
+                headerFrames.frames["clove.detail.photoCornerOverlay"])
+            let cornerInfoFrame = try #require(headerFrames.frames["clove.detail.info"])
+            let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
+            let capsuleFrame = try #require(tapFrames.frames["clove.duo.capsule"])
+            #expect(cornerOverlayFrame.width > 0 && cornerOverlayFrame.height > 0)
+            #expect(cornerInfoFrame.width >= 44 && cornerInfoFrame.height >= 44)
+            #expect(abs(capsuleFrame.width - 168) <= 1)
+            #expect(abs(capsuleFrame.height - 48) <= 1)
+            #expect(capsuleFrame.minY >= stripFrame.maxY + 7)
+            #expect(abs(capsuleFrame.midX - stripFrame.midX) <= 2)
         }
     }
 
@@ -2799,12 +2837,21 @@ struct BrowsingLayoutTests {
         inspectToolbarState(in: host, window: window).contains(identifier)
     }
 
-    private func describeToolbarState(in host: UIViewController, window: UIWindow) -> String {
-        inspectToolbarState(in: host, window: window).description
+    private func describeToolbarState(
+        in host: UIViewController,
+        window: UIWindow,
+        leadingBarHostIdentifier: String = "clove.detail.gridToggle"
+    ) -> String {
+        inspectToolbarState(
+            in: host, window: window, leadingBarHostIdentifier: leadingBarHostIdentifier
+        ).description
     }
 
-    private func inspectToolbarState(in host: UIViewController, window: UIWindow) -> ToolbarSnapshot
-    {
+    private func inspectToolbarState(
+        in host: UIViewController,
+        window: UIWindow,
+        leadingBarHostIdentifier: String = "clove.detail.gridToggle"
+    ) -> ToolbarSnapshot {
         window.setNeedsLayout()
         window.layoutIfNeeded()
         host.view.setNeedsLayout()
@@ -2972,12 +3019,12 @@ struct BrowsingLayoutTests {
             if let custom = item.customView,
                 String(describing: type(of: custom)).contains("BarItemHost")
             {
-                if isLeading { return "clove.detail.gridToggle" }
+                if isLeading { return leadingBarHostIdentifier }
                 if isDetailScreen {
-                    // Expanded Duo Detail puts photoGridToggle first (before spacer & Filter);
-                    // Duo Cover Detail puts Focus regions after Filter.
+                    // Expanded Duo Detail puts photoGridToggle first; Duo Cover Detail puts Focus
+                    // regions first (both via standaloneDockTool) before spacer & Filter.
                     return indexInTrailing == 0
-                        ? "clove.detail.gridToggle" : "clove.detail.focusToggle"
+                        ? leadingBarHostIdentifier : "clove.detail.focusToggle"
                 }
                 return "clove.grid.filter"
             }

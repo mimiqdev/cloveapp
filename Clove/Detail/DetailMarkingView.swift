@@ -138,8 +138,6 @@ struct DetailMarkingView: View {
     @State private var popoverHandoffTask: Task<Void, Never>?
     @State private var emptyFromFilterSelection = false
     private var showsInformation: Bool { activeSheet == .information }
-    @State private var showsToolbarStars = false
-    @State private var toolbarDragRating: Rating?
     @State private var showsZoomChip = false
     @State private var controlsHeight: CGFloat = 0
 
@@ -254,8 +252,6 @@ struct DetailMarkingView: View {
             }
             .onAppear { hasKeyFocus = true }
             .onChange(of: photo.id) { _, _ in
-                showsToolbarStars = false
-                toolbarDragRating = nil
                 inspectedFocusRegionID = nil
                 pendingRestoredZoom = nil
                 focusAnalysisID = UUID()
@@ -282,17 +278,11 @@ struct DetailMarkingView: View {
                 cancelPendingMetadataFiltersHandoff()
                 filterHandoff.dismissFiltersAndCancelPending()
             }
-            .onChange(of: duoPopoverDismissTrigger) { _, _ in
-                showsToolbarStars = false
-                toolbarDragRating = nil
-            }
             .onChange(of: tapPickerDismissTrigger) { _, _ in
                 gridPickerDismissToken += 1
             }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active {
-                    showsToolbarStars = false
-                    toolbarDragRating = nil
                     cancelPendingMetadataFiltersHandoff()
                     filterHandoff.dismissFiltersAndCancelPending()
                 }
@@ -310,8 +300,6 @@ struct DetailMarkingView: View {
                 await loadFocusRegions(for: photo)
             }
             .onDisappear {
-                showsToolbarStars = false
-                toolbarDragRating = nil
                 cancelPendingMetadataFiltersHandoff()
                 filterHandoff.dismissFiltersAndCancelPending()
                 upgradeTask?.cancel()
@@ -356,7 +344,7 @@ struct DetailMarkingView: View {
             floatingPillInStage: duo != nil,
             pillVisible: floatingPillVisible,
             pillHeight: floatingPillHeight,
-            pillGap: showsFilmstrip ? (isDuoExpanded ? 12 : 6) : 12,
+            pillGap: 12,
             measuredBand: isOrdinaryPhoneLandscape ? 0 : controlsHeight)
     }
 
@@ -424,8 +412,8 @@ struct DetailMarkingView: View {
         isWidePadLayout && !isDuoExpanded ? filterTitle : nil
     }
 
-    private var usesExpandedDuoViewportOverlay: Bool {
-        isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion)
+    private var usesDuoViewportOverlay: Bool {
+        isDuoCover || (isDuoExpanded && (usesVerticalToolbar || !hasFoldRegion))
     }
 
     private var presentationPolicy: DetailPresentationPolicy {
@@ -454,7 +442,7 @@ struct DetailMarkingView: View {
     }
 
     private var usesUnifiedStageBackground: Bool {
-        userInterfaceIdiom == .pad || isDuoExpanded
+        userInterfaceIdiom == .pad || isDuoExpanded || isDuoCover
     }
 
     private var canEnterCompare: Bool {
@@ -684,6 +672,7 @@ struct DetailMarkingView: View {
                         browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
             }
             .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+            .help(focusLabel)
             .accessibilityLabel(focusLabel)
             .accessibilityValue(focusValue)
             .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
@@ -698,6 +687,7 @@ struct DetailMarkingView: View {
             ) {
                 browsing.showsFocusRegions.toggle()
             }
+            .help(focusLabel)
             .reportHeaderControlFrame("clove.detail.focusToggle")
         }
     }
@@ -791,76 +781,46 @@ struct DetailMarkingView: View {
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
                     showsUndo: false,
                     showsNavigationTools: false,
-                    showsStandaloneDockTool: !emptyFromFilterSelection && duo.showsGrid
-                        && presentationPolicy.supportsPhotoPreview,
+                    showsStandaloneDockTool: !emptyFromFilterSelection
+                        && ((duo.showsGrid && presentationPolicy.supportsPhotoPreview)
+                            || isDuoCover),
                     showsTools: true,
                     showsBottom: false
                 ) {
                     EmptyView()
                 } standaloneDockTool: {
-                    if !emptyFromFilterSelection && duo.showsGrid
-                        && presentationPolicy.supportsPhotoPreview
-                    {
-                        photoGridToggle
+                    if !emptyFromFilterSelection {
+                        if duo.showsGrid && presentationPolicy.supportsPhotoPreview {
+                            photoGridToggle
+                        } else if isDuoCover {
+                            focusRegionsToggle
+                        }
                     }
                 } tools: {
                     detailFilterButton
-                    if !isDuoExpanded, !emptyFromFilterSelection {
+                    if !isDuoExpanded, !isDuoCover, !emptyFromFilterSelection {
                         focusRegionsToggle
                         if !usesInspectionPill, canEnterCompare {
                             compareToolbarButton
                         }
                     }
                 } marks: {
-                    // Expanded Duo marks live in the capsule row beneath the photo, so
-                    // system status activity cannot push them into overflow (#200). The
-                    // cover keeps the compact dock controls.
-                    if emptyFromFilterSelection || isDuoExpanded {
-                        Optional<ToolbarItem<Void, EmptyView>>.none
-                    } else {
-                        DuoMarkControls(
-                            photoID: photo.id, marks: displayMarks, settings: settings,
-                            previewRating: swipeFeedback.rating, canMark: allowsMarkingInput,
-                            showsStars: $showsToolbarStars, dragRating: $toolbarDragRating,
-                            rate: { rate($0, togglesCurrent: false) }, label: { choose($0) },
-                            toggleReject: { toggleReject() },
-                            markingBegan: beginMarkingGesture)
-                    }
+                    Optional<ToolbarItem<Void, EmptyView>>.none
                 } bottom: {
                     EmptyView()
                 }
-                if !emptyFromFilterSelection && !usesExpandedDuoViewportOverlay {
+                if !emptyFromFilterSelection && !usesDuoViewportOverlay {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
                         .axisBehavior(.horizontalOnly)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(
-                isDuoExpanded ? .hidden : .automatic,
+                usesUnifiedStageBackground ? .hidden : .automatic,
                 for: .navigationBar
             )
             .toolbarVerticalBehavior(.automatic)
             .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
-            .background {
-                if !isDuoExpanded {
-                    ToolbarRatingGesture(
-                        rating: displayMarks.rating, enabledRatings: settings.enabledRatings,
-                        canMark: allowsMarkingInput, began: beginMarkingGesture,
-                        preview: {
-                            toolbarDragRating = $0
-                            showsToolbarStars = true
-                        },
-                        commit: {
-                            rate($0, togglesCurrent: false)
-                            toolbarDragRating = nil
-                            showsToolbarStars = false
-                        },
-                        cancel: {
-                            toolbarDragRating = nil
-                            showsToolbarStars = false
-                        })
-                }
-            }
         }
     }
 
@@ -941,7 +901,7 @@ struct DetailMarkingView: View {
                                 } action: {
                                     duoPillHeight = $0
                                 }
-                                .padding(.bottom, 6)
+                                .padding(.bottom, 12)
                                 .transition(
                                     .asymmetric(
                                         insertion: CloveMotion.slideTransition(
@@ -984,39 +944,54 @@ struct DetailMarkingView: View {
                     CloveMotion.slideTransition(
                         edge: .bottom, offset: 12, reduceMotion: reduceMotion))
             }
-            // The marking toolbar gets its own reserved bottom-right area inside the shared bottom
-            // control band, never over the image and never in the system side toolbar (#200, #227). Both Photo Preview and Focus View anchor it with the same 16 pt
-            // trailing inset and vertical centering on the band so switching presentations keeps
-            // the capsule stationary. In Focus View, the toolbar sibling is the one reservation:
-            // its width (plus a 6 pt leading optical gap) narrows the filmstrip's viewport once,
-            // and the strip's content fills that viewport up to the toolbar (#237). In 30/70
-            // Photo Preview, [ Focus | Compare ], Stage Pill, and MarkingToolbar align on one
-            // single bottom row inside the 70% photo pane (#463).
+            // The marking toolbar gets its own reserved area inside the shared bottom control
+            // band, never over the image and never in the system side toolbar (#200, #227, #469).
+            // In Expanded Focus View, it sits beside the filmstrip at 16 pt trailing inset (same
+            // anchor as Photo Preview); in Duo Cover Focus View, the background-free two-level
+            // filmstrip sits above the centered MarkingToolbar, matching iPhone Detail's bottom
+            // stack. In 30/70 Photo Preview, [ Focus | Compare ], Stage Pill, and MarkingToolbar
+            // align on one single bottom row inside the 70% photo pane (#463).
             if chromeIsVisible && (showsFilmstrip || isDuoExpanded) {
                 if showsFilmstrip {
-                    let markingLeadingGap: CGFloat = 6
-                    let markingTrailingInset: CGFloat = 16
-                    HStack(alignment: .center, spacing: 0) {
-                        DetailFilmstrip(
-                            timeline: timeline,
-                            expandedGroup: expandedGroup,
-                            current: photo.id,
-                            thumbnails: browsing.thumbnails,
-                            gridPickerDismissToken: gridPickerDismissToken,
-                            openPhoto: openFilmstripPhoto,
-                            selectGroupPhoto: selectFilmstripGroupPhoto,
-                            expandGroup: expandFilmstripGroup,
-                            collapseGroup: collapseFilmstripGroup
-                        )
-                        .frame(maxWidth: .infinity)
-                        if isDuoExpanded {
+                    if isDuoExpanded {
+                        let markingLeadingGap: CGFloat = 6
+                        let markingTrailingInset: CGFloat = 16
+                        HStack(alignment: .center, spacing: 0) {
+                            DetailFilmstrip(
+                                timeline: timeline,
+                                expandedGroup: expandedGroup,
+                                current: photo.id,
+                                thumbnails: browsing.thumbnails,
+                                gridPickerDismissToken: gridPickerDismissToken,
+                                openPhoto: openFilmstripPhoto,
+                                selectGroupPhoto: selectFilmstripGroupPhoto,
+                                expandGroup: expandFilmstripGroup,
+                                collapseGroup: collapseFilmstripGroup
+                            )
+                            .frame(maxWidth: .infinity)
                             duoMarkingToolbar
                                 .padding(.leading, markingLeadingGap)
                                 .padding(.trailing, markingTrailingInset)
                                 .layoutPriority(1)
                         }
+                        .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
+                    } else {
+                        VStack(spacing: 8) {
+                            DetailFilmstrip(
+                                timeline: timeline,
+                                expandedGroup: expandedGroup,
+                                current: photo.id,
+                                thumbnails: browsing.thumbnails,
+                                gridPickerDismissToken: gridPickerDismissToken,
+                                openPhoto: openFilmstripPhoto,
+                                selectGroupPhoto: selectFilmstripGroupPhoto,
+                                expandGroup: expandFilmstripGroup,
+                                collapseGroup: collapseFilmstripGroup)
+                            duoMarkingToolbar
+                                .padding(.horizontal, 16)
+                        }
+                        .padding(.bottom, 8)
                     }
-                    .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
                 } else {
                     DetailPhotoPreviewBandLayout(
                         leadingInset: 16,
@@ -1806,7 +1781,7 @@ struct DetailMarkingView: View {
                 browsing: browsing,
                 identifierPrefix: "clove.detail.saveStatus.failure"
             )
-            .padding(.top, usesExpandedDuoViewportOverlay ? 56 : 0)
+            .padding(.top, usesDuoViewportOverlay ? 56 : 0)
         }
         .animation(CloveMotion.chrome(reduceMotion: reduceMotion), value: showsGestureGuide)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1903,15 +1878,16 @@ struct DetailMarkingView: View {
     }
 
     /// Compact passive face/AF result indicators and any preview-only limitation note stacked cleanly
-    /// in the viewport's upper-leading corner inside its safe area. On expanded Duo, the upper-leading
-    /// viewport corner also pins the passive photo identity badge beside the floating focus,
-    /// preparation, and save/access controls so the photo stage reclaims the former top header height.
+    /// in the viewport's upper-leading corner inside its safe area. On expanded Duo Landscape and
+    /// Duo Cover, the upper-leading viewport corner also pins the passive photo identity badge
+    /// beside the floating save/access indicator so the photo stage reclaims the former top header
+    /// height.
     @ViewBuilder private var topLeadingStageOverlays: some View {
         let isShowingCurrentPhoto = shown != nil && shownPhoto == photo.id
         let indicators = focusRegionState.resultIndicators(
             visible: isShowingCurrentPhoto && chromeIsVisible && browsing.showsFocusRegions)
         let showsLimitation = limitation != nil && isShowingCurrentPhoto
-        if usesExpandedDuoViewportOverlay {
+        if usesDuoViewportOverlay {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
                     if chromeIsVisible {
@@ -2804,15 +2780,11 @@ struct DetailMarkingView: View {
     }
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
-    private func rate(_ rating: Rating, togglesCurrent: Bool = true) {
+    private func rate(_ rating: Rating) {
         let marks = browsing.shownMarks(for: photo.id)
-        // The rail resolves tap-to-clear itself and a drag commits its final value directly.
         apply(
-            togglesCurrent
-                ? rules.result(
-                    forRating: rating, marks: marks, allowsMarking: allowsMarkingInput)
-                : rules.result(
-                    for: .rating(rating), marks: marks, allowsMarking: allowsMarkingInput))
+            rules.result(
+                forRating: rating, marks: marks, allowsMarking: allowsMarkingInput))
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).
@@ -2969,24 +2941,12 @@ struct DetailMarkingView: View {
             showsInformation: showsInformation,
             showsPhotoGrid: showsPhotoGrid,
             expandedGroupID: expandedGroup?.id,
+            isDuoExpanded: isDuoExpanded,
+            isDuoCover: isDuoCover,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer,
             dismissToken: tapPickerDismissToken)
-    }
-
-    private var duoPopoverDismissTrigger: DetailDuoPopoverDismissTrigger {
-        DetailDuoPopoverDismissTrigger(
-            route: browsing.state.route,
-            isDuoExpanded: isDuoExpanded,
-            isDuoCover: isDuoCover,
-            usesVerticalToolbar: usesVerticalToolbar,
-            hasFoldRegion: hasFoldRegion,
-            horizontalSizeClass: horizontalSizeClass,
-            verticalSizeClass: verticalSizeClass,
-            isLandscapeContainer: isLandscapeContainer,
-            allowsMarkingInput: allowsMarkingInput,
-            hasDuo: duo != nil)
     }
 
     // MARK: - Geometry
@@ -3067,23 +3027,12 @@ private struct DetailTapPickerDismissTrigger: Equatable {
     let showsInformation: Bool
     let showsPhotoGrid: Bool
     let expandedGroupID: GroupID?
+    let isDuoExpanded: Bool
+    let isDuoCover: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?
     let isLandscapeContainer: Bool
     let dismissToken: Int
-}
-
-private struct DetailDuoPopoverDismissTrigger: Equatable {
-    let route: BrowserRoute
-    let isDuoExpanded: Bool
-    let isDuoCover: Bool
-    let usesVerticalToolbar: Bool
-    let hasFoldRegion: Bool
-    let horizontalSizeClass: UserInterfaceSizeClass?
-    let verticalSizeClass: UserInterfaceSizeClass?
-    let isLandscapeContainer: Bool
-    let allowsMarkingInput: Bool
-    let hasDuo: Bool
 }
 
 private struct DetailFilterSelectionKey: Equatable {
@@ -3202,7 +3151,7 @@ struct DetailHeaderFileNameParts: Equatable, Sendable {
 }
 
 /// Tappable two-line photo identity badge pinned to the upper-leading corner of the photo viewport
-/// on expanded Duo Landscape.
+/// on expanded Duo Landscape and Duo Cover.
 struct DetailPhotoCornerOverlay: View {
     let fileName: String
     let positionText: String?

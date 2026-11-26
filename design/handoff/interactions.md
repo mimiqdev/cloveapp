@@ -73,8 +73,8 @@ Grid ─Move Rejects─▶ Confirm sheet ─Move─▶ Grid + toast (Undo / Deta
 
 ## Duo cover (folded)
 
-- The same as iPhone. Back, Filter and Move Rejects are in the side rail next to the status bar, following Apple's Duo guidance.
-- Tapping Rating or Label in the vertical side toolbar opens the shared visual `RatingPicker` (`5..1, Clear` top to bottom) or `LabelPicker` popover alongside the toolbar button (disabled on unexpanded group stacks in Timeline); picking or tapping outside dismisses. Dragging from the Rating button still scrubs ratings directly.
+- **Grid View**: the same as iPhone. `Back`, `Move Rejects` (when rejects exist), and bottom `Filter` are in the vertical right rail next to the status bar, following Apple's Duo guidance, with `"…"` / Select tools in the top bar.
+- **Detail (Focus View)**: hides the redundant top navigation bar, uses one continuous `Color.clove.bg.stage` background, and pins the upper-leading dark-scrim tappable photo identity badge (`DetailPhotoCornerOverlay`, `filename ⓘ` + Row 2 position/zoom + transient inline preparation progress bar) inside the viewport. The vertical right rail holds strictly 3 buttons (`Back`, `Focus regions`, `Filter`) with an empty bottom rail, while the bottom of the stage renders the background-free two-level `DetailFilmstrip` above the centered shared `168 × 48` `MarkingToolbar` (`[ Reject | ★ | Color ]`) with horizontal tap pickers (`RatingPicker` / `LabelPicker`), `12 pt` floating stage pill / transient Undo toast, chrome toggle, and stage gestures matching iPhone Detail. Folding/unfolding between Cover and Expanded preserves the active photo, filter, group focus, marks, focus regions toggle, and zoom cleanly.
 
 ## Duo expanded (unfolded, landscape)
 

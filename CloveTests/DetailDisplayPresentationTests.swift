@@ -2911,6 +2911,7 @@ struct DetailDisplayPresentationTests {
 
         let presentationBox = TestPresentationBox(value: .photoPreview)
         let headerFrames = DetailFrameBox()
+        let tapFrames = DetailFrameBox()
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
@@ -2928,6 +2929,9 @@ struct DetailDisplayPresentationTests {
             )
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 headerFrames.frames = $0
+            }
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                tapFrames.frames = $0
             })
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
@@ -3014,8 +3018,9 @@ struct DetailDisplayPresentationTests {
         #expect(abs((focusPreviewFrame.maxY - 12) - focusPillFrame.maxY) <= 1.5)
 
         // Pose transitions: Half-fold keeps expanded inspection pill while removing viewport corner
-        // overlay; Duo Cover restores iPhone detail toggle without inspectionPill; returning to
-        // Expanded Duo Open pose restores both cleanly.
+        // overlay; Duo Cover uses Option A viewport corner overlay without inspectionPill while
+        // preserving filmstrip and centered MarkingToolbar; returning to Expanded Duo Open pose
+        // restores both cleanly.
         presentationBox.value = .photoPreview
         host.rootView = TestDuoPoseDetailHost(
             browsing: browsing,
@@ -3030,6 +3035,9 @@ struct DetailDisplayPresentationTests {
         )
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
+        }
+        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+            tapFrames.frames = $0
         }
         try await waitFor("Half-fold removed expanded viewport overlay") {
             self.findPreview(in: window) != nil
@@ -3052,13 +3060,19 @@ struct DetailDisplayPresentationTests {
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
         }
+        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+            tapFrames.frames = $0
+        }
         host.traitOverrides.horizontalSizeClass = .compact
-        try await waitFor("Duo Cover settled cleanly") {
+        try await waitFor("Duo Cover Option A settled cleanly") {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findCollectionView(in: window) == nil
                 && self.findFilmstripScrollView(in: window, excluding: preview) != nil
-                && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.info"] != nil
                 && headerFrames.frames["clove.detail.inspectionPill"] == nil
+                && headerFrames.frames["clove.detail.focusToggle"] == nil
+                && tapFrames.frames["clove.duo.capsule"] != nil
         }
 
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
@@ -3075,6 +3089,9 @@ struct DetailDisplayPresentationTests {
         )
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
+        }
+        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+            tapFrames.frames = $0
         }
         try await waitFor("Expanded Duo Open pose restored viewport overlay and inspection pill") {
             guard let preview = self.findPreview(in: window),
@@ -5736,7 +5753,7 @@ struct DetailDisplayPresentationTests {
     }
 
     @Test
-    func nonExpandedDuoCoverHalfFoldIPhoneAndIPadKeepToolbarHeadersWithoutCompanions()
+    func halfFoldIPhoneAndIPadKeepToolbarHeadersWithoutCompanions()
         async throws
     {
         guard #available(iOS 27.1, *) else { return }
@@ -5762,12 +5779,6 @@ struct DetailDisplayPresentationTests {
         }
 
         let cases: [StandardPoseCase] = [
-            StandardPoseCase(
-                name: "Duo Cover",
-                size: CGSize(width: 466, height: 678),
-                horizontal: .compact, vertical: .regular, idiom: .phone,
-                usesSystemToolbar: true, isDuoCover: true, isDuoExpanded: false,
-                usesVerticalToolbar: true, hasFoldRegion: false),
             StandardPoseCase(
                 name: "iPhone Portrait",
                 size: CGSize(width: 393, height: 852),
@@ -7147,6 +7158,17 @@ struct DetailDisplayPresentationTests {
                 presentation: presentation, isDuoExpanded: true, isDuoCover: false,
                 usesVerticalToolbar: true, hasFoldRegion: false, showsGrid: true, theme: .dark)
         }
+
+        // Duo Cover
+        try await verifyNoPermanentUndo(
+            size: CGSize(width: 466, height: 678), horizontalSizeClass: .compact,
+            expectsHeaderInfo: true
+        ) { browsing, presentation in
+            TestDuoPoseDetailHost(
+                browsing: browsing, images: SampleDetailImages(),
+                presentation: presentation, isDuoExpanded: false, isDuoCover: true,
+                usesVerticalToolbar: true, hasFoldRegion: false, showsGrid: false, theme: .dark)
+        }
     }
 
     @Test func detailUndoToastAppearsForFilterHiddenMarkOnlyAndRespectsDismissalAndLayout()
@@ -7941,7 +7963,231 @@ struct DetailDisplayPresentationTests {
                 #expect(!stageColorsClose(duoBottomSample, expectedCanvas, tolerance: 8))
                 #expect(!stageColorsClose(duoDividerSample, expectedCanvas, tolerance: 8))
             }
+
+            // 4. Duo Cover Detail: stage margin, top corner above filmstrip, and bottom strip +
+            // MarkingToolbar band all render on one continuous Color.clove.bg.stage (#469).
+            let coverPresentation = TestPresentationBox(value: .focus)
+            let coverHeaderFrames = DetailFrameBox()
+            let coverTapFrames = DetailFrameBox()
+            window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)
+            host.rootView = AnyView(
+                TestDuoPoseDetailHost(
+                    browsing: browsing,
+                    images: sampleImages,
+                    presentation: coverPresentation,
+                    isDuoExpanded: false,
+                    isDuoCover: true,
+                    usesVerticalToolbar: true,
+                    hasFoldRegion: false,
+                    showsGrid: false,
+                    theme: theme,
+                    settingsStore: store
+                )
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    coverHeaderFrames.frames = $0
+                }
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    coverTapFrames.frames = $0
+                })
+            try await waitFor("Duo Cover Detail stage settled") {
+                self.findPreview(in: window) != nil
+                    && coverHeaderFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                    && coverTapFrames.frames["clove.detail.filmstrip"] != nil
+                    && coverTapFrames.frames["clove.duo.capsule"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(250))
+
+            let coverBuffer = try captureStageBuffer(in: window)
+            let coverPreview = try #require(findPreview(in: window))
+            let coverPreviewRect = coverPreview.convert(coverPreview.bounds, to: window)
+            let coverFitRect = coverPreview.imageRectAtFit()
+            let coverOverlay = try #require(
+                coverHeaderFrames.frames["clove.detail.photoCornerOverlay"])
+            let coverCapsule = try #require(coverTapFrames.frames["clove.duo.capsule"])
+            let coverTopMargin = coverBuffer.pixel(
+                x: Int(min(coverPreviewRect.maxX - 16, coverOverlay.maxX + 24).rounded()),
+                y: Int(coverOverlay.midY.rounded()))
+            let coverStageMargin = coverBuffer.pixel(
+                x: Int(coverPreviewRect.midX.rounded()),
+                y: Int((coverPreviewRect.minY + max(coverFitRect.minY * 0.5, 8)).rounded()))
+            let coverBottomMargin = coverBuffer.pixel(
+                x: Int(max(coverPreviewRect.minX + 16, coverCapsule.minX - 24).rounded()),
+                y: Int(coverCapsule.midY.rounded()))
+            assertStageColorClose(
+                coverTopMargin, expectedStage, "Duo Cover top margin (\(theme.id))")
+            assertStageColorClose(
+                coverStageMargin, expectedStage, "Duo Cover stage margin (\(theme.id))")
+            assertStageColorClose(
+                coverBottomMargin, expectedStage, "Duo Cover bottom toolbar band (\(theme.id))")
+            if theme == .light {
+                #expect(!stageColorsClose(coverTopMargin, expectedCanvas, tolerance: 8))
+                #expect(!stageColorsClose(coverBottomMargin, expectedCanvas, tolerance: 8))
+            }
         }
+    }
+
+    @Test
+    func duoCoverDetailOptionAViewportOverlayBottomStackAndFoldContinuity() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first { $0.id == GroupID(rawValue: "burst-2696") })
+        let rep = try #require(
+            BrowsingGroup.representative(
+                of: browsing.photos.filter { group.members.contains($0.id) }
+            ))
+        let second = try #require(group.members.first { $0 != rep.id })
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        store.update { $0.autoAdvance.destination = .stay }
+        browsing.setFilter(.unmarked)
+        browsing.openPhoto(rep.id)
+
+        let source = AspectByPhotoDetailImages(portraitPhotos: [])
+        let presentationBox = TestPresentationBox(value: .photoPreview)
+        let headerFrames = DetailFrameBox()
+        let tapFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
+
+        let host = UIHostingController(
+            rootView: TestDuoPoseDetailHost(
+                browsing: browsing,
+                images: source,
+                presentation: presentationBox,
+                isDuoExpanded: false,
+                isDuoCover: true,
+                usesVerticalToolbar: true,
+                hasFoldRegion: false,
+                showsGrid: false,
+                theme: .light,
+                settingsStore: store
+            )
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                headerFrames.frames = $0
+            }
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                tapFrames.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 84)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        // 1. Cover Detail pins DetailPhotoCornerOverlay at (16, 12), renders Expand pill 12 pt
+        // above DetailFilmstrip, and centers shared 168 × 48 MarkingToolbar beneath the strip.
+        try await waitFor(
+            "Cover Detail Option A did not lay out (header=\(headerFrames.frames.keys.sorted()), tap=\(tapFrames.frames.keys.sorted()))"
+        ) {
+            self.findPreview(in: window) != nil
+                && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.info"] != nil
+                && tapFrames.frames["clove.detail.expandGroup"] != nil
+                && tapFrames.frames["clove.detail.filmstrip"] != nil
+                && tapFrames.frames["clove.duo.capsule"] != nil
+        }
+        let preview = try #require(findPreview(in: window))
+        let stageBefore = preview.convert(preview.bounds, to: window)
+        let cornerOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+        let cornerInfo = try #require(headerFrames.frames["clove.detail.info"])
+        let expandPill = try #require(tapFrames.frames["clove.detail.expandGroup"])
+        let strip = try #require(tapFrames.frames["clove.detail.filmstrip"])
+        let capsule = try #require(tapFrames.frames["clove.duo.capsule"])
+        #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
+        #expect(headerFrames.frames["clove.detail.inspectionPill"] == nil)
+        #expect(abs(cornerOverlay.minX - (stageBefore.minX + 16)) <= 1.5)
+        #expect(abs(cornerOverlay.minY - (stageBefore.minY + 12)) <= 1.5)
+        #expect(cornerInfo.width >= 44 && cornerInfo.height >= 44)
+        #expect(abs(strip.minY - stageBefore.maxY) <= 1.5)
+        #expect(abs(strip.height - DetailFilmstrip.Metrics.standard.bandHeight) <= 1)
+        #expect(abs((strip.minY - 12) - expandPill.maxY) <= 1.5)
+        #expect(abs(expandPill.midX - stageBefore.midX) <= 2)
+        #expect(abs(capsule.width - 168) <= 1)
+        #expect(abs(capsule.height - 48) <= 1)
+        #expect(capsule.minY >= strip.maxY + 7)
+        #expect(abs(capsule.midX - stageBefore.midX) <= 2)
+
+        // 2. Entering Group Focus, marking, zooming to 100%, and toggling chrome keep the
+        // stage invariant and unfold seamlessly to Expanded Duo preserving state.
+        browsing.setFilter(.all)
+        browsing.openGroup(group.id, on: rep.id)
+        let fourStars = try #require(Rating(rawValue: 4))
+        browsing.apply(.rating(fourStars), to: rep.id)
+        try await waitFor("Cover Group Focus reject pill did not mount") {
+            tapFrames.frames["clove.detail.rejectUnmarked"] != nil
+                && tapFrames.frames["clove.detail.filmstrip.expandedGroup"] != nil
+        }
+        let stageDuringRejectPill = preview.convert(preview.bounds, to: window)
+        #expect(sameFrame(stageDuringRejectPill, stageBefore))
+        let rejectPill = try #require(tapFrames.frames["clove.detail.rejectUnmarked"])
+        #expect(abs((strip.minY - 12) - rejectPill.maxY) <= 1.5)
+
+        browsing.apply(.rating(fourStars), to: second)
+        browsing.setFilter(.ratedAtLeast(fourStars))
+
+        preview.onDoubleTap?(.center)
+        try await waitFor("Cover Group Focus did not zoom to 100%") { preview.isZoomed }
+
+        // Chrome toggle hides identity badge, filmstrip, and MarkingToolbar together.
+        preview.onChromeToggle?()
+        try await waitFor("Cover chrome did not hide") {
+            headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
+                && tapFrames.frames["clove.detail.filmstrip"] == nil
+                && tapFrames.frames["clove.duo.capsule"] == nil
+        }
+        preview.onChromeToggle?()
+        try await waitFor("Cover chrome did not restore") {
+            headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && tapFrames.frames["clove.detail.filmstrip"] != nil
+                && tapFrames.frames["clove.duo.capsule"] != nil
+        }
+
+        // Unfolding Cover -> Expanded preserves photo, filter, group focus, marks, focus, zoom.
+        window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.additionalSafeAreaInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 89.5)
+        host.rootView = TestDuoPoseDetailHost(
+            browsing: browsing,
+            images: source,
+            presentation: presentationBox,
+            isDuoExpanded: true,
+            isDuoCover: false,
+            usesVerticalToolbar: true,
+            hasFoldRegion: true,
+            showsGrid: true,
+            theme: .light,
+            settingsStore: store
+        )
+        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+            headerFrames.frames = $0
+        }
+        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+            tapFrames.frames = $0
+        }
+        try await waitFor("Unfolded Expanded Duo did not restore state seamlessly") {
+            guard let unfoldedPreview = self.findPreview(in: window) else { return false }
+            return headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.inspectionPill"] != nil
+                && tapFrames.frames["clove.duo.capsule"] != nil
+                && self.findCollectionView(in: window) != nil
+                && unfoldedPreview.isZoomed
+        }
+        let unfoldedPreview = try #require(findPreview(in: window))
+        #expect(browsing.state.currentPhoto == rep.id)
+        #expect(browsing.state.filter == .ratedAtLeast(fourStars))
+        #expect(browsing.expandedGroup == group.id)
+        #expect(browsing.shownMarks(for: rep.id).rating == fourStars)
+        #expect(browsing.showsFocusRegions)
+        #expect(unfoldedPreview.isZoomed)
     }
 
     private func renderedStagePixel(_ style: CloveColour, theme: CloveTheme) throws -> StageRGBA {
