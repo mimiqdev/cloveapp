@@ -2941,31 +2941,41 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        // Photo Preview: expanded Duo reclaims the top header space for the photo viewport and
-        // floats the focus toggle beside the viewport-pinned identity badge.
-        try await waitFor("Expanded Duo Photo Preview viewport overlay did not settle") {
+        // Photo Preview: expanded Duo reclaims the top header space for the photo viewport with
+        // the corner overlay pinned upper-leading, and anchors [ Focus | Compare ] at the leading
+        // edge of the single-row bottom bar (#390, #463).
+        try await waitFor(
+            "Expanded Duo Photo Preview viewport overlay and inspection pill did not settle"
+        ) {
             let preview = self.findPreview(in: window)
             return preview != nil
                 && self.findCollectionView(in: window) != nil
                 && source.delivered.contains(.screenRAW)
                 && self.findFocusControl(in: preview!) != nil
                 && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
+                && headerFrames.frames["clove.detail.inspectionPill"] != nil
                 && headerFrames.frames["clove.detail.focusToggle"] != nil
+                && headerFrames.frames["clove.detail.compare"] != nil
         }
         let splitGrid = try #require(findCollectionView(in: window))
         let previewInSplit = try #require(findPreview(in: window))
         let splitGridFrame = splitGrid.convert(splitGrid.bounds, to: window)
         let splitPreviewFrame = previewInSplit.convert(previewInSplit.bounds, to: window)
         let splitOverlayFrame = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
+        let splitPillFrame = try #require(headerFrames.frames["clove.detail.inspectionPill"])
         let splitFocusFrame = try #require(headerFrames.frames["clove.detail.focusToggle"])
+        let splitCompareFrame = try #require(headerFrames.frames["clove.detail.compare"])
         #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
         #expect(splitPreviewFrame.minX >= splitGridFrame.maxX - 1)
         #expect(abs(splitPreviewFrame.minY - splitGridFrame.minY) <= 4.0)
         #expect(abs(splitOverlayFrame.minX - (splitPreviewFrame.minX + 16)) <= 1.5)
         #expect(abs(splitOverlayFrame.minY - (splitPreviewFrame.minY + 12)) <= 1.5)
-        #expect(splitFocusFrame.minX >= splitOverlayFrame.maxX + 6)
-        #expect(abs(splitFocusFrame.minY - (splitPreviewFrame.minY + 12)) <= 1.5)
+        #expect(abs(splitPillFrame.width - 96) <= 1.5 && abs(splitPillFrame.height - 44) <= 1.5)
         #expect(splitFocusFrame.width >= 44 && splitFocusFrame.height >= 44)
+        #expect(splitCompareFrame.width >= 44 && splitCompareFrame.height >= 44)
+        #expect(splitPillFrame.minX >= splitPreviewFrame.minX + 15)
+        #expect(splitPillFrame.minY >= splitPreviewFrame.maxY - 1)
+        #expect(splitFocusFrame.maxX <= splitCompareFrame.minX + 2)
 
         browsing.showsFocusRegions = false
         try await waitFor("Focus controls hid when toggled Off in Photo Preview") {
@@ -2980,8 +2990,8 @@ struct DetailDisplayPresentationTests {
             return self.findFocusControl(in: preview) != nil
         }
 
-        // Focus View: full-width photo viewport keeps the same upper-leading overlay without
-        // restarting analysis.
+        // Focus View: full-width photo viewport keeps upper-leading identity overlay and floats
+        // [ Focus | Compare ] bottom-left 12 pt above the full-width filmstrip (#463).
         let analyzesBeforeFocus = source.analyzeCalls.count
         presentationBox.value = .focus
         try await waitFor("Expanded Duo Focus View viewport overlay did not settle") {
@@ -2998,18 +3008,18 @@ struct DetailDisplayPresentationTests {
         let previewInFocus = try #require(findPreview(in: window))
         let focusPreviewFrame = previewInFocus.convert(previewInFocus.bounds, to: window)
         let focusOverlayFrame = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
-        let focusToggleFrame = try #require(headerFrames.frames["clove.detail.focusToggle"])
+        let focusPillFrame = try #require(headerFrames.frames["clove.detail.inspectionPill"])
         #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
         #expect(abs(focusPreviewFrame.minY - splitPreviewFrame.minY) <= 1.5)
         #expect(focusPreviewFrame.minX < splitPreviewFrame.minX)
         #expect(abs(focusOverlayFrame.minX - (focusPreviewFrame.minX + 16)) <= 1.5)
         #expect(abs(focusOverlayFrame.minY - (focusPreviewFrame.minY + 12)) <= 1.5)
-        #expect(focusToggleFrame.minX >= focusOverlayFrame.maxX + 6)
-        #expect(abs(focusToggleFrame.minY - (focusPreviewFrame.minY + 12)) <= 1.5)
+        #expect(abs(focusPillFrame.minX - (focusPreviewFrame.minX + 16)) <= 1.5)
+        #expect(abs((focusPreviewFrame.maxY - 12) - focusPillFrame.maxY) <= 1.5)
 
-        // Pose transitions: Half-fold (no vertical toolbar) & Duo Cover remove the expanded
-        // viewport overlay cleanly; returning to Expanded Duo Open pose restores it without losing
-        // state.
+        // Pose transitions: Half-fold keeps expanded inspection pill while removing viewport corner
+        // overlay; Duo Cover restores iPhone detail toggle without inspectionPill; returning to
+        // Expanded Duo Open pose restores both cleanly.
         presentationBox.value = .photoPreview
         host.rootView = TestDuoPoseDetailHost(
             browsing: browsing,
@@ -3029,6 +3039,7 @@ struct DetailDisplayPresentationTests {
             self.findPreview(in: window) != nil
                 && self.findCollectionView(in: window) != nil
                 && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
+                && headerFrames.frames["clove.detail.inspectionPill"] != nil
         }
 
         host.rootView = TestDuoPoseDetailHost(
@@ -3051,6 +3062,7 @@ struct DetailDisplayPresentationTests {
             return self.findCollectionView(in: window) == nil
                 && self.findFilmstripScrollView(in: window, excluding: preview) != nil
                 && headerFrames.frames["clove.detail.photoCornerOverlay"] == nil
+                && headerFrames.frames["clove.detail.inspectionPill"] == nil
         }
 
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
@@ -3068,10 +3080,11 @@ struct DetailDisplayPresentationTests {
         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
             headerFrames.frames = $0
         }
-        try await waitFor("Expanded Duo Open pose restored viewport overlay and focus controls") {
+        try await waitFor("Expanded Duo Open pose restored viewport overlay and inspection pill") {
             guard let preview = self.findPreview(in: window),
                 self.findCollectionView(in: window) != nil,
                 headerFrames.frames["clove.detail.photoCornerOverlay"] != nil,
+                headerFrames.frames["clove.detail.inspectionPill"] != nil,
                 headerFrames.frames["clove.detail.focusToggle"] != nil
             else { return false }
             return abs(preview.convert(preview.bounds, to: window).minY - splitPreviewFrame.minY)
@@ -4391,14 +4404,15 @@ struct DetailDisplayPresentationTests {
             let baselinePreviewSize = preview.bounds.size
 
             func visibleStagePillGlasses() -> [UIView] {
-                let previewFrame = preview.convert(preview.bounds, to: window)
-                let topY = previewFrame.minY + previewFrame.height * 0.6
-                let bottomY = framesBox.frames["clove.duo.capsule"]?.minY ?? previewFrame.maxY
+                guard let bottomBand = framesBox.frames["clove.detail.bottomBand"],
+                    let inspectionPill = framesBox.frames["clove.detail.inspectionPill"],
+                    let capsule = framesBox.frames["clove.duo.capsule"]
+                else { return [] }
                 let band = CGRect(
-                    x: previewFrame.minX,
-                    y: topY,
-                    width: previewFrame.width,
-                    height: max(0, bottomY - topY))
+                    x: inspectionPill.maxX + 2,
+                    y: bottomBand.minY,
+                    width: max(0, capsule.minX - inspectionPill.maxX - 4),
+                    height: bottomBand.height)
                 var matches: [UIView] = []
                 func walk(_ view: UIView) {
                     let frame = view.convert(view.bounds, to: window)
@@ -4406,7 +4420,7 @@ struct DetailDisplayPresentationTests {
                     if name.contains("GlassInteractionView"),
                         !view.isHidden, view.alpha > 0.01, view.layer.opacity > 0.01,
                         frame.width > 40, frame.height > 20,
-                        band.intersects(frame)
+                        band.contains(CGPoint(x: frame.midX, y: frame.midY))
                     {
                         matches.append(view)
                     }
@@ -4425,6 +4439,7 @@ struct DetailDisplayPresentationTests {
                 let glass = try #require(glasses.first)
                 let frame = glass.convert(glass.bounds, to: window)
                 let previewFrame = preview.convert(preview.bounds, to: window)
+                let inspectionFrame = try #require(framesBox.frames["clove.detail.inspectionPill"])
                 let capsuleFrame = try #require(framesBox.frames["clove.duo.capsule"])
 
                 #expect(
@@ -4434,10 +4449,14 @@ struct DetailDisplayPresentationTests {
                     abs(frame.midX - previewFrame.midX) <= 1.0,
                     Comment(rawValue: "\(label): capsule should be centered in right photo pane"))
                 #expect(
-                    abs(previewFrame.maxY - frame.maxY - 12.0) <= 1.5,
-                    Comment(rawValue: "\(label): capsule should sit 12 pt above stage bottom"))
+                    abs(frame.midY - capsuleFrame.midY) <= 1.5,
+                    Comment(rawValue: "\(label): capsule should share midline with marking toolbar")
+                )
                 #expect(
-                    frame.maxY <= capsuleFrame.minY,
+                    frame.minX >= inspectionFrame.maxX + 11,
+                    Comment(rawValue: "\(label): capsule must stay clear of inspection pill"))
+                #expect(
+                    frame.maxX <= capsuleFrame.minX - 11,
                     Comment(rawValue: "\(label): capsule must stay clear of marking dock"))
                 if let expectedWidth {
                     #expect(
@@ -4576,13 +4595,30 @@ struct DetailDisplayPresentationTests {
                 window.frame = CGRect(x: 0, y: 0, width: width, height: 703.5)
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
-                try await Task.sleep(for: .milliseconds(100))
+                try await waitFor("Duo resized pill settled at \(width)") {
+                    guard let capsule = framesBox.frames["clove.duo.capsule"],
+                        let inspection = framesBox.frames["clove.detail.inspectionPill"],
+                        let pill = framesBox.frames["clove.detail.expandGroup"]
+                    else { return false }
+                    return capsule.maxX <= width - 89.5 && pill.minX >= inspection.maxX + 11
+                        && visibleStagePillGlasses().count == 1
+                }
                 let resizedGlass = try #require(visibleStagePillGlasses().first)
                 let resizedPill = resizedGlass.convert(resizedGlass.bounds, to: window)
                 let resizedPreview = preview.convert(preview.bounds, to: window)
                 let resizedCapsule = try #require(framesBox.frames["clove.duo.capsule"])
-                #expect(abs(resizedPill.midX - resizedPreview.midX) <= 1.0)
-                #expect(resizedPill.maxY <= resizedCapsule.minY)
+                let resizedInspection = try #require(
+                    framesBox.frames["clove.detail.inspectionPill"])
+                if width >= 1100 {
+                    #expect(abs(resizedPill.midX - resizedPreview.midX) <= 1.0)
+                } else {
+                    #expect(
+                        resizedPill.midX <= resizedPreview.midX + 1.0
+                            && resizedPill.maxX <= resizedCapsule.minX - 11)
+                }
+                #expect(abs(resizedPill.midY - resizedCapsule.midY) <= 1.5)
+                #expect(resizedPill.minX >= resizedInspection.maxX + 11)
+                #expect(resizedPill.maxX <= resizedCapsule.minX - 11)
             }
         }
     }
@@ -4665,19 +4701,15 @@ struct DetailDisplayPresentationTests {
                 && framesBox.frames["clove.duo.capsule"] != nil
                 && self.findPreview(in: window) != nil
         }
-        func visibleGlassViews(inVerticalBand range: (CGRect) -> ClosedRange<CGFloat>?) -> [UIView]
-        {
-            guard let currentPreview = findPreview(in: window) else { return [] }
-            let previewFrame = currentPreview.convert(currentPreview.bounds, to: window)
-            guard let verticalRange = range(previewFrame) else { return [] }
+        func visibleGlassViews(inRegion rect: () -> CGRect?) -> [UIView] {
+            guard let region = rect(), !region.isEmpty else { return [] }
             var matches: [UIView] = []
             func walk(_ view: UIView) {
                 let frame = view.convert(view.bounds, to: window)
                 if String(describing: type(of: view)).contains("GlassInteractionView"),
                     !view.isHidden, view.alpha > 0.01, view.layer.opacity > 0.01,
                     frame.width > 40, frame.height > 20,
-                    frame.midX >= previewFrame.minX, frame.midX <= previewFrame.maxX,
-                    frame.midY >= verticalRange.lowerBound, frame.midY <= verticalRange.upperBound
+                    region.contains(CGPoint(x: frame.midX, y: frame.midY))
                 {
                     matches.append(view)
                 }
@@ -4687,27 +4719,56 @@ struct DetailDisplayPresentationTests {
             return matches
         }
 
-        func visiblePillGlasses() -> [UIView] {
-            visibleGlassViews { previewFrame in
+        func visiblePhotoPreviewPillGlasses() -> [UIView] {
+            visibleGlassViews {
+                guard let bottomBand = framesBox.frames["clove.detail.bottomBand"],
+                    let inspection = framesBox.frames["clove.detail.inspectionPill"],
+                    let capsule = framesBox.frames["clove.duo.capsule"]
+                else { return nil }
+                return CGRect(
+                    x: inspection.maxX + 2,
+                    y: bottomBand.minY,
+                    width: max(0, capsule.minX - inspection.maxX - 4),
+                    height: bottomBand.height)
+            }
+        }
+
+        func visibleFocusPillGlasses() -> [UIView] {
+            visibleGlassViews {
+                guard let currentPreview = findPreview(in: window),
+                    let inspection = framesBox.frames["clove.detail.inspectionPill"]
+                else { return nil }
+                let previewFrame = currentPreview.convert(currentPreview.bounds, to: window)
                 let topY = previewFrame.minY + previewFrame.height * 0.55
-                return topY...previewFrame.maxY
+                return CGRect(
+                    x: inspection.maxX + 2,
+                    y: topY,
+                    width: max(0, previewFrame.maxX - inspection.maxX - 4),
+                    height: max(0, previewFrame.maxY - topY))
             }
         }
 
         func visibleToastGlasses() -> [UIView] {
-            visibleGlassViews { previewFrame in
-                let capsuleMinY =
-                    framesBox.frames["clove.duo.capsule"]?.minY ?? previewFrame.maxY + 200
-                guard capsuleMinY > previewFrame.maxY else { return nil }
-                return previewFrame.maxY...capsuleMinY
+            visibleGlassViews {
+                guard let currentPreview = findPreview(in: window),
+                    let bottomBand = framesBox.frames["clove.detail.bottomBand"]
+                else { return nil }
+                let previewFrame = currentPreview.convert(currentPreview.bounds, to: window)
+                guard bottomBand.minY > previewFrame.maxY else { return nil }
+                return CGRect(
+                    x: previewFrame.minX,
+                    y: previewFrame.maxY,
+                    width: previewFrame.width,
+                    height: bottomBand.minY - previewFrame.maxY)
             }
         }
 
-        // Entering Group Focus and triggering a save failure toast keeps the stage pill clear of
-        // the toast and marking capsule.
+        // Entering Group Focus and triggering a save failure toast places the stage pill on the
+        // single 30/70 bottom row aligned with [ Focus | Compare ] and MarkingToolbar, clear of
+        // the toast above (#463).
         browsing.openGroup(group.id, on: rep)
         try await waitFor("Group Focus pill did not appear") {
-            visiblePillGlasses().count == 1
+            visiblePhotoPreviewPillGlasses().count == 1
         }
         library.failNext.insert(m1)
         browsing.apply(.rating(try #require(Rating(rawValue: 3))), to: m1)
@@ -4715,21 +4776,26 @@ struct DetailDisplayPresentationTests {
         try await waitFor("Save failure toast did not appear") {
             browsing.failureToastMessage != nil && visibleToastGlasses().count == 1
         }
-        let pillFrame = try #require(visiblePillGlasses().first).convert(
-            try #require(visiblePillGlasses().first).bounds, to: window)
+        let pillFrame = try #require(visiblePhotoPreviewPillGlasses().first).convert(
+            try #require(visiblePhotoPreviewPillGlasses().first).bounds, to: window)
         let toastView = try #require(visibleToastGlasses().first)
         let toastFrame = toastView.convert(toastView.bounds, to: window)
+        let bottomBand = try #require(framesBox.frames["clove.detail.bottomBand"])
         let capsuleFrame = try #require(framesBox.frames["clove.duo.capsule"])
-        #expect(pillFrame.maxY <= toastFrame.minY)
-        #expect(toastFrame.maxY <= capsuleFrame.minY)
+        let inspectionFrame = try #require(framesBox.frames["clove.detail.inspectionPill"])
+        #expect(toastFrame.maxY <= bottomBand.minY + 1)
+        #expect(abs(pillFrame.midY - capsuleFrame.midY) <= 1.5)
+        #expect(abs(inspectionFrame.midY - capsuleFrame.midY) <= 1.5)
+        #expect(pillFrame.minX >= inspectionFrame.maxX + 11)
+        #expect(pillFrame.maxX <= capsuleFrame.minX - 11)
 
-        // Focus View preserves its filmstrip and group action pill when toggled from Photo Preview.
+        // Focus View preserves its full-width filmstrip and aligns Reject pill with [Focus|Compare].
         presentationBox.value = .focus
         try await waitFor("Focus View did not mount filmstrip") {
             guard let currentPreview = self.findPreview(in: window) else { return false }
             return framesBox.frames["clove.duo.focus"] != nil
                 && self.findFilmstripScrollView(in: window, excluding: currentPreview) != nil
-                && visiblePillGlasses().count == 1
+                && visibleFocusPillGlasses().count == 1
         }
 
         // Losing folder location disables marking: Reject hides in Group Focus, while Expand stays
@@ -4739,17 +4805,17 @@ struct DetailDisplayPresentationTests {
             guard let currentPreview = self.findPreview(in: window) else { return false }
             return framesBox.frames["clove.duo.photoPreview"] != nil
                 && self.findFilmstripScrollView(in: window, excluding: currentPreview) == nil
-                && visiblePillGlasses().count == 1
+                && visiblePhotoPreviewPillGlasses().count == 1
         }
         library.reportDriveLoss()
         try await waitFor("Location loss did not disable marking") { !browsing.canMark }
         try await waitFor("Reject pill did not hide after location loss") {
-            visiblePillGlasses().isEmpty
+            visiblePhotoPreviewPillGlasses().isEmpty
         }
 
         browsing.collapseGroup()
         try await waitFor("Timeline Expand pill did not appear while location lost") {
-            visiblePillGlasses().count == 1
+            visiblePhotoPreviewPillGlasses().count == 1
         }
     }
 
@@ -4908,7 +4974,8 @@ struct DetailDisplayPresentationTests {
             browsing.openPhoto(library.identity(longStem))
             browsing.apply(.rating(.rejected), to: library.identity(longStem))
             try await waitFor("Photo Preview viewport overlay did not lay out") {
-                headerFrames.frames["clove.detail.focusToggle"] != nil
+                headerFrames.frames["clove.detail.inspectionPill"] != nil
+                    && headerFrames.frames["clove.detail.focusToggle"] != nil
                     && headerFrames.frames["clove.detail.photoCornerOverlay"] != nil
                     && headerFrames.frames["clove.detail.fileName"] != nil
                     && headerFrames.frames["clove.detail.fileName.extension"] != nil
@@ -4920,6 +4987,7 @@ struct DetailDisplayPresentationTests {
 
             let previewPhotoPreview = try #require(findPreview(in: window))
             let splitGrid = try #require(findCollectionView(in: window))
+            let inspectionPP = try #require(headerFrames.frames["clove.detail.inspectionPill"])
             let focusPP = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let overlayPP = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let filePP = try #require(headerFrames.frames["clove.detail.fileName"])
@@ -4935,11 +5003,11 @@ struct DetailDisplayPresentationTests {
             #expect(stagePreviewRect.minY >= 15.5)
             #expect(abs(overlayPP.minX - (stagePreviewRect.minX + 16)) <= 1.5)
             #expect(abs(overlayPP.minY - (stagePreviewRect.minY + 12)) <= 1.5)
+            #expect(abs(inspectionPP.width - 96) <= 1.5 && abs(inspectionPP.height - 44) <= 1.5)
             #expect(focusPP.width >= 44 && focusPP.height >= 44)
-            #expect(focusPP.minX >= overlayPP.maxX + 6)
-            #expect(abs(focusPP.minY - (stagePreviewRect.minY + 12)) <= 1.5)
-            #expect(!focusPP.intersects(rejectPP))
-            #expect(focusPP.maxX <= rejectPP.minX - 4)
+            #expect(inspectionPP.minX >= stagePreviewRect.minX + 15)
+            #expect(inspectionPP.minY >= stagePreviewRect.maxY - 1)
+            #expect(!inspectionPP.intersects(rejectPP))
             #expect(headerFrames.frames["clove.detail.saveState"] == nil)
             #expect(filePP.maxY <= zoomPP.minY + 1)
             #expect(filePP.width < fullLongWidth)
@@ -4954,7 +5022,7 @@ struct DetailDisplayPresentationTests {
             }
 
             // 2. Narrower Photo Preview width + drive loss:
-            // - SaveStatusIndicator floats beside focusToggle inside the viewport
+            // - SaveStatusIndicator floats beside cornerOverlay inside the viewport
             // - FolderSaveBanner floats inside previewArea below the viewport overlay without shifting previewArea vertically
             window.frame = CGRect(x: 0, y: 0, width: 760, height: 680)
             host.view.setNeedsLayout()
@@ -4970,7 +5038,7 @@ struct DetailDisplayPresentationTests {
                     && abs(overlay.minX - (stageRect.minX + 16)) <= 1.5
                     && abs(overlay.minY - (stageRect.minY + 12)) <= 1.5
             }
-            let narrowFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let narrowInspection = try #require(headerFrames.frames["clove.detail.inspectionPill"])
             let narrowSave = try #require(headerFrames.frames["clove.detail.saveState"])
             let narrowBanner = try #require(
                 headerFrames.frames["clove.detail.saveStatus.failure"])
@@ -4980,16 +5048,15 @@ struct DetailDisplayPresentationTests {
             let narrowPreview = try #require(findPreview(in: window))
             let narrowStageRect = narrowPreview.convert(narrowPreview.bounds, to: window)
             #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
-            #expect(narrowFocus.minX >= narrowOverlay.maxX + 6)
-            #expect(narrowFocus.maxX < narrowSave.minX)
+            #expect(narrowSave.minX >= narrowOverlay.maxX + 6)
             #expect(!narrowSave.intersects(narrowReject))
             #expect(narrowSave.maxX <= narrowReject.minX - 4)
             #expect(abs(narrowStageRect.minY - stagePreviewRect.minY) <= 1.5)
             #expect(narrowBanner.minY >= narrowStageRect.minY - 1)
             #expect(narrowBanner.maxY <= narrowStageRect.maxY + 1)
-            #expect(narrowBanner.minY >= narrowFocus.maxY - 1)
+            #expect(narrowBanner.minY >= narrowOverlay.maxY - 1)
             #expect(!narrowBanner.intersects(narrowOverlay))
-            #expect(!narrowBanner.intersects(narrowFocus))
+            #expect(!narrowBanner.intersects(narrowInspection))
             #expect(!narrowBanner.intersects(narrowSave))
             #expect(!narrowBanner.intersects(narrowReject))
             #expect(abs(narrowOverlay.minX - (narrowStageRect.minX + 16)) <= 1.5)
@@ -4997,7 +5064,7 @@ struct DetailDisplayPresentationTests {
             #expect(narrowExt.width >= fullExtensionWidth - 2)
 
             // 3. Switch to Focus View + Group Focus on shorter filename:
-            // - Overlay stays pinned to (16, 12) of the full-width viewport
+            // - Overlay stays pinned to (16, 12) of the full-width viewport; inspection pill floats bottom-left
             window.frame = CGRect(x: 0, y: 0, width: 920, height: 680)
             browsing.openGroup(group.id, on: library.identity(shortStem))
             presentationBox.value = .focus
@@ -5012,23 +5079,25 @@ struct DetailDisplayPresentationTests {
                     && abs(overlay.minX - (stageRect.minX + 16)) <= 1.5
                     && abs(overlay.minY - (stageRect.minY + 12)) <= 1.5
             }
-            let focusToggleInFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+            let inspectionInFocus = try #require(
+                headerFrames.frames["clove.detail.inspectionPill"])
             let focusSave = try #require(headerFrames.frames["clove.detail.saveState"])
             let focusOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let focusPreview = try #require(findPreview(in: window))
             let focusStageRect = focusPreview.convert(focusPreview.bounds, to: window)
             #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
             #expect(focusOverlay.minX < overlayPP.minX - 40)
-            #expect(focusToggleInFocus.minX >= focusOverlay.maxX + 6)
-            #expect(focusToggleInFocus.maxX < focusSave.minX)
+            #expect(focusSave.minX >= focusOverlay.maxX + 6)
             #expect(focusSave.maxX < focusStageRect.maxX - 120)
+            #expect(abs(inspectionInFocus.minX - (focusStageRect.minX + 16)) <= 1.5)
+            #expect(abs((focusStageRect.maxY - 12) - inspectionInFocus.maxY) <= 1.5)
             #expect(abs(focusOverlay.minX - (focusStageRect.minX + 16)) <= 1.5)
             #expect(abs(focusOverlay.minY - (focusStageRect.minY + 12)) <= 1.5)
             #expect(headerCounts.counts["clove.detail.fileName"] == 1)
             #expect(headerCounts.counts["clove.detail.zoom"] == 1)
 
             // 4. Accessibility Dynamic Type size: viewport identity badge scales cleanly without
-            // clipping while keeping >= 44×44 focus toggle and viewport insets intact.
+            // clipping while keeping 96x44 inspection pill and >=44pt touch targets intact.
             let standardOverlayHeight = focusOverlay.height
             _ = mountHost(dynamicTypeSize: .accessibility2)
             presentationBox.value = .photoPreview
@@ -5039,6 +5108,7 @@ struct DetailDisplayPresentationTests {
                 return overlay.height > standardOverlayHeight + 6
                     && self.findCollectionView(in: window) != nil
             }
+            let a11yInspection = try #require(headerFrames.frames["clove.detail.inspectionPill"])
             let a11yFocus = try #require(headerFrames.frames["clove.detail.focusToggle"])
             let a11yOverlay = try #require(headerFrames.frames["clove.detail.photoCornerOverlay"])
             let a11yFile = try #require(headerFrames.frames["clove.detail.fileName"])
@@ -5048,10 +5118,9 @@ struct DetailDisplayPresentationTests {
             #expect(headerFrames.frames["clove.detail.photoHeader"] == nil)
             #expect(abs(a11yOverlay.minX - (a11yStageRect.minX + 16)) <= 1.5)
             #expect(abs(a11yOverlay.minY - (a11yStageRect.minY + 12)) <= 1.5)
+            #expect(abs(a11yInspection.width - 96) <= 1.5 && abs(a11yInspection.height - 44) <= 1.5)
             #expect(a11yFocus.width >= 44 && a11yFocus.height >= 44)
-            #expect(a11yFocus.minX >= a11yOverlay.maxX + 6)
-            #expect(abs(a11yFocus.minY - (a11yStageRect.minY + 12)) <= 1.5)
-            #expect(a11yFocus.maxX <= a11yStageRect.maxX - 40)
+            #expect(a11yInspection.minY >= a11yStageRect.maxY - 1)
             #expect(a11yFile.maxY <= a11yZoom.minY + 1)
             #expect(a11yZoom.maxY <= a11yOverlay.maxY)
         }
@@ -5305,11 +5374,11 @@ struct DetailDisplayPresentationTests {
         #expect(abs(landscapeOverlay.minX - (stageAtLandscape.minX + 16)) <= 1.5)
         #expect(abs(landscapeOverlay.minY - (stageAtLandscape.minY + 12)) <= 1.5)
         #expect(landscapeOverlay.minY < stageAtLandscape.minY + landscapeFit.minY)
-        #expect(landscapeFocus.minX >= landscapeOverlay.maxX + 6)
-        #expect(abs(landscapeFocus.minY - (stageAtLandscape.minY + 12)) <= 1.5)
+        #expect(landscapeFocus.minX >= stageAtLandscape.minX + 15)
+        #expect(landscapeFocus.minY > landscapeOverlay.maxY)
 
         // Switch to portrait photo: portrait fills the full recovered stage height while the
-        // identity badge and focus toggle remain pinned at the exact same viewport coordinates.
+        // identity badge and bottom-left inspection pill remain pinned at exact coordinates.
         browsing.openPhoto(portraitID)
         try await waitFor("Portrait photo settled") {
             guard source.deliveredPhotos.contains(portraitID) else { return false }
@@ -5363,22 +5432,25 @@ struct DetailDisplayPresentationTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(sameFrame(preview.imageRectAtFit(), fitBeforeToggle))
 
-        // Chrome toggle hides the identity badge and restores it at the exact same coordinates
-        // without changing the fitted photo on restore.
+        // Chrome toggle hides the identity badge and [ Focus | Compare ] inspection pill together,
+        // and restores them cleanly without changing the fitted photo.
         preview.onChromeToggle?()
-        try await waitFor("identity overlay hid with chrome") {
+        try await waitFor("identity overlay and inspection pill hid with chrome") {
             framesBox.frames["clove.detail.photoCornerOverlay"] == nil
                 && framesBox.frames["clove.detail.fileName"] == nil
                 && framesBox.frames["clove.detail.zoom"] == nil
-                && framesBox.frames["clove.detail.focusToggle"] != nil
+                && framesBox.frames["clove.detail.inspectionPill"] == nil
+                && framesBox.frames["clove.detail.focusToggle"] == nil
         }
 
         preview.onChromeToggle?()
-        try await waitFor("identity overlay restored with chrome") {
+        try await waitFor("identity overlay and inspection pill restored with chrome") {
             let currentFit = preview.imageRectAtFit()
             return framesBox.frames["clove.detail.photoCornerOverlay"] != nil
                 && framesBox.frames["clove.detail.fileName"] != nil
                 && framesBox.frames["clove.detail.zoom"] != nil
+                && framesBox.frames["clove.detail.inspectionPill"] != nil
+                && framesBox.frames["clove.detail.focusToggle"] != nil
                 && abs(currentFit.height - fitBeforeToggle.height) <= 1.0
         }
         let restoredOverlay = try #require(framesBox.frames["clove.detail.photoCornerOverlay"])
@@ -5445,6 +5517,7 @@ struct DetailDisplayPresentationTests {
         try await waitFor("loading state viewport overlay did not appear") {
             self.findPreview(in: window) != nil
                 && framesBox.frames["clove.detail.photoCornerOverlay"] != nil
+                && framesBox.frames["clove.detail.inspectionPill"] != nil
                 && framesBox.frames["clove.detail.focusToggle"] != nil
         }
         let preview = try #require(findPreview(in: window))
@@ -5453,7 +5526,7 @@ struct DetailDisplayPresentationTests {
         let loadingFocus = try #require(framesBox.frames["clove.detail.focusToggle"])
         #expect(abs(loadingOverlay.minX - (stageRect.minX + 16)) <= 1.5)
         #expect(abs(loadingOverlay.minY - (stageRect.minY + 12)) <= 1.5)
-        #expect(loadingFocus.minX >= loadingOverlay.maxX + 6)
+        #expect(loadingFocus.minY > loadingOverlay.maxY)
 
         // 2. Loaded state: coordinates remain identical.
         source.releaseHeld()
@@ -5467,7 +5540,8 @@ struct DetailDisplayPresentationTests {
         #expect(abs(loadedFocus.minX - loadingFocus.minX) <= 1.0)
         #expect(abs(loadedFocus.minY - loadingFocus.minY) <= 1.0)
 
-        // 3. Unavailable & deferred error states: overlay remains pinned and clear of error copy.
+        // 3. Unavailable & deferred error states: overlay and inspection pill remain pinned and clear
+        // of error copy.
         for errorID in [unavailableID, deferredID] {
             browsing.openPhoto(errorID)
             try await waitFor("error state did not appear") {
@@ -5597,17 +5671,19 @@ struct DetailDisplayPresentationTests {
         let indicatorsFrame = try #require(framesBox.frames["clove.detail.focusIndicators"])
         let limitationFrame = try #require(framesBox.frames["clove.detail.limitation"])
 
-        // Passive indicators and limitation note stack cleanly below the top row without overlap.
+        // Passive indicators and limitation note stack cleanly below the top row without overlap,
+        // while [ Focus | Compare ] sits bottom-left clear of upper overlays.
         #expect(!cornerOverlay.intersects(focusToggleFrame))
         #expect(!cornerOverlay.intersects(indicatorsFrame))
         #expect(!focusToggleFrame.intersects(indicatorsFrame))
-        #expect(indicatorsFrame.minY >= max(cornerOverlay.maxY, focusToggleFrame.maxY) + 4)
+        #expect(indicatorsFrame.minY >= cornerOverlay.maxY + 4)
         #expect(!indicatorsFrame.intersects(limitationFrame))
         #expect(limitationFrame.minY >= indicatorsFrame.maxY + 4)
+        #expect(focusToggleFrame.minY > limitationFrame.maxY)
 
         // Focus region placed under the upper-leading corner (x=0.08, y=0.08) still receives hits
         // right through the passive corner overlay, while passive indicators, limitation note, and
-        // empty area pass through to the preview and the floating focus toggle receives its own tap.
+        // empty area pass through to the preview and the bottom focus toggle receives its own tap.
         let cornerRegion = try #require(findFocusControl(in: preview))
         let regionCenterInWindow = cornerRegion.convert(
             CGPoint(x: cornerRegion.bounds.midX, y: cornerRegion.bounds.midY), to: window)
@@ -5621,10 +5697,10 @@ struct DetailDisplayPresentationTests {
             CGPoint(x: limitationFrame.midX, y: limitationFrame.midY), with: nil)
         #expect(limitationHit?.isDescendant(of: preview) == true)
         let trailingControlsEdge = max(
-            focusToggleFrame.maxX,
+            cornerOverlay.maxX,
             framesBox.frames["clove.detail.preparation"]?.maxX ?? 0)
         let emptyAreaHit = window.hitTest(
-            CGPoint(x: trailingControlsEdge + 40, y: focusToggleFrame.midY), with: nil)
+            CGPoint(x: trailingControlsEdge + 40, y: cornerOverlay.midY), with: nil)
         #expect(emptyAreaHit?.isDescendant(of: preview) == true)
         let toggleHit = window.hitTest(
             CGPoint(x: focusToggleFrame.midX, y: focusToggleFrame.midY), with: nil)
@@ -6722,15 +6798,16 @@ struct DetailDisplayPresentationTests {
             window.rootViewController = nil
         }
 
-        // 1. Collapsed Timeline group in Photo Preview: 84 pt bottom band, centered/top-aligned
-        // Expand pill, stationary bottom-right MarkingToolbar, 0.32 opacity disabled styling,
-        // and pointer hover tooltips on all three actions.
+        // 1. Collapsed Timeline group in Photo Preview: 84 pt single-row bottom band with
+        // leading [ Focus | Compare ] pill, centered Expand pill, stationary bottom-right
+        // MarkingToolbar, 0.32 opacity disabled styling, and pointer hover tooltips.
         try await waitFor("iPad Photo Preview settled") {
             guard self.findPreview(in: window) != nil,
                 self.findCollectionView(in: window) != nil
             else { return false }
             return source.delivered.contains(.screenRAW)
                 && tapFrames.frames["clove.detail.bottomBand"] != nil
+                && tapFrames.frames["clove.detail.inspectionPill"] != nil
                 && tapFrames.frames["clove.detail.capsule"] != nil
                 && tapFrames.frames["clove.detail.expandGroup"] != nil
         }
@@ -6738,17 +6815,23 @@ struct DetailDisplayPresentationTests {
         let safeBottomY = host.view.safeAreaLayoutGuide.layoutFrame.maxY
         let photoPreviewStageFrame = preview.convert(preview.bounds, to: window)
         let photoPreviewBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+        let photoPreviewInspection = try #require(tapFrames.frames["clove.detail.inspectionPill"])
         let photoPreviewCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
         let photoPreviewExpand = try #require(tapFrames.frames["clove.detail.expandGroup"])
         #expect(tapFrames.frames["clove.detail.rail"] == nil)
         #expect(abs(photoPreviewBand.height - 84) <= 1.5)
         #expect(photoPreviewStageFrame.maxY <= photoPreviewBand.minY + 1)
+        #expect(abs(photoPreviewInspection.width - 96) <= 1.5)
+        #expect(abs(photoPreviewInspection.height - 44) <= 1.5)
+        #expect(abs(photoPreviewInspection.minX - (photoPreviewStageFrame.minX + 16)) <= 1.5)
+        #expect(abs(photoPreviewInspection.midY - photoPreviewCapsule.midY) <= 1.5)
         #expect(abs(photoPreviewCapsule.width - 168) <= 1)
         #expect(abs(photoPreviewCapsule.height - 48) <= 1)
         #expect(abs((window.frame.maxX - 24) - photoPreviewCapsule.maxX) <= 1.5)
         #expect(abs((safeBottomY - 10) - photoPreviewCapsule.maxY) <= 1.5)
-        #expect(abs(photoPreviewExpand.minY - photoPreviewCapsule.minY) <= 1.5)
+        #expect(abs(photoPreviewExpand.midY - photoPreviewCapsule.midY) <= 1.5)
         #expect(abs(photoPreviewExpand.midX - photoPreviewStageFrame.midX) <= 2)
+        #expect(photoPreviewInspection.maxX + 12 <= photoPreviewExpand.minX + 1)
         #expect(photoPreviewExpand.maxX <= photoPreviewCapsule.minX - 12 + 1)
 
         // Collapsed Timeline stack applies 0.32 read-only opacity and keeps marking disabled.
@@ -6764,26 +6847,31 @@ struct DetailDisplayPresentationTests {
         preview.onChromeToggle?()
         try await waitFor("iPad Photo Preview chrome hidden") {
             tapFrames.frames["clove.detail.bottomBand"] == nil
+                && tapFrames.frames["clove.detail.inspectionPill"] == nil
                 && tapFrames.frames["clove.detail.expandGroup"] == nil
         }
         preview.onReadOnlyMarkingDrag?()
         try await waitFor("collapsed drag surfaced Expand pill") {
             tapFrames.frames["clove.detail.bottomBand"] != nil
+                && tapFrames.frames["clove.detail.inspectionPill"] != nil
                 && tapFrames.frames["clove.detail.expandGroup"] != nil
         }
 
-        // 2. Focus View on collapsed Timeline group: 78 pt band, 24 pt filmstrip gap, Expand pill
-        // centered 12 pt above the band, identical stationary MarkingToolbar frame.
+        // 2. Focus View on collapsed Timeline group: 78 pt band preserving full filmstrip width,
+        // [ Focus | Compare ] floating bottom-left 12 pt above the band aligned horizontally with
+        // centered Expand pill, and identical stationary MarkingToolbar frame.
         presentationBox.value = .focus
         try await waitFor("iPad Focus View settled") {
             self.findCollectionView(in: window) == nil
                 && tapFrames.frames["clove.detail.filmstrip"] != nil
+                && tapFrames.frames["clove.detail.inspectionPill"] != nil
                 && abs((tapFrames.frames["clove.detail.bottomBand"]?.height ?? 0) - 78) <= 1.5
                 && tapFrames.frames["clove.detail.expandGroup"] != nil
                 && abs(preview.bounds.width - window.frame.width) <= 1.5
         }
         try await Task.sleep(for: .milliseconds(350))
         let focusBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+        let focusInspection = try #require(tapFrames.frames["clove.detail.inspectionPill"])
         let focusCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
         let focusStrip = try #require(tapFrames.frames["clove.detail.filmstrip"])
         let focusExpand = try #require(tapFrames.frames["clove.detail.expandGroup"])
@@ -6792,8 +6880,10 @@ struct DetailDisplayPresentationTests {
         #expect(abs(focusCapsule.maxX - photoPreviewCapsule.maxX) <= 1)
         #expect(abs(focusCapsule.minY - photoPreviewCapsule.minY) <= 1)
         #expect(abs((focusCapsule.minX - focusStrip.maxX) - 24) <= 1.5)
+        #expect(abs(focusInspection.minX - 16) <= 1.5)
+        #expect(abs((focusBand.minY - 12) - focusInspection.maxY) <= 1.5)
         #expect(abs(focusExpand.midX - 590) <= 2)
-        #expect(abs((focusBand.minY - 12) - focusExpand.maxY) <= 1.5)
+        #expect(abs(focusExpand.midY - focusInspection.midY) <= 1.5)
 
         // 3. Expanding Group Focus restores full opacity and surfaces "Reject N unmarked" cleanly.
         let stageBeforeRejectPill = preview.convert(preview.bounds, to: window)
@@ -6803,7 +6893,7 @@ struct DetailDisplayPresentationTests {
         }
         try await Task.sleep(for: .milliseconds(250))
         let focusRejectPill = try #require(tapFrames.frames["clove.detail.rejectUnmarked"])
-        #expect(abs((focusBand.minY - 12) - focusRejectPill.maxY) <= 1.5)
+        #expect(abs(focusRejectPill.midY - focusInspection.midY) <= 1.5)
         let stageWithRejectPill = preview.convert(preview.bounds, to: window)
         #expect(abs(stageWithRejectPill.height - stageBeforeRejectPill.height) <= 1)
         if let activeAlpha = effectiveRenderedOpacity(atCenterOf: focusCapsule, in: window) {
@@ -6812,7 +6902,7 @@ struct DetailDisplayPresentationTests {
         #expect(preview.allowsMarking)
 
         // 4. Chrome hiding expands the stage without breaking 100% zoom or pan anchor in Focus View
-        // and Photo Preview.
+        // and Photo Preview, hiding [ Focus | Compare ] cleanly alongside chrome.
         preview.onDoubleTap?(DetailDoubleTapLocation(UnitPoint(x: 0.36, y: 0.42)))
         try await waitFor("iPad Focus View zoomed to 100%") {
             preview.isZoomed && source.delivered.contains(.nativeRAW)
@@ -6824,6 +6914,7 @@ struct DetailDisplayPresentationTests {
         preview.onChromeToggle?()
         try await waitFor("iPad Focus View bottom band hidden while zoomed") {
             tapFrames.frames["clove.detail.bottomBand"] == nil
+                && tapFrames.frames["clove.detail.inspectionPill"] == nil
                 && preview.bounds.height > heightBeforeHide + 60
         }
         try await Task.sleep(for: .milliseconds(350))
@@ -6835,6 +6926,7 @@ struct DetailDisplayPresentationTests {
         preview.onChromeToggle?()
         try await waitFor("iPad Focus View bottom band restored while zoomed") {
             tapFrames.frames["clove.detail.bottomBand"] != nil
+                && tapFrames.frames["clove.detail.inspectionPill"] != nil
                 && abs(preview.bounds.height - heightBeforeHide) <= 2
         }
         try await Task.sleep(for: .milliseconds(350))
@@ -6882,6 +6974,598 @@ struct DetailDisplayPresentationTests {
             return matches
         }
         return walk(window, inherited: 1).min()
+    }
+
+    @Test
+    func detailInspectionPillSizingCompareDisablingChromeHideAndPhonePreservation()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+
+        // 1. Single-photo folder on iPad disables Compare gracefully while Focus remains active,
+        // and no top-bar Focus or Compare buttons exist.
+        let singlePhotoLibrary = ControlledPhotoLibrary(rejected: [], stems: ["solo"])
+        let soloBrowsing = BrowsingModel(library: singlePhotoLibrary)
+        soloBrowsing.openFolder()
+        singlePhotoLibrary.reportScanFinished()
+        try await waitFor("single photo folder opened") { !soloBrowsing.isFolderOpening }
+        let soloID = singlePhotoLibrary.identity("solo")
+        soloBrowsing.openPhoto(soloID)
+
+        let soloPresentation = TestPresentationBox(value: .photoPreview)
+        let soloHeaderFrames = DetailFrameBox()
+        let soloTapFrames = DetailFrameBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let soloHost = UIHostingController(
+            rootView: AnyView(
+                PadInspectionHost(
+                    browsing: soloBrowsing,
+                    images: SampleDetailImages(),
+                    presentation: soloPresentation,
+                    usesSystemToolbar: true
+                )
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    soloHeaderFrames.frames = $0
+                }
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    soloTapFrames.frames = $0
+                }))
+        soloHost.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = soloHost
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("iPad single-photo inspection pill did not mount") {
+            soloTapFrames.frames["clove.detail.inspectionPill"] != nil
+                && soloTapFrames.frames["clove.detail.focusToggle"] != nil
+                && soloTapFrames.frames["clove.detail.compare"] != nil
+                && soloTapFrames.frames["clove.detail.bottomBand"] != nil
+        }
+        let pillFrame = try #require(soloTapFrames.frames["clove.detail.inspectionPill"])
+        let focusFrame = try #require(soloTapFrames.frames["clove.detail.focusToggle"])
+        let compareFrame = try #require(soloTapFrames.frames["clove.detail.compare"])
+        let bandFrame = try #require(soloTapFrames.frames["clove.detail.bottomBand"])
+        #expect(abs(pillFrame.width - 96) <= 1.5)
+        #expect(abs(pillFrame.height - 44) <= 1.5)
+        #expect(focusFrame.maxX <= compareFrame.minX + 2)
+        #expect(abs(pillFrame.midY - bandFrame.midY) <= 10)
+
+        let soloTimeline = DetailTimeline(
+            photos: soloBrowsing.photos, groups: soloBrowsing.groups, groupsEnabled: true)
+        #expect(!soloBrowsing.canEnterCompareFromDetail(timeline: soloTimeline))
+        if let compareAlpha = effectiveRenderedOpacity(atCenterOf: compareFrame, in: window) {
+            #expect(compareAlpha < 0.6)
+        }
+        if let focusAlpha = effectiveRenderedOpacity(atCenterOf: focusFrame, in: window) {
+            #expect(focusAlpha > 0.9)
+        }
+        try expectCompareVisiblyDimmedWhenDisabled()
+        #expect(soloBrowsing.compareSession == nil)
+
+        // Focus View keeps [ Focus | Compare ] 12 pt above the full-width filmstrip and hides with chrome.
+        soloPresentation.value = .focus
+        try await waitFor("iPad Focus View single-photo inspection pill did not settle") {
+            self.findCollectionView(in: window) == nil
+                && soloTapFrames.frames["clove.detail.filmstrip"] != nil
+                && soloTapFrames.frames["clove.detail.inspectionPill"] != nil
+                && abs((soloTapFrames.frames["clove.detail.bottomBand"]?.height ?? 0) - 78) <= 1.5
+        }
+        let focusStrip = try #require(soloTapFrames.frames["clove.detail.filmstrip"])
+        let focusPill = try #require(soloTapFrames.frames["clove.detail.inspectionPill"])
+        let focusBand = try #require(soloTapFrames.frames["clove.detail.bottomBand"])
+        let focusCapsule = try #require(soloTapFrames.frames["clove.detail.capsule"])
+        #expect(abs((focusBand.minY - 12) - focusPill.maxY) <= 1.5)
+        #expect(focusStrip.maxX <= focusCapsule.minX - 22)
+
+        let soloPreview = try #require(findPreview(in: window))
+        soloPreview.onChromeToggle?()
+        try await waitFor("iPad Focus View inspection pill did not hide with chrome") {
+            soloTapFrames.frames["clove.detail.inspectionPill"] == nil
+                && soloTapFrames.frames["clove.detail.bottomBand"] == nil
+        }
+        soloPreview.onChromeToggle?()
+        try await waitFor("iPad Focus View inspection pill did not restore with chrome") {
+            soloTapFrames.frames["clove.detail.inspectionPill"] != nil
+                && soloTapFrames.frames["clove.detail.bottomBand"] != nil
+        }
+
+        // 2. Portrait Expanded Duo disables Compare gracefully while Focus View places [Focus|Compare]
+        // bottom-left 12 pt above the filmstrip without squeezing the strip.
+        let multiBrowsing = BrowsingModel(library: TestLibrary.sample())
+        multiBrowsing.openFolder()
+        try await waitFor("sample folder open") { !multiBrowsing.isFolderOpening }
+        let firstPhoto = try #require(multiBrowsing.photos.first?.id)
+        multiBrowsing.openPhoto(firstPhoto)
+
+        let duoPresentation = TestPresentationBox(value: .focus)
+        let duoFrames = DetailFrameBox()
+        window.frame = CGRect(x: 0, y: 0, width: 703.5, height: 1000)
+        soloHost.rootView = AnyView(
+            TestDuoPoseDetailHost(
+                browsing: multiBrowsing,
+                images: SampleDetailImages(),
+                presentation: duoPresentation,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                duoFrames.frames = $0
+            })
+        try await waitFor("Portrait Duo Focus View did not settle") {
+            duoFrames.frames["clove.detail.inspectionPill"] != nil
+                && duoFrames.frames["clove.detail.compare"] != nil
+                && duoFrames.frames["clove.detail.filmstrip"] != nil
+        }
+        let portraitCompareFrame = try #require(duoFrames.frames["clove.detail.compare"])
+        let portraitDuoPreview = try #require(findPreview(in: window))
+        let portraitPill = try #require(duoFrames.frames["clove.detail.inspectionPill"])
+        #expect(
+            abs(
+                (portraitDuoPreview.convert(portraitDuoPreview.bounds, to: window).maxY - 12)
+                    - portraitPill.maxY) <= 1.5)
+        if let portraitCompareAlpha = effectiveRenderedOpacity(
+            atCenterOf: portraitCompareFrame, in: window)
+        {
+            #expect(portraitCompareAlpha < 0.6)
+        }
+        let portraitFocusFrame = try #require(duoFrames.frames["clove.detail.focusToggle"])
+        if let portraitCompareAlpha = effectiveRenderedOpacity(
+            atCenterOf: portraitCompareFrame, in: window)
+        {
+            #expect(portraitCompareAlpha < 0.6)
+        }
+        if let portraitFocusAlpha = effectiveRenderedOpacity(
+            atCenterOf: portraitFocusFrame, in: window)
+        {
+            #expect(portraitFocusAlpha > 0.9)
+        }
+        #expect(
+            !CompareLayoutPolicy(
+                availableWidth: 703.5, availableHeight: 1000, isRegularWidth: true,
+                isCompactHeight: false, isDuoExpanded: true, isDuoCover: false
+            ).supportsCompare)
+        #expect(multiBrowsing.compareSession == nil)
+
+        // 3. Ordinary iPhone landscape leaves standalone top Focus and Compare untouched without inspectionPill.
+        window.frame = CGRect(x: 0, y: 0, width: 844, height: 390)
+        let phoneFrames = DetailFrameBox()
+        soloHost.traitOverrides.horizontalSizeClass = .regular
+        soloHost.traitOverrides.verticalSizeClass = .compact
+        soloHost.rootView = AnyView(
+            NavigationStack {
+                DetailScreen(browsing: multiBrowsing, images: SampleDetailImages())
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .phone)
+            .environment(\.usesSystemBrowsingToolbar, false)
+            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                phoneFrames.frames = $0
+            })
+        try await waitFor("iPhone landscape header Focus & Compare did not mount") {
+            phoneFrames.frames["clove.detail.focusToggle"] != nil
+                && phoneFrames.frames["clove.detail.compare"] != nil
+                && phoneFrames.frames["clove.nav.back"] != nil
+        }
+        #expect(phoneFrames.frames["clove.detail.inspectionPill"] == nil)
+        let phoneBack = try #require(phoneFrames.frames["clove.nav.back"])
+        let phoneFocus = try #require(phoneFrames.frames["clove.detail.focusToggle"])
+        let phoneCompare = try #require(phoneFrames.frames["clove.detail.compare"])
+        let phoneHeader = try #require(phoneFrames.frames["clove.browsing.header"])
+        #expect(phoneBack.maxX <= phoneFocus.minX + 2)
+        #expect(phoneFocus.maxY <= phoneHeader.maxY + 2)
+        #expect(phoneCompare.maxY <= phoneHeader.maxY + 2)
+    }
+
+    @Test
+    func detailUnifiedStageBackgroundAndSplitDividerAcrossLightAndDarkModes() async throws {
+        guard #available(iOS 27.1, *) else { return }
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let sampleImages = SampleDetailImages()
+        let library = TestLibrary.sample()
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("sample library opened") { !browsing.isFolderOpening }
+        let group = try #require(browsing.groups.first { $0.members.count >= 2 })
+        let groupMember = try #require(group.members.first)
+        browsing.openPhoto(groupMember)
+
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            let expectedStage = try renderedStagePixel(Color.clove.bg.stage, theme: theme)
+            let expectedCanvas = try renderedStagePixel(Color.clove.bg.canvas, theme: theme)
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+            window.overrideUserInterfaceStyle = theme.appearance == .light ? .light : .dark
+
+            let presentationBox = TestPresentationBox(value: .photoPreview)
+            let headerFrames = DetailFrameBox()
+            let tapFrames = DetailFrameBox()
+            let host = UIHostingController(
+                rootView: AnyView(
+                    PadInspectionHost(
+                        browsing: browsing,
+                        images: sampleImages,
+                        presentation: presentationBox,
+                        usesSystemToolbar: false,
+                        theme: theme
+                    )
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        headerFrames.frames = $0
+                    }
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    }))
+            host.traitOverrides.horizontalSizeClass = .regular
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            // 1. iPad 30/70 Photo Preview: top bar, 30% grid pane, 8 pt divider gutter, 70% stage,
+            // and bottom row all share continuous Color.clove.bg.stage without opaque white fill.
+            try await waitFor("iPad 30/70 rendered") {
+                self.findPreview(in: window) != nil
+                    && self.findCollectionView(in: window) != nil
+                    && headerFrames.frames["clove.browsing.header"] != nil
+                    && tapFrames.frames["clove.detail.bottomBand"] != nil
+                    && tapFrames.frames["clove.detail.inspectionPill"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(250))
+
+            let buffer30_70 = try captureStageBuffer(in: window)
+            let headerRect = try #require(headerFrames.frames["clove.browsing.header"])
+            let gridView = try #require(findCollectionView(in: window))
+            let gridRect = gridView.convert(gridView.bounds, to: window)
+            let previewView = try #require(findPreview(in: window))
+            let previewRect = previewView.convert(previewView.bounds, to: window)
+            let fitRect = previewView.imageRectAtFit()
+            let stageSamplePoint: CGPoint =
+                if fitRect.minY > 12 {
+                    CGPoint(x: previewRect.midX, y: previewRect.minY + fitRect.minY * 0.5)
+                } else {
+                    CGPoint(x: previewRect.minX + fitRect.minX * 0.5, y: previewRect.midY)
+                }
+            let bottomBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+            let inspectionRect = try #require(tapFrames.frames["clove.detail.inspectionPill"])
+            let capsuleRect = try #require(tapFrames.frames["clove.detail.capsule"])
+
+            // Sample top bar open gap, bottom band open gap (just right of [Focus | Compare] clear
+            // of the centered Expand pill), and stage margin beside fitted photo.
+            let topBarSample = buffer30_70.pixel(
+                x: Int((headerRect.minX + headerRect.width * 0.25).rounded()),
+                y: Int(headerRect.midY.rounded()))
+            let bottomBandSample = buffer30_70.pixel(
+                x: Int((inspectionRect.maxX + 6).rounded()),
+                y: Int(bottomBand.midY.rounded()))
+            let stageCornerSample = buffer30_70.pixel(
+                x: Int(stageSamplePoint.x.rounded()),
+                y: Int(stageSamplePoint.y.rounded()))
+            let dividerGutterX = Int((gridRect.maxX + 2).rounded())
+            let dividerGutterSample = buffer30_70.pixel(
+                x: dividerGutterX,
+                y: Int((gridRect.minY + 24).rounded()))
+
+            assertStageColorClose(
+                topBarSample, expectedStage, "iPad Photo Preview top bar (\(theme.id))")
+            assertStageColorClose(
+                bottomBandSample, expectedStage, "iPad Photo Preview bottom row (\(theme.id))")
+            assertStageColorClose(
+                stageCornerSample, expectedStage, "iPad Photo Preview stage margin (\(theme.id))")
+            assertStageColorClose(
+                dividerGutterSample, expectedStage,
+                "iPad Photo Preview 8 pt divider gutter (\(theme.id))")
+            if theme == .light {
+                #expect(!stageColorsClose(topBarSample, expectedCanvas, tolerance: 8))
+                #expect(!stageColorsClose(bottomBandSample, expectedCanvas, tolerance: 8))
+                #expect(!stageColorsClose(dividerGutterSample, expectedCanvas, tolerance: 8))
+            }
+
+            // Enter Group Focus in 30/70 Photo Preview: split grid uses bg.stage while unloaded
+            // expanded group cells reveal the 12% neutral ExpandedGroupSurface tray tint.
+            browsing.openGroup(group.id, on: groupMember)
+            try await waitFor("Group Focus active in split grid") {
+                browsing.expandedGroup == group.id
+            }
+            let surfaceWindow = UIWindow(windowScene: scene)
+            surfaceWindow.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
+            surfaceWindow.overrideUserInterfaceStyle = theme.appearance == .light ? .light : .dark
+            let surfaceHost = UIHostingController(
+                rootView: SplitFolderGridPane(
+                    browsing: browsing,
+                    thumbnails: DeferredOnlyThumbnails(),
+                    similarGroupsEnabled: true,
+                    openPhoto: { _ in },
+                    selectGroupPhoto: { _ in },
+                    openGroup: { _ in },
+                    collapseGroup: {}
+                )
+                .environment(\.cloveTheme, theme))
+            surfaceHost.safeAreaRegions = []
+            surfaceWindow.rootViewController = surfaceHost
+            surfaceWindow.makeKeyAndVisible()
+            defer {
+                surfaceWindow.isHidden = true
+                surfaceWindow.rootViewController = nil
+            }
+            try await Task.sleep(for: .milliseconds(250))
+
+            let surfaceCollection = try #require(findCollectionView(in: surfaceWindow))
+            let firstCell = try #require(
+                surfaceCollection.cellForItem(at: IndexPath(item: 0, section: 0)))
+            let firstCellFrame = firstCell.convert(firstCell.bounds, to: surfaceWindow)
+            let surfaceBuffer = try captureStageBuffer(in: surfaceWindow)
+            let expandedTileSample = surfaceBuffer.pixel(
+                x: Int(firstCellFrame.midX.rounded()),
+                y: Int(firstCellFrame.midY.rounded()))
+            #expect(!stageColorsClose(expandedTileSample, expectedStage, tolerance: 5))
+            if theme == .light {
+                #expect(!stageColorsClose(expandedTileSample, expectedCanvas, tolerance: 12))
+            }
+            browsing.collapseGroup()
+
+            // 2. iPad Focus View: top bar, stage margins, background-free filmstrip & bottom band
+            // all share continuous Color.clove.bg.stage.
+            presentationBox.value = .focus
+            try await waitFor("iPad Focus View settled") {
+                self.findCollectionView(in: window) == nil
+                    && tapFrames.frames["clove.detail.filmstrip"] != nil
+                    && abs((tapFrames.frames["clove.detail.bottomBand"]?.height ?? 0) - 78) <= 1.5
+            }
+            try await Task.sleep(for: .milliseconds(250))
+
+            let bufferFocus = try captureStageBuffer(in: window)
+            let focusBand = try #require(tapFrames.frames["clove.detail.bottomBand"])
+            let focusStrip = try #require(tapFrames.frames["clove.detail.filmstrip"])
+            let focusCapsule = try #require(tapFrames.frames["clove.detail.capsule"])
+            let focusGapSample = bufferFocus.pixel(
+                x: Int(((focusStrip.maxX + focusCapsule.minX) * 0.5).rounded()),
+                y: Int(focusBand.midY.rounded()))
+            let focusTopSample = bufferFocus.pixel(
+                x: Int((headerRect.minX + headerRect.width * 0.25).rounded()),
+                y: Int(headerRect.midY.rounded()))
+            assertStageColorClose(
+                focusTopSample, expectedStage, "iPad Focus View top bar (\(theme.id))")
+            assertStageColorClose(
+                focusGapSample, expectedStage, "iPad Focus View strip/toolbar gap (\(theme.id))")
+
+            // 3. Expanded Duo Photo Preview 30/70: left grid, PhotoArrangement divider seam, right
+            // stage, and single bottom row all share continuous Color.clove.bg.stage.
+            let duoPresentation = TestPresentationBox(value: .photoPreview)
+            let duoTapFrames = DetailFrameBox()
+            window.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
+            host.rootView = AnyView(
+                TestDuoPoseDetailHost(
+                    browsing: browsing,
+                    images: sampleImages,
+                    presentation: duoPresentation,
+                    isDuoExpanded: true,
+                    isDuoCover: false,
+                    usesVerticalToolbar: true,
+                    hasFoldRegion: true,
+                    showsGrid: true,
+                    theme: theme,
+                    settingsStore: store
+                )
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    duoTapFrames.frames = $0
+                })
+            try await waitFor("Duo 30/70 Photo Preview settled") {
+                self.findCollectionView(in: window) != nil
+                    && self.findPreview(in: window) != nil
+                    && duoTapFrames.frames["clove.detail.bottomBand"] != nil
+                    && duoTapFrames.frames["clove.detail.inspectionPill"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(250))
+
+            let duoBuffer = try captureStageBuffer(in: window)
+            let duoGrid = try #require(findCollectionView(in: window))
+            let duoGridRect = duoGrid.convert(duoGrid.bounds, to: window)
+            let duoPreview = try #require(findPreview(in: window))
+            let duoPreviewRect = duoPreview.convert(duoPreview.bounds, to: window)
+            let duoFitRect = duoPreview.imageRectAtFit()
+            let duoStagePoint: CGPoint =
+                if duoFitRect.minY > 12 {
+                    CGPoint(x: duoPreviewRect.midX, y: duoPreviewRect.minY + duoFitRect.minY * 0.5)
+                } else {
+                    CGPoint(x: duoPreviewRect.minX + duoFitRect.minX * 0.5, y: duoPreviewRect.midY)
+                }
+            let duoBand = try #require(duoTapFrames.frames["clove.detail.bottomBand"])
+            let duoInspection = try #require(duoTapFrames.frames["clove.detail.inspectionPill"])
+            let duoCapsule = try #require(duoTapFrames.frames["clove.duo.capsule"])
+
+            let duoStageMargin = duoBuffer.pixel(
+                x: Int(duoStagePoint.x.rounded()),
+                y: Int(duoStagePoint.y.rounded()))
+            let duoBottomSample = duoBuffer.pixel(
+                x: Int((duoInspection.maxX + 6).rounded()),
+                y: Int(duoBand.midY.rounded()))
+            let duoDividerSample = duoBuffer.pixel(
+                x: Int((duoGridRect.maxX + 2).rounded()),
+                y: Int((duoGridRect.minY + 24).rounded()))
+            assertStageColorClose(
+                duoStageMargin, expectedStage, "Duo 30/70 stage margin (\(theme.id))")
+            assertStageColorClose(
+                duoBottomSample, expectedStage, "Duo 30/70 bottom row (\(theme.id))")
+            assertStageColorClose(
+                duoDividerSample, expectedStage, "Duo 30/70 divider gutter (\(theme.id))")
+            if theme == .light {
+                #expect(!stageColorsClose(duoBottomSample, expectedCanvas, tolerance: 8))
+                #expect(!stageColorsClose(duoDividerSample, expectedCanvas, tolerance: 8))
+            }
+        }
+    }
+
+    private func renderedStagePixel(_ style: CloveColour, theme: CloveTheme) throws -> StageRGBA {
+        let swatch = Rectangle()
+            .fill(style)
+            .frame(width: 10, height: 10)
+            .environment(\.cloveTheme, theme)
+        let renderer = ImageRenderer(content: swatch)
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        return try stagePixels(from: image).pixel(x: 5, y: 5)
+    }
+
+    private func captureStageBuffer(in window: UIWindow) throws -> StagePixelBuffer {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        var didDraw = false
+        let image = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+            didDraw = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        try #require(didDraw)
+        return try stagePixels(from: try #require(image.cgImage))
+    }
+
+    private func stagePixels(from image: CGImage) throws -> StagePixelBuffer {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return StagePixelBuffer(width: width, height: height, bytes: bytes)
+    }
+
+    private func stageColorsClose(_ actual: StageRGBA, _ expected: StageRGBA, tolerance: Int = 10)
+        -> Bool
+    {
+        abs(Int(actual.r) - Int(expected.r)) <= tolerance
+            && abs(Int(actual.g) - Int(expected.g)) <= tolerance
+            && abs(Int(actual.b) - Int(expected.b)) <= tolerance
+            && abs(Int(actual.a) - Int(expected.a)) <= tolerance
+    }
+
+    private func assertStageColorClose(
+        _ actual: StageRGBA, _ expected: StageRGBA, _ label: String, tolerance: Int = 10,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(
+            stageColorsClose(actual, expected, tolerance: tolerance),
+            "\(label): actual \(actual) != expected \(expected)",
+            sourceLocation: sourceLocation)
+    }
+
+    private func expectCompareVisiblyDimmedWhenDisabled() throws {
+        let enabledRenderer = ImageRenderer(
+            content: DetailInspectionPill(
+                isFocusRegionsOn: true,
+                canCompare: true,
+                onToggleFocus: {},
+                onCompare: {}
+            )
+            .padding(8)
+            .background(Color.clove.bg.stage)
+            .environment(\.cloveTheme, .light))
+        enabledRenderer.scale = 2
+        let disabledRenderer = ImageRenderer(
+            content: DetailInspectionPill(
+                isFocusRegionsOn: true,
+                canCompare: false,
+                onToggleFocus: {},
+                onCompare: {}
+            )
+            .padding(8)
+            .background(Color.clove.bg.stage)
+            .environment(\.cloveTheme, .light))
+        disabledRenderer.scale = 2
+        let enabledCG = try #require(enabledRenderer.cgImage)
+        let disabledCG = try #require(disabledRenderer.cgImage)
+        let enabledPixels = try stagePixels(from: enabledCG)
+        let disabledPixels = try stagePixels(from: disabledCG)
+        // Left (Focus) half stays identical, right (Compare) half visibly dims.
+        let focusX = enabledPixels.width / 4
+        let compareX = (enabledPixels.width * 3) / 4
+        let midY = enabledPixels.height / 2
+        var compareDiffCount = 0
+        for dy in -12...12 {
+            for dx in -12...12 {
+                let e = enabledPixels.pixel(x: compareX + dx, y: midY + dy)
+                let d = disabledPixels.pixel(x: compareX + dx, y: midY + dy)
+                if !stageColorsClose(e, d, tolerance: 8) {
+                    compareDiffCount += 1
+                }
+            }
+        }
+        let fE = enabledPixels.pixel(x: focusX, y: midY)
+        let fD = disabledPixels.pixel(x: focusX, y: midY)
+        assertStageColorClose(fE, fD, "Focus segment unchanged when Compare disabled")
+        #expect(compareDiffCount > 10)
+    }
+}
+
+private final class DeferredOnlyThumbnails: GridThumbnailSource {
+    func companions(for photo: PhotoIdentity) -> GridCompanions { GridCompanions() }
+
+    func cachedThumbnail(for photo: PhotoIdentity) -> GridThumbnailOutcome? { nil }
+
+    func thumbnail(for photo: PhotoIdentity, priority: GridThumbnailPriority) async
+        -> GridThumbnailOutcome
+    {
+        .deferred
+    }
+}
+
+private struct StageRGBA: CustomStringConvertible {
+    let r: UInt8
+    let g: UInt8
+    let b: UInt8
+    let a: UInt8
+
+    var description: String { "(\(r), \(g), \(b), \(a))" }
+}
+
+private struct StagePixelBuffer {
+    let width: Int
+    let height: Int
+    let bytes: [UInt8]
+
+    func pixel(x: Int, y: Int) -> StageRGBA {
+        let clampedX = max(0, min(width - 1, x))
+        let clampedY = max(0, min(height - 1, y))
+        let index = (clampedY * width + clampedX) * 4
+        return StageRGBA(
+            r: bytes[index], g: bytes[index + 1], b: bytes[index + 2], a: bytes[index + 3])
+    }
+}
+
+private struct PadInspectionHost: View {
+    let browsing: BrowsingModel
+    let images: any DetailImageSource
+    @Bindable var presentation: TestPresentationBox
+    let usesSystemToolbar: Bool
+    var theme: CloveTheme = .light
+    @State private var store: SettingsStore = {
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        return store
+    }()
+
+    var body: some View {
+        NavigationStack {
+            DetailScreen(browsing: browsing, images: images, presentation: $presentation.value)
+        }
+        .environment(store)
+        .environment(\.cloveTheme, theme)
+        .environment(\.cloveUserInterfaceIdiom, .pad)
+        .environment(\.usesSystemBrowsingToolbar, usesSystemToolbar)
     }
 }
 

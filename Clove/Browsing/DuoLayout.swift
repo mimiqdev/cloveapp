@@ -224,33 +224,56 @@ struct BrowsingToolbar<
 }
 
 /// Shared Photo Preview 30/70 divider interaction for both `ArrangementView` and `SplitPhotoView`.
+/// Renders an `8 pt` `bg/stage` gutter with a hairline in `separator` and a small centered drag
+/// handle, without any opaque white fill (`design/handoff/components.md`, Split divider).
 struct SplitDivider: View {
     @Binding var presentation: DetailPresentation
     let horizontal: Bool
     let contentExtent: CGFloat
     let back: () -> Void
     @Environment(\.appLanguage) private var language
+    @Environment(\.displayScale) private var displayScale
+
+    private var hairlineThickness: CGFloat {
+        1 / max(displayScale, 1)
+    }
 
     var body: some View {
-        Divider()
-            .contentShape(.interaction, Rectangle().inset(by: -22))
-            .gesture(
-                DragGesture(minimumDistance: 4).onEnded { value in
-                    let next = presentation.released(
-                        translation: horizontal
-                            ? value.translation.width : value.translation.height,
-                        contentWidth: contentExtent)
-                    if next == .grid { back() } else { presentation = next }
-                }
-            )
-            .accessibilityLabel(AppLocalization.string("Photo split", language: language))
-            .accessibilityValue(
-                AppLocalization.string("Grid 30 percent, photo 70 percent", language: language)
-            )
-            .accessibilityAdjustableAction { direction in
-                if direction == .decrement { presentation = .focus } else { back() }
+        ZStack {
+            Rectangle()
+                .fill(Color.clove.separator)
+                .frame(
+                    width: horizontal ? hairlineThickness : nil,
+                    height: horizontal ? nil : hairlineThickness
+                )
+            Capsule()
+                .fill(Color.clove.text.secondary.opacity(0.45))
+                .frame(
+                    width: horizontal ? 4 : 28,
+                    height: horizontal ? 28 : 4
+                )
+        }
+        .frame(width: horizontal ? 8 : nil, height: horizontal ? nil : 8)
+        .frame(maxWidth: horizontal ? nil : .infinity, maxHeight: horizontal ? .infinity : nil)
+        .background(Color.clove.bg.stage)
+        .contentShape(.interaction, Rectangle().inset(by: -18))
+        .gesture(
+            DragGesture(minimumDistance: 4).onEnded { value in
+                let next = presentation.released(
+                    translation: horizontal
+                        ? value.translation.width : value.translation.height,
+                    contentWidth: contentExtent)
+                if next == .grid { back() } else { presentation = next }
             }
-            .accessibilityIdentifier("clove.duo.divider")
+        )
+        .accessibilityLabel(AppLocalization.string("Photo split", language: language))
+        .accessibilityValue(
+            AppLocalization.string("Grid 30 percent, photo 70 percent", language: language)
+        )
+        .accessibilityAdjustableAction { direction in
+            if direction == .decrement { presentation = .focus } else { back() }
+        }
+        .accessibilityIdentifier("clove.duo.divider")
     }
 }
 

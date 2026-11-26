@@ -1689,18 +1689,13 @@ struct BrowsingLayoutTests {
                     rawValue:
                         "expected standalone gap between gridToggle and tools capsule: \(snapshot.description)"
                 ))
-            // Filter -> More -> [Compare] -> Info share a single capsule (~14pt internal gap).
+            // Filter -> More -> Info share a single capsule (~14pt internal gap); Compare & Focus live
+            // in the bottom-left Detail inspection pill instead of the dock (#463).
             #expect(filterFrame.maxY < moreFrame.minY)
             #expect(moreFrame.minY - filterFrame.maxY <= 16)
-            if let compareFrame = snapshot.frame(for: "clove.detail.compare") {
-                #expect(moreFrame.maxY < compareFrame.minY)
-                #expect(compareFrame.minY - moreFrame.maxY <= 16)
-                #expect(compareFrame.maxY < infoFrame.minY)
-                #expect(infoFrame.minY - compareFrame.maxY <= 16)
-            } else {
-                #expect(moreFrame.maxY < infoFrame.minY)
-                #expect(infoFrame.minY - moreFrame.maxY <= 16)
-            }
+            #expect(moreFrame.maxY < infoFrame.minY)
+            #expect(infoFrame.minY - moreFrame.maxY <= 16)
+            #expect(!snapshot.contains("clove.detail.compare"))
             #expect(infoFrame.maxY < undoFrame.minY)
             #expect(undoFrame.maxY < moveRejectsFrame.minY)
             #expect(moveRejectsFrame.minY - undoFrame.maxY <= 16)
@@ -1717,12 +1712,8 @@ struct BrowsingLayoutTests {
             #expect(
                 snapshot.trailingIDs == [
                     "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
-                    "clove.detail.compare", "clove.detail.info",
-                ]
-                    || snapshot.trailingIDs == [
-                        "clove.detail.gridToggle", "clove.grid.filter", "clove.grid.more",
-                        "clove.detail.info",
-                    ])
+                    "clove.detail.info",
+                ])
             #expect(snapshot.bottomToolbarIDs == ["clove.duo.undo", "clove.grid.moveRejects"])
         } else {
             #expect(
@@ -1732,18 +1723,16 @@ struct BrowsingLayoutTests {
             #expect(toggleFrame.maxX < filterFrame.minX)
             #expect(filterFrame.maxX <= moreFrame.minX + 2)
             #expect(moreFrame.maxX <= infoFrame.minX + 2)
+            #expect(!snapshot.contains("clove.detail.compare"))
             #expect(
                 snapshot.trailingIDs == [
-                    "clove.grid.filter", "clove.grid.more", "clove.detail.compare",
-                    "clove.detail.info", "clove.detail.undo", "clove.grid.moveRejects",
-                ]
-                    || snapshot.trailingIDs == [
-                        "clove.grid.filter", "clove.grid.more", "clove.detail.info",
-                        "clove.detail.undo", "clove.grid.moveRejects",
-                    ])
+                    "clove.grid.filter", "clove.grid.more", "clove.detail.info",
+                    "clove.detail.undo", "clove.grid.moveRejects",
+                ])
         }
 
-        // Non-system BrowsingHeader fallback also keeps photoGridToggle right after Back before tools.
+        // Non-system BrowsingHeader fallback keeps photoGridToggle/Back in header while Focus and
+        // Compare live in the bottom-left inspection pill (#463).
         let fallbackFrames = TestHeaderFramesBox()
         let fallbackWindow = UIWindow(windowScene: scene)
         fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1000, height: 703.5)
@@ -1766,15 +1755,19 @@ struct BrowsingLayoutTests {
         }
         try await waitFor("fallback detail header did not mount") {
             fallbackFrames.frames["clove.nav.back"] != nil
-                && fallbackFrames.frames["clove.detail.focusToggle"] != nil
                 && fallbackFrames.frames["clove.detail.info"] != nil
+                && fallbackFrames.frames["clove.detail.focusToggle"] != nil
+                && fallbackFrames.frames["clove.detail.compare"] != nil
         }
         if let fBack = fallbackFrames.frames["clove.nav.back"],
             let fFocus = fallbackFrames.frames["clove.detail.focusToggle"],
+            let fCompare = fallbackFrames.frames["clove.detail.compare"],
             let fInfo = fallbackFrames.frames["clove.detail.info"]
         {
-            #expect(fBack.maxX <= fFocus.minX + 1)
-            #expect(fFocus.maxX < fInfo.minX)
+            #expect(fBack.maxX <= fInfo.minX)
+            #expect(fFocus.minY > fBack.maxY)
+            #expect(fCompare.minY > fBack.maxY)
+            #expect(fFocus.maxX <= fCompare.minX + 2)
         }
     }
 
@@ -2076,7 +2069,7 @@ struct BrowsingLayoutTests {
             #expect(!snapshot.contains("clove.grid.undo"))
         }
 
-        // 4. Native iPad Detail keeps navigationTools (photoGridToggle + focusToggle) mounted after Back.
+        // 4. Native iPad Detail keeps navigationTools (Back + photoGridToggle) without top Focus/Compare (#463).
         do {
             let photo = try #require(model.photos.first?.id)
             model.openPhoto(photo)
@@ -2105,8 +2098,10 @@ struct BrowsingLayoutTests {
                     "iPad Detail navigation tools did not mount: \(self.describeToolbarState(in: host, window: window))"
                 ) {
                     let state = self.inspectToolbarState(in: host, window: window)
-                    return state.rawLeadingItemCount == 3
+                    return state.rawLeadingItemCount == 2
                         && state.contains("clove.detail.info")
+                        && !state.contains("clove.detail.compare")
+                        && !state.contains("clove.detail.focusToggle")
                 }
             }
         }

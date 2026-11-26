@@ -299,11 +299,26 @@ struct DetailMarkingView: View {
     /// edge; reserving that band keeps a low central swipe's star bar above the pill without
     /// shrinking the photo (#305).
     private var swipeFeedbackReservation: CGFloat {
-        Self.swipeFeedbackReservation(
+        let duoHasFocusOverlay = duo != nil && isDuoExpanded && showsFilmstrip
+        let floatingPillVisible: Bool =
+            if duoHasFocusOverlay {
+                chromeIsVisible
+            } else if duo != nil && !isDuoExpanded {
+                chromeIsVisible && stagePill != nil
+            } else {
+                false
+            }
+        let floatingPillHeight: CGFloat =
+            if duoHasFocusOverlay {
+                max(DetailInspectionPill.size.height, stagePill != nil ? duoPillHeight : 0)
+            } else {
+                duoPillHeight
+            }
+        return Self.swipeFeedbackReservation(
             floatingPillInStage: duo != nil,
-            pillVisible: chromeIsVisible && stagePill != nil,
-            pillHeight: duoPillHeight,
-            pillGap: showsFilmstrip ? 6 : 12,
+            pillVisible: floatingPillVisible,
+            pillHeight: floatingPillHeight,
+            pillGap: showsFilmstrip ? (isDuoExpanded ? 12 : 6) : 12,
             measuredBand: isOrdinaryPhoneLandscape ? 0 : controlsHeight)
     }
 
@@ -396,9 +411,33 @@ struct DetailMarkingView: View {
             isDuoCover: isDuoCover)
     }
 
+    private var usesInspectionPill: Bool {
+        userInterfaceIdiom == .pad || isDuoExpanded
+    }
+
+    private var usesUnifiedStageBackground: Bool {
+        userInterfaceIdiom == .pad || isDuoExpanded
+    }
+
     private var canEnterCompare: Bool {
         compareLayoutPolicy.supportsCompare
             && browsing.canEnterCompareFromDetail(timeline: timeline)
+    }
+
+    private var inspectionPill: some View {
+        DetailInspectionPill(
+            isFocusRegionsOn: browsing.showsFocusRegions,
+            canCompare: canEnterCompare,
+            onToggleFocus: {
+                browsing.showsFocusRegions.toggle()
+            },
+            onCompare: {
+                dismissGestureGuide()
+                tapPickerDismissToken += 1
+                actions.markingSwipeBegan()
+                browsing.enterCompareFromDetail(timeline: timeline)
+            }
+        )
     }
 
     private var compareToolbarButton: some View {
@@ -440,7 +479,11 @@ struct DetailMarkingView: View {
                 standardLayout
             }
         }
-        .background(Color.clove.bg.stage)
+        .background {
+            Rectangle()
+                .fill(Color.clove.bg.stage)
+                .ignoresSafeArea(edges: usesUnifiedStageBackground ? .all : [])
+        }
         .onGeometryChange(for: CGSize.self) {
             $0.size
         } action: { size in
@@ -508,7 +551,9 @@ struct DetailMarkingView: View {
                     if presentationPolicy.supportsPhotoPreview {
                         photoGridToggle
                     }
-                    focusRegionsToggle
+                    if !usesInspectionPill {
+                        focusRegionsToggle
+                    }
                 } tools: {
                     if chromeIsVisible {
                         if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
@@ -519,7 +564,7 @@ struct DetailMarkingView: View {
                                 )
                                 .accessibilityIdentifier(pill.identifier)
                         }
-                        if canEnterCompare {
+                        if !usesInspectionPill, canEnterCompare {
                             compareToolbarButton
                         }
                         Button(
@@ -537,6 +582,10 @@ struct DetailMarkingView: View {
                     .axisBehavior(.horizontalOnly)
             }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(
+                usesUnifiedStageBackground ? .hidden : .automatic,
+                for: .navigationBar
+            )
             .toolbarVisibility(
                 isOrdinaryPhoneLandscape && !chromeIsVisible ? .hidden : .visible,
                 for: .navigationBar)
@@ -576,54 +625,12 @@ struct DetailMarkingView: View {
         }
     }
 
-    private var focusRegionsToggle: some View {
-        focusRegionsButton(inStageOverlay: false)
-    }
-
     @ViewBuilder
-    private func focusRegionsButton(inStageOverlay: Bool) -> some View {
+    private var focusRegionsToggle: some View {
         let focusLabel = AppLocalization.string("Focus regions", language: language)
         let focusValue = AppLocalization.string(
             browsing.showsFocusRegions ? "On" : "Off", language: language)
-        if inStageOverlay {
-            Group {
-                if #available(iOS 26.0, *) {
-                    Button {
-                        browsing.showsFocusRegions.toggle()
-                    } label: {
-                        Image(systemName: "viewfinder")
-                            .font(.body)
-                            .foregroundStyle(
-                                browsing.showsFocusRegions
-                                    ? Color.clove.accent : Color.clove.text.primary
-                            )
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Circle())
-                    .tint(
-                        browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary
-                    )
-                    .accessibilityLabel(focusLabel)
-                    .accessibilityValue(focusValue)
-                    .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
-                    .accessibilityIdentifier("clove.detail.focusToggle")
-                } else {
-                    GlassIconButton(
-                        label: focusLabel,
-                        symbol: "viewfinder",
-                        isActive: browsing.showsFocusRegions,
-                        size: .pad,
-                        identifier: "clove.detail.focusToggle"
-                    ) {
-                        browsing.showsFocusRegions.toggle()
-                    }
-                }
-            }
-            .reportHeaderControlFrame("clove.detail.focusToggle")
-        } else if usesSystemToolbar {
+        if usesSystemToolbar {
             Button {
                 browsing.showsFocusRegions.toggle()
             } label: {
@@ -697,15 +704,13 @@ struct DetailMarkingView: View {
             .toolbar {
                 BrowsingToolbar(
                     back: { browsing.back() }, undo: undo, canUndo: browsing.canUndoMark,
-                    showsNavigationTools: isDuoExpanded && !usesExpandedDuoViewportOverlay,
+                    showsNavigationTools: false,
                     showsStandaloneDockTool: duo.showsGrid
                         && presentationPolicy.supportsPhotoPreview,
                     showsTools: true,
                     showsBottom: duo.showsGrid
                 ) {
-                    if isDuoExpanded && !usesExpandedDuoViewportOverlay {
-                        focusRegionsToggle
-                    }
+                    EmptyView()
                 } standaloneDockTool: {
                     if duo.showsGrid && presentationPolicy.supportsPhotoPreview {
                         photoGridToggle
@@ -718,7 +723,7 @@ struct DetailMarkingView: View {
                     if !isDuoExpanded {
                         focusRegionsToggle
                     }
-                    if canEnterCompare {
+                    if !usesInspectionPill, canEnterCompare {
                         compareToolbarButton
                     }
                     Button(
@@ -752,6 +757,10 @@ struct DetailMarkingView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(
+                isDuoExpanded ? .hidden : .automatic,
+                for: .navigationBar
+            )
             .toolbarVerticalBehavior(.automatic)
             .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
             .background {
@@ -784,11 +793,43 @@ struct DetailMarkingView: View {
         VStack(spacing: 0) {
             previewArea
                 .overlay(alignment: .bottom) {
-                    // The finishing pill floats over the stage's bottom edge, above the dock. It
-                    // is not part of the dock's height, so showing or hiding it never resizes
-                    // the photo stage (#305).
+                    // The finishing pill and Focus/Compare capsule float above the dock without
+                    // changing its height so showing or hiding them never resizes the photo stage
+                    // (#305, #463).
                     if showsFilmstrip {
-                        if let activeStagePill {
+                        if isDuoExpanded {
+                            if chromeIsVisible {
+                                DetailPhotoPreviewBandLayout(
+                                    leadingInset: 16,
+                                    trailingInset: 16,
+                                    pillGap: 12
+                                ) {
+                                    inspectionPill
+                                        .layoutValue(
+                                            key: DetailBottomBandRoleKey.self, value: .leadingPill)
+                                    if let activeStagePill {
+                                        activeStagePill
+                                            .onGeometryChange(for: CGFloat.self) {
+                                                $0.size.height
+                                            } action: {
+                                                duoPillHeight = $0
+                                            }
+                                            .layoutValue(
+                                                key: DetailBottomBandRoleKey.self,
+                                                value: .centerPill
+                                            )
+                                            .transition(
+                                                .asymmetric(
+                                                    insertion: CloveMotion.slideTransition(
+                                                        edge: .bottom, offset: 8,
+                                                        reduceMotion: reduceMotion),
+                                                    removal: .identity))
+                                    }
+                                }
+                                .padding(.bottom, 12)
+                                .transition(.opacity)
+                            }
+                        } else if let activeStagePill {
                             activeStagePill
                                 .onGeometryChange(for: CGFloat.self) {
                                     $0.size.height
@@ -802,8 +843,6 @@ struct DetailMarkingView: View {
                                             edge: .bottom, offset: 8, reduceMotion: reduceMotion),
                                         removal: .identity))
                         }
-                    } else {
-                        photoPreviewStagePillOverlay(activeStagePill)
                     }
                 }
                 .animation(
@@ -811,7 +850,7 @@ struct DetailMarkingView: View {
                         ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
                     value: showsFilmstrip ? activeStagePill?.identifier : nil
                 )
-                .onChange(of: activeStagePill != nil) { _, isVisible in
+                .onChange(of: activeStagePill != nil && showsFilmstrip) { _, isVisible in
                     if !isVisible {
                         duoPillHeight = 0
                     }
@@ -824,6 +863,7 @@ struct DetailMarkingView: View {
                     identifier: "clove.save.toast"
                 )
                 .padding(.horizontal, 16)
+                .padding(.bottom, 8)
                 .transition(
                     CloveMotion.slideTransition(
                         edge: .bottom, offset: 12, reduceMotion: reduceMotion))
@@ -833,14 +873,14 @@ struct DetailMarkingView: View {
             // trailing inset and vertical centering on the band so switching presentations keeps
             // the capsule stationary. In Focus View, the toolbar sibling is the one reservation:
             // its width (plus a 6 pt leading optical gap) narrows the filmstrip's viewport once,
-            // and the strip's content fills that viewport up to the toolbar (#237). The two
-            // regions share the photo stage's background, so no contrasting sidebar slab divides
-            // them.
+            // and the strip's content fills that viewport up to the toolbar (#237). In 30/70
+            // Photo Preview, [ Focus | Compare ], Stage Pill, and MarkingToolbar align on one
+            // single bottom row inside the 70% photo pane (#463).
             if chromeIsVisible && (showsFilmstrip || isDuoExpanded) {
-                let markingLeadingGap: CGFloat = 6
-                let markingTrailingInset: CGFloat = 16
-                HStack(alignment: .center, spacing: 0) {
-                    if showsFilmstrip {
+                if showsFilmstrip {
+                    let markingLeadingGap: CGFloat = 6
+                    let markingTrailingInset: CGFloat = 16
+                    HStack(alignment: .center, spacing: 0) {
                         DetailFilmstrip(
                             timeline: timeline,
                             expandedGroup: expandedGroup,
@@ -853,17 +893,39 @@ struct DetailMarkingView: View {
                             collapseGroup: collapseFilmstripGroup
                         )
                         .frame(maxWidth: .infinity)
-                    } else {
-                        Spacer(minLength: 0)
+                        if isDuoExpanded {
+                            duoMarkingToolbar
+                                .padding(.leading, markingLeadingGap)
+                                .padding(.trailing, markingTrailingInset)
+                                .layoutPriority(1)
+                        }
                     }
-                    if isDuoExpanded {
+                    .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
+                } else {
+                    DetailPhotoPreviewBandLayout(
+                        leadingInset: 16,
+                        trailingInset: 16,
+                        pillGap: 12
+                    ) {
+                        inspectionPill
+                            .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
+                        if let activeStagePill {
+                            activeStagePill
+                                .id(activeStagePill.identity)
+                                .layoutValue(key: DetailBottomBandRoleKey.self, value: .centerPill)
+                                .transition(.identity)
+                                .transaction { transaction in
+                                    transaction.animation = nil
+                                    transaction.disablesAnimations = true
+                                }
+                        }
                         duoMarkingToolbar
-                            .padding(.leading, showsFilmstrip ? markingLeadingGap : 0)
-                            .padding(.trailing, markingTrailingInset)
-                            .layoutPriority(1)
+                            .layoutValue(key: DetailBottomBandRoleKey.self, value: .toolbar)
                     }
+                    .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
+                    .frame(maxWidth: .infinity)
+                    .reportTapPickerFrame("clove.detail.bottomBand")
                 }
-                .frame(height: DetailFilmstrip.Metrics.standard.bandHeight)
             }
         }
         .animation(
@@ -875,27 +937,6 @@ struct DetailMarkingView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
         .reportTapPickerFrame(showsFilmstrip ? "clove.duo.focus" : "clove.duo.photoPreview")
-    }
-
-    @ViewBuilder
-    private func photoPreviewStagePillOverlay(_ pill: PillAction?) -> some View {
-        Group {
-            if let pill {
-                pill
-                    .id(pill.identity)
-                    .onGeometryChange(for: CGFloat.self) {
-                        $0.size.height
-                    } action: {
-                        duoPillHeight = $0
-                    }
-                    .padding(.bottom, 12)
-                    .transition(.identity)
-            }
-        }
-        .transaction { transaction in
-            transaction.animation = nil
-            transaction.disablesAnimations = true
-        }
     }
 
     /// The shared marking family in the reserved bottom-right marking area beside the filmstrip
@@ -930,6 +971,8 @@ struct DetailMarkingView: View {
                     backTitle: detailBackTitle,
                     usesInlineFlow: isOrdinaryPhoneLandscape,
                     height: isOrdinaryPhoneLandscape ? 44 : 64,
+                    background: usesUnifiedStageBackground
+                        ? Color.clove.bg.stage : Color.clove.bg.canvas,
                     back: { browsing.back() }
                 ) {
                     HStack(spacing: 0) {
@@ -948,7 +991,9 @@ struct DetailMarkingView: View {
                     if presentationPolicy.supportsPhotoPreview {
                         photoGridToggle
                     }
-                    focusRegionsToggle
+                    if !usesInspectionPill {
+                        focusRegionsToggle
+                    }
                 } tools: {
                     if chromeIsVisible {
                         if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
@@ -956,7 +1001,7 @@ struct DetailMarkingView: View {
                                 .fixedSize()
                                 .reportHeaderControlFrame(pill.identifier)
                         }
-                        if canEnterCompare {
+                        if !usesInspectionPill, canEnterCompare {
                             GlassIconButton(
                                 label: AppLocalization.string("Compare", language: language),
                                 symbol: "rectangle.split.2x1",
@@ -1115,14 +1160,16 @@ struct DetailMarkingView: View {
             .background(Color.clove.bg.stage)
             .reportTapPickerFrame("clove.detail.bottomBand")
         } else {
-            IPadPhotoPreviewBandLayout(
-                toolbarTrailingInset: 24,
-                pillLeadingInset: 16,
-                pillTrailingGap: 12
+            DetailPhotoPreviewBandLayout(
+                leadingInset: 16,
+                trailingInset: 24,
+                pillGap: 12
             ) {
+                inspectionPill
+                    .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
                 if let stagePill {
                     stagePill
-                        .layoutValue(key: IPadPhotoPreviewBandRoleKey.self, value: .pill)
+                        .layoutValue(key: DetailBottomBandRoleKey.self, value: .centerPill)
                         .transition(
                             .asymmetric(
                                 insertion: CloveMotion.slideTransition(
@@ -1130,7 +1177,7 @@ struct DetailMarkingView: View {
                                 removal: .identity))
                 }
                 iPadBottomToolbar
-                    .layoutValue(key: IPadPhotoPreviewBandRoleKey.self, value: .toolbar)
+                    .layoutValue(key: DetailBottomBandRoleKey.self, value: .toolbar)
             }
             .animation(
                 stagePill != nil ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
@@ -1179,7 +1226,7 @@ struct DetailMarkingView: View {
         let hasWidePadOverlayItems =
             browsing.failureToastMessage != nil
             || (showsZoomChip && scale > DetailFitScale.tolerance)
-            || (showsFilmstrip && chromeIsVisible && stagePill != nil)
+            || (showsFilmstrip && chromeIsVisible)
         return VStack(spacing: 8) {
             // The save/read failure toast sits above the filmstrip so it never
             // covers the mark capsule (handoff screens.md §03, components.md Toast).
@@ -1213,9 +1260,18 @@ struct DetailMarkingView: View {
             }
             if isWidePadLayout {
                 if showsFilmstrip && chromeIsVisible {
-                    Group {
+                    DetailPhotoPreviewBandLayout(
+                        leadingInset: 16,
+                        trailingInset: 16,
+                        pillGap: 12
+                    ) {
+                        inspectionPill
+                            .layoutValue(key: DetailBottomBandRoleKey.self, value: .leadingPill)
                         if let stagePill {
                             stagePill
+                                .layoutValue(
+                                    key: DetailBottomBandRoleKey.self, value: .centerPill
+                                )
                                 .transition(
                                     .asymmetric(
                                         insertion: CloveMotion.slideTransition(
@@ -1235,23 +1291,53 @@ struct DetailMarkingView: View {
                 // overlay, so its height never moves the stage (handoff components.md,
                 // Pill action; #305).
                 VStack(spacing: 8) {
-                    Group {
-                        if let stagePill {
-                            stagePill
-                                .transition(
-                                    .asymmetric(
-                                        insertion: CloveMotion.slideTransition(
-                                            edge: .bottom, offset: 8,
-                                            reduceMotion: reduceMotion
-                                        ),
-                                        removal: .identity))
+                    if usesInspectionPill {
+                        DetailPhotoPreviewBandLayout(
+                            leadingInset: 16,
+                            trailingInset: 16,
+                            pillGap: 12
+                        ) {
+                            inspectionPill
+                                .layoutValue(
+                                    key: DetailBottomBandRoleKey.self, value: .leadingPill)
+                            if let stagePill {
+                                stagePill
+                                    .layoutValue(
+                                        key: DetailBottomBandRoleKey.self, value: .centerPill
+                                    )
+                                    .transition(
+                                        .asymmetric(
+                                            insertion: CloveMotion.slideTransition(
+                                                edge: .bottom, offset: 8,
+                                                reduceMotion: reduceMotion),
+                                            removal: .identity))
+                            }
                         }
+                        .animation(
+                            stagePill != nil
+                                ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                            value: stagePill?.identifier
+                        )
+                        .padding(.bottom, 4)
+                    } else {
+                        Group {
+                            if let stagePill {
+                                stagePill
+                                    .transition(
+                                        .asymmetric(
+                                            insertion: CloveMotion.slideTransition(
+                                                edge: .bottom, offset: 8,
+                                                reduceMotion: reduceMotion
+                                            ),
+                                            removal: .identity))
+                            }
+                        }
+                        .animation(
+                            stagePill != nil
+                                ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
+                            value: stagePill?.identifier
+                        )
                     }
-                    .animation(
-                        stagePill != nil
-                            ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                        value: stagePill?.identifier
-                    )
                     DetailFilmstrip(
                         timeline: timeline,
                         expandedGroup: expandedGroup,
@@ -1627,8 +1713,6 @@ struct DetailMarkingView: View {
                         .transition(.opacity)
                     }
                     HStack(alignment: .center, spacing: 8) {
-                        focusRegionsButton(inStageOverlay: true)
-                            .layoutPriority(2)
                         FolderPreparationIndicator(
                             browsing: browsing,
                             identifierPrefix: "clove.detail.preparation",
@@ -2903,70 +2987,5 @@ struct DetailPhotoCornerOverlay: View {
         )
         .allowsHitTesting(false)
         .reportHeaderControlFrame("clove.detail.photoCornerOverlay")
-    }
-}
-
-private enum IPadPhotoPreviewBandRole {
-    case pill
-    case toolbar
-}
-
-private struct IPadPhotoPreviewBandRoleKey: LayoutValueKey {
-    static let defaultValue: IPadPhotoPreviewBandRole = .toolbar
-}
-
-/// Arranges the wide-iPad Photo Preview bottom control row so `MarkingToolbar` stays pinned at
-/// trailing while the active finishing/expand `Stage Pill` sits horizontally centered in the 70%
-/// photo pane and top-aligned with the toolbar without overlapping it on narrow splits.
-private struct IPadPhotoPreviewBandLayout: Layout {
-    let toolbarTrailingInset: CGFloat
-    let pillLeadingInset: CGFloat
-    let pillTrailingGap: CGFloat
-
-    func sizeThatFits(
-        proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) -> CGSize {
-        let toolbarSize =
-            subviews
-            .first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .toolbar })?
-            .sizeThatFits(.unspecified) ?? CGSize(width: 168, height: 48)
-        let pillSize =
-            subviews
-            .first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .pill })?
-            .sizeThatFits(.unspecified) ?? .zero
-        return CGSize(
-            width: proposal.width ?? max(toolbarSize.width + toolbarTrailingInset, pillSize.width),
-            height: max(toolbarSize.height, pillSize.height))
-    }
-
-    func placeSubviews(
-        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) {
-        let toolbarView = subviews.first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .toolbar }
-        )
-        let toolbarSize = toolbarView?.sizeThatFits(.unspecified) ?? CGSize(width: 168, height: 48)
-        let toolbarMinX = bounds.maxX - toolbarTrailingInset - toolbarSize.width
-        if let toolbarView {
-            toolbarView.place(
-                at: CGPoint(x: toolbarMinX, y: bounds.minY),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(toolbarSize))
-        }
-
-        if let pillView = subviews.first(where: { $0[IPadPhotoPreviewBandRoleKey.self] == .pill }) {
-            let maxPillWidth = max(
-                0, toolbarMinX - pillTrailingGap - (bounds.minX + pillLeadingInset))
-            let measured = pillView.sizeThatFits(
-                ProposedViewSize(width: maxPillWidth, height: bounds.height))
-            let pillWidth = min(measured.width, maxPillWidth)
-            let idealX = bounds.midX - pillWidth / 2
-            let minAllowedX = bounds.minX + pillLeadingInset
-            let maxAllowedX = toolbarMinX - pillTrailingGap - pillWidth
-            let pillX = max(minAllowedX, min(idealX, maxAllowedX))
-            pillView.place(
-                at: CGPoint(x: pillX, y: bounds.minY),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: pillWidth, height: measured.height))
-        }
     }
 }
