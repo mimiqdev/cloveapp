@@ -1291,9 +1291,10 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.detail.labels.blue").tap()
             XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Blue"), capsule))
             capture("marking-labeled-unrated-\(theme)")
-            // Reject keeps the label in the file but reads Rejected; the corner glyph shows.
+            // Reject replaces stars while keeping the active color label visible; the corner glyph shows.
             element(app, "clove.detail.capsule.reject").tap()
             XCTAssertTrue(wait(NSPredicate(format: "value CONTAINS %@", "Rejected"), capsule))
+            XCTAssertEqual(element(app, "clove.detail.capsule.label").label, "Label, Blue")
             XCTAssertTrue(element(app, "clove.detail.rejectGlyph").exists)
             capture("marking-rejected-\(theme)")
             // The ladder itself, opened from the rating action.
@@ -2046,6 +2047,8 @@ final class CloveFlowTests: XCTestCase {
         let rejectButton = element(app, "clove.duo.capsule.reject")
         rejectButton.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Green · Rejected"), capsule))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "label CONTAINS[c] %@", "green"), labelButton))
         rejectButton.tap()
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Green"), capsule))
         labelButton.tap()

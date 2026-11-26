@@ -572,7 +572,7 @@ struct CompareView: View {
 
             MarkingToolbar(
                 rating: marks.isRejected ? .unrated : marks.rating,
-                label: marks.isRejected ? nil : marks.label.colour,
+                label: marks.label.colour,
                 isRejected: marks.isRejected,
                 enabledRatings: settings.enabledRatings,
                 labels: [nil] + settings.availableLabels.map { Optional($0) },
@@ -1681,14 +1681,14 @@ private struct CompareFocusTrigger: Equatable {
 
 // MARK: - Read-only Pane Marks Summary
 
-private struct ComparePaneMarksSummary: View {
+struct ComparePaneMarksSummary: View {
     let marks: PhotoMarks
     let language: ResolvedAppLanguage
     let identifier: String
 
     var body: some View {
         let hasStars = !marks.isRejected && marks.rating.rawValue > 0
-        let hasLabel = !marks.isRejected && marks.label.colour != nil
+        let hasLabel = marks.label.colour != nil
         let hasAny = marks.isRejected || hasStars || hasLabel
 
         Group {
@@ -1698,26 +1698,25 @@ private struct ComparePaneMarksSummary: View {
                         Image(systemName: "flag.slash.fill")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Color.clove.reject)
-                    } else {
-                        if marks.rating.rawValue > 0 {
-                            HStack(spacing: 1) {
-                                Image(systemName: "star.fill")
-                                    .font(.caption2)
-                                Text("\(marks.rating.rawValue)")
-                                    .font(.caption2.weight(.semibold).monospacedDigit())
-                            }
-                            .foregroundStyle(Color.clove.rating.on)
+                    } else if hasStars {
+                        HStack(spacing: 1) {
+                            Image(systemName: "star.fill")
+                                .font(.caption2)
+                            Text("\(marks.rating.rawValue)")
+                                .font(.caption2.weight(.semibold).monospacedDigit())
                         }
-                        if let colour = marks.label.colour {
-                            Circle()
-                                .fill(Color.clove.label.colour(for: colour))
-                                .frame(width: 8, height: 8)
-                        }
+                        .foregroundStyle(Color.clove.rating.on)
+                    }
+                    if let colour = marks.label.colour {
+                        Circle()
+                            .fill(Color.clove.label.colour(for: colour))
+                            .frame(width: 8, height: 8)
                     }
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(MarkSummary.text(for: marks, language: language))
                 .accessibilityIdentifier(identifier)
+                .reportHeaderControlFrame(identifier)
             }
         }
     }

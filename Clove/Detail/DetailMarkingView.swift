@@ -1037,7 +1037,7 @@ struct DetailMarkingView: View {
             MarkingToolbar(
                 rating: swipeFeedback.rating
                     ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
-                label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+                label: displayMarks.label.colour,
                 isRejected: displayMarks.isRejected,
                 enabledRatings: settings.enabledRatings,
                 labels: [nil] + settings.availableLabels.map { Optional($0) },
@@ -1238,7 +1238,7 @@ struct DetailMarkingView: View {
         MarkingToolbar(
             rating: swipeFeedback.rating
                 ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
-            label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+            label: displayMarks.label.colour,
             isRejected: displayMarks.isRejected,
             enabledRatings: settings.enabledRatings,
             labels: [nil] + settings.availableLabels.map { Optional($0) },
@@ -1523,8 +1523,7 @@ struct DetailMarkingView: View {
                         rating: swipeFeedback.rating
                             ?? (displayMarks.isRejected
                                 ? .unrated : displayMarks.rating),
-                        label: displayMarks.isRejected
-                            ? nil : displayMarks.label.colour,
+                        label: displayMarks.label.colour,
                         isRejected: displayMarks.isRejected,
                         enabledRatings: settings.enabledRatings,
                         labels: [nil] + settings.availableLabels.map { Optional($0) },
@@ -1614,7 +1613,7 @@ struct DetailMarkingView: View {
             MarkingToolbar(
                 rating: swipeFeedback.rating
                     ?? (displayMarks.isRejected ? .unrated : displayMarks.rating),
-                label: displayMarks.isRejected ? nil : displayMarks.label.colour,
+                label: displayMarks.label.colour,
                 isRejected: displayMarks.isRejected,
                 enabledRatings: settings.enabledRatings,
                 labels: [nil] + settings.availableLabels.map { Optional($0) },

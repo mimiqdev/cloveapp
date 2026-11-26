@@ -106,7 +106,7 @@ struct GridBatchBar: View {
             Rectangle().fill(Color.clove.separator).frame(width: 1, height: 24)
 
             MarkLabelAction(
-                label: isRejected ? nil : batchLabelState.selection,
+                label: batchLabelState.selection,
                 labels: [nil] + store.settings.availableLabels.map { Optional($0) },
                 isMixed: batchLabelState.isMixed,
                 identifier: "clove.grid.batch.label",
