@@ -5,11 +5,11 @@ import SwiftUI
 /// (`design/handoff/components.md`, Glass icon button).
 ///
 /// It is 44 × 44 with a 20 pt symbol on iPhone, 40 on iPad and 36 in the Duo dock. The active
-/// state fills the circle with `accent` and draws the glyph white, which is how Filter shows that
-/// a filter is on. The screen passes the SF Symbol, the accessibility label from `copy.md` and an
-/// identifier it can find in a UI test.
+/// state keeps the translucent glass circle and tints only the symbol in `accent`, matching the
+/// iOS system toolbar controls. The screen passes the SF Symbol, the accessibility label from
+/// `copy.md` and an identifier it can find in a UI test.
 struct GlassIconButton: View {
-    /// The theme in effect, for the white glyph on the active fill (tokens.md).
+    /// The theme in effect, for the symbol colour (tokens.md).
     @Environment(\.cloveTheme) private var theme
 
     /// The accessibility label, from `design/handoff/copy.md` where it names one.
@@ -18,8 +18,8 @@ struct GlassIconButton: View {
     /// The SF Symbol, from components.md's icon list.
     let symbol: String
 
-    /// Whether the button's active state is on, or nil for a button that has none; only the
-    /// filter fills with `accent` and reports On or Off (components.md).
+    /// Whether the button's active state is on, or nil for a button that has none; active buttons
+    /// tint only the symbol in `accent` and report On or Off (components.md).
     var isActive: Bool?
 
     /// Optional accessibility value override when `isActive` is non-nil.
@@ -34,20 +34,33 @@ struct GlassIconButton: View {
     /// What the tap does.
     let action: () -> Void
 
+    /// The token used to tint the symbol in its active or inactive state.
+    static func symbolToken(isActive: Bool?) -> ThemeToken {
+        isActive == true ? .accent : .primaryText
+    }
+
+    /// The resolved symbol colour for `isActive` in `theme`.
+    static func symbolColour(isActive: Bool?, in theme: CloveTheme) -> Color {
+        theme.tokens[symbolToken(isActive: isActive)].color
+    }
+
+    /// The circle's diameter: 44 on iPhone, 40 on iPad and 36 in the Duo dock (components.md).
+    static func diameter(for size: ControlSize) -> CGFloat {
+        switch size {
+        case .phone: 44
+        case .pad: 40
+        case .duo: 36
+        }
+    }
+
     var body: some View {
         Button(action: action) {
-            ZStack {
-                if isActive == true {
-                    Circle().fill(Color.clove.accent)
-                }
-                Image(systemName: symbol)
-                    .font(symbolFont)
-                    .foregroundStyle(
-                        isActive == true ? Color.white : theme.tokens.primaryText.color)
-            }
-            .frame(width: diameter, height: diameter)
-            .contentShape(Circle())
-            .cloveGlass(in: Circle())
+            Image(systemName: symbol)
+                .font(symbolFont)
+                .foregroundStyle(Self.symbolColour(isActive: isActive, in: theme))
+                .frame(width: diameter, height: diameter)
+                .contentShape(Circle())
+                .cloveGlass(in: Circle())
         }
         .buttonStyle(.cloveGlassPress)
         .accessibilityLabel(label)
@@ -57,13 +70,8 @@ struct GlassIconButton: View {
         .accessibilityIdentifier(identifier)
     }
 
-    /// The circle's diameter: 44 on iPhone, 40 on iPad and 36 in the Duo dock (components.md).
     private var diameter: CGFloat {
-        switch size {
-        case .phone: 44
-        case .pad: 40
-        case .duo: 36
-        }
+        Self.diameter(for: size)
     }
 
     /// The 20 pt symbol of the 44 pt button, at the size each device's button takes (components.md).

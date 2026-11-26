@@ -39,6 +39,9 @@ struct LabelPicker: View {
         [nil] + LabelColour.allCases.filter { !$0.isExtended }
 
     static let targetExtent: CGFloat = 44
+    static let dotExtent: CGFloat = 16
+    static let selectionRingExtent: CGFloat = 24
+    static let selectionRingLineWidth: CGFloat = 2
     static let itemSpacing: CGFloat = 3.2
     static let containerPadding: CGFloat = 4
 
@@ -89,7 +92,6 @@ struct LabelPicker: View {
     /// One dot; the current choice carries a ring (components.md).
     private func dot(_ label: LabelColour?, targetSize: CGFloat) -> some View {
         let isSelected = !isMixed && label == selection
-        let ringSize = 34.0
         let accessibleName =
             label.map {
                 AppLocalization.format(
@@ -104,16 +106,18 @@ struct LabelPicker: View {
                     Circle().fill(Color.clove.label.colour(for: label))
                 } else {
                     Image(systemName: "circle.slash")
-                        .font(.title3)
+                        .font(.callout)
                         .foregroundStyle(Color.clove.text.secondary)
                 }
             }
-            .frame(width: 24, height: 24)
+            .frame(width: Self.dotExtent, height: Self.dotExtent)
             .overlay {
                 if isSelected {
                     Circle()
-                        .strokeBorder(Color.clove.text.primary, lineWidth: 2)
-                        .frame(width: ringSize, height: ringSize)
+                        .strokeBorder(
+                            Color.clove.text.primary, lineWidth: Self.selectionRingLineWidth
+                        )
+                        .frame(width: Self.selectionRingExtent, height: Self.selectionRingExtent)
                 }
             }
             .frame(minWidth: targetSize, minHeight: targetSize)

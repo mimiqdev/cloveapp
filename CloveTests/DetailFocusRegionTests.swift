@@ -617,8 +617,122 @@ struct DetailFocusRegionTests {
         let host = UIHostingController(rootView: overlay)
         host.view.backgroundColor = .clear
         let measured = host.sizeThatFits(in: CGSize(width: 400, height: 400))
-        #expect(measured.width > 0 && measured.width < 64)
-        #expect(measured.height > 0 && measured.height < 36)
+        #expect(measured == CGSize(width: 48, height: 22))
+
+        let singleHost = UIHostingController(
+            rootView: DetailFocusResultIndicatorsView(
+                indicators: oneIcon, usesPhotoBacking: true, language: .english))
+        singleHost.view.backgroundColor = .clear
+        #expect(
+            singleHost.sizeThatFits(in: CGSize(width: 400, height: 400))
+                == CGSize(width: 22, height: 22))
+    }
+
+    @Test func resultIndicatorsRenderIndividual22PtPhotoSquaresAndSecondaryUnboxedTint() throws {
+        #expect(DetailFocusResultIndicatorsView.tileSize == 22)
+        #expect(DetailFocusResultIndicatorsView.tileCornerRadius == 5)
+        #expect(DetailFocusResultIndicatorsView.tileGap == 4)
+        #expect(DetailFocusResultIndicatorsView.photoBackingOpacity == 0.68)
+
+        let twoIcons = DetailFocusResultIndicators(
+            face: .detected, missingAutofocusMetadata: true)
+        let oneIcon = DetailFocusResultIndicators(
+            face: .noFacesDetected, missingAutofocusMetadata: false)
+        #expect(
+            DetailFocusResultIndicatorsView.layoutSize(for: oneIcon)
+                == CGSize(width: 22, height: 22))
+        #expect(
+            DetailFocusResultIndicatorsView.layoutSize(for: twoIcons)
+                == CGSize(width: 48, height: 22))
+
+        for theme in [CloveTheme.light, CloveTheme.dark, CloveTheme.nord] {
+            let expectedSecondary = try renderedColourPixel(
+                Color.clove.text.secondary, theme: theme)
+            let expectedPrimary = try renderedColourPixel(Color.clove.text.primary, theme: theme)
+            let expectedFocusOutline = try renderedColourPixel(
+                Color.clove.focus.outline, theme: theme)
+
+            // 1. Boxed over photo pixels: two independent 22 × 22 rounded squares (r = 5),
+            //    #000 @ 68% scrim, 4 pt transparent gap, white focus-outline glyphs.
+            let boxedRenderer = ImageRenderer(
+                content: DetailFocusResultIndicatorsView(
+                    indicators: twoIcons, usesPhotoBacking: true, language: .english
+                )
+                .environment(\.cloveTheme, theme))
+            boxedRenderer.scale = 2
+            let boxedImage = try #require(boxedRenderer.cgImage)
+            #expect(boxedImage.width == 96)
+            #expect(boxedImage.height == 44)
+            let boxedPixels = try rgbaPixels(from: boxedImage)
+
+            // Rounded corner (r = 5): outermost corner is transparent; inside corner edge is #000 @ 68%.
+            #expect(boxedPixels.pixel(x: 0, y: 0).a == 0)
+            #expect(boxedPixels.pixel(x: 43, y: 0).a == 0)
+            #expect(boxedPixels.pixel(x: 52, y: 0).a == 0)
+            #expect(boxedPixels.pixel(x: 95, y: 43).a == 0)
+
+            let scrimSamples = [(5, 5), (38, 5), (57, 5), (90, 38)]
+            for (sx, sy) in scrimSamples {
+                let px = boxedPixels.pixel(x: sx, y: sy)
+                #expect(px.r == 0 && px.g == 0 && px.b == 0)
+                #expect(abs(Int(px.a) - 173) <= 4)
+            }
+
+            // 4 pt gap (x = 44..<52 at 2x) stays completely transparent across full height.
+            for y in 0..<44 {
+                for x in 45..<51 {
+                    #expect(boxedPixels.pixel(x: x, y: y).a == 0)
+                }
+            }
+
+            // White focus-outline glyph pixels appear inside both tiles.
+            let hasWhiteFaceGlyph = (8..<36).contains { y in
+                (8..<36).contains { x in
+                    let px = boxedPixels.pixel(x: x, y: y)
+                    return px.a == 255 && colorsClose(px, expectedFocusOutline, tolerance: 8)
+                }
+            }
+            let hasWhiteAFGlyph = (8..<36).contains { y in
+                (60..<88).contains { x in
+                    let px = boxedPixels.pixel(x: x, y: y)
+                    return px.a == 255 && colorsClose(px, expectedFocusOutline, tolerance: 8)
+                }
+            }
+            #expect(hasWhiteFaceGlyph)
+            #expect(hasWhiteAFGlyph)
+
+            // 2. Unboxed over stage background: no backing pixels, glyphs tinted in text/secondary.
+            let unboxedRenderer = ImageRenderer(
+                content: DetailFocusResultIndicatorsView(
+                    indicators: twoIcons, usesPhotoBacking: false, language: .english
+                )
+                .environment(\.cloveTheme, theme))
+            unboxedRenderer.scale = 2
+            let unboxedImage = try #require(unboxedRenderer.cgImage)
+            #expect(unboxedImage.width == 96)
+            #expect(unboxedImage.height == 44)
+            let unboxedPixels = try rgbaPixels(from: unboxedImage)
+
+            for (sx, sy) in scrimSamples {
+                #expect(unboxedPixels.pixel(x: sx, y: sy).a == 0)
+            }
+
+            let unboxedOpaqueSamples = (8..<36).flatMap { y in
+                (8..<36).compactMap { x -> RGBA? in
+                    let px = unboxedPixels.pixel(x: x, y: y)
+                    return px.a > 20 ? px : nil
+                }
+            }
+            #expect(!unboxedOpaqueSamples.isEmpty)
+            #expect(
+                unboxedOpaqueSamples.contains {
+                    colorsClose($0, expectedSecondary, tolerance: 10)
+                })
+            #expect(
+                !unboxedOpaqueSamples.contains {
+                    colorsClose($0, expectedPrimary, tolerance: 10)
+                })
+        }
     }
 
     @Test func doubleTapPolicyPrefersInspectedThenAutofocusThenNearestPresentedRegion() {
@@ -1100,6 +1214,58 @@ struct DetailFocusRegionTests {
             found.append(contentsOf: findAllRegionControls(in: child))
         }
         return found
+    }
+
+    private func renderedColourPixel(_ style: CloveColour, theme: CloveTheme) throws -> RGBA {
+        let swatch = Rectangle()
+            .fill(style)
+            .frame(width: 8, height: 8)
+            .environment(\.cloveTheme, theme)
+        let renderer = ImageRenderer(content: swatch)
+        renderer.scale = 1
+        let image = try #require(renderer.cgImage)
+        return try rgbaPixels(from: image).pixel(x: 4, y: 4)
+    }
+
+    private func rgbaPixels(from image: CGImage) throws -> PixelBuffer {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = try #require(
+            CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return PixelBuffer(width: width, height: height, bytes: bytes)
+    }
+
+    private func colorsClose(_ actual: RGBA, _ expected: RGBA, tolerance: Int = 10) -> Bool {
+        abs(Int(actual.r) - Int(expected.r)) <= tolerance
+            && abs(Int(actual.g) - Int(expected.g)) <= tolerance
+            && abs(Int(actual.b) - Int(expected.b)) <= tolerance
+            && abs(Int(actual.a) - Int(expected.a)) <= tolerance
+    }
+}
+
+private struct RGBA {
+    let r: UInt8
+    let g: UInt8
+    let b: UInt8
+    let a: UInt8
+}
+
+private struct PixelBuffer {
+    let width: Int
+    let height: Int
+    let bytes: [UInt8]
+
+    func pixel(x: Int, y: Int) -> RGBA {
+        let offset = (y * width + x) * 4
+        return RGBA(
+            r: bytes[offset], g: bytes[offset + 1], b: bytes[offset + 2], a: bytes[offset + 3])
     }
 }
 
