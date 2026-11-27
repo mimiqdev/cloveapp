@@ -367,8 +367,6 @@ struct DetailScreen: View {
         withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
             undoToast = toast
         }
-        UIAccessibility.post(
-            notification: .announcement, argument: toast.localizedMessage(language: language))
     }
 
     private func dismissUndoToast() {

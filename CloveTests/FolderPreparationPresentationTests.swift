@@ -165,17 +165,11 @@ struct FolderPreparationPresentationTests {
             FolderPreparationAccessibility.indicatorAccessibilityValue(for: withIssues).contains(
                 "34 of 36 ready"))
         #expect(FolderPreparationAccessibility.canRetryIssues(for: withIssues))
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(for: withIssues)
-                == "Retries failed or deferred analysis and preview tasks.")
 
         var pausedWithIssues = withIssues
         pausedWithIssues.waitingReason = .memoryPressure
         #expect(pausedWithIssues.hasRetryableIssues)
         #expect(!FolderPreparationAccessibility.canRetryIssues(for: pausedWithIssues))
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(for: pausedWithIssues)
-                == "Unavailable while folder preparation is paused.")
 
         var disconnectedWithIssues = withIssues
         disconnectedWithIssues.waitingReason = .folderUnavailable(.externalVolumeDisconnected)

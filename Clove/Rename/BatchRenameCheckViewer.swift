@@ -70,12 +70,6 @@ struct BatchRenameCheckViewer: View {
                     scale > DetailFitScale.tolerance ? "Zoomed" : "Fit", language: language)
             )
             .accessibilityIdentifier("clove.rename.viewer.preview")
-            .accessibilityAction(
-                named: AppLocalization.string("Previous photo", language: language)
-            ) { step(-1) }
-            .accessibilityAction(
-                named: AppLocalization.string("Next photo", language: language)
-            ) { step(1) }
             .overlay {
                 if pixels.unavailable {
                     Text(AppLocalization.string("No preview available", language: language))

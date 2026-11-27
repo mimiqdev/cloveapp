@@ -268,9 +268,6 @@ struct SplitDivider: View {
         .accessibilityValue(
             AppLocalization.string("Grid 30 percent, photo 70 percent", language: language)
         )
-        .accessibilityAdjustableAction { direction in
-            if direction == .decrement { presentation = .focus } else { back() }
-        }
         .accessibilityIdentifier("clove.duo.divider")
     }
 }

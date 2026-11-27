@@ -330,9 +330,6 @@ private struct TapPickerContainerModifier<Trigger: Equatable>: ViewModifier {
                                 active.content(placement.axis) {
                                     controller.dismiss()
                                 }
-                                .accessibilityAction(.escape) {
-                                    controller.dismiss()
-                                }
                                 .transition(
                                     CloveMotion.bloomTransition(
                                         anchor: bloomAnchor, reduceMotion: reduceMotion)

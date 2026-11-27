@@ -163,17 +163,6 @@ enum FolderPreparationAccessibility {
         AppLocalization.string("Retry preparation issues", language: language)
     }
 
-    static func retryButtonAccessibilityHint(
-        for status: FolderPreparationStatus, language: ResolvedAppLanguage = .english
-    ) -> String {
-        if status.waitingReason != nil {
-            return AppLocalization.string(
-                "Unavailable while folder preparation is paused.", language: language)
-        }
-        return AppLocalization.string(
-            "Retries failed or deferred analysis and preview tasks.", language: language)
-    }
-
     static func canRetryIssues(for status: FolderPreparationStatus) -> Bool {
         status.canRetryIssues
     }
@@ -599,11 +588,6 @@ struct FolderPreparationIndicator: View {
                         AppLocalization.string("Folder preparation", language: language)
                     )
                     .accessibilityValue(indicatorAccessibilityValue)
-                    .accessibilityHint(
-                        AppLocalization.string(
-                            "Shows folder analysis and preview preparation details.",
-                            language: language)
-                    )
                     .accessibilityIdentifier(identifierPrefix)
                     .reportHeaderControlFrame(identifierPrefix)
                 } else {
@@ -623,11 +607,6 @@ struct FolderPreparationIndicator: View {
                         AppLocalization.string("Folder preparation", language: language)
                     )
                     .accessibilityValue(indicatorAccessibilityValue)
-                    .accessibilityHint(
-                        AppLocalization.string(
-                            "Shows folder analysis and preview preparation details.",
-                            language: language)
-                    )
                     .accessibilityIdentifier(identifierPrefix)
                 }
             } else {
@@ -647,11 +626,6 @@ struct FolderPreparationIndicator: View {
                     AppLocalization.string("Folder preparation", language: language)
                 )
                 .accessibilityValue(indicatorAccessibilityValue)
-                .accessibilityHint(
-                    AppLocalization.string(
-                        "Shows folder analysis and preview preparation details.",
-                        language: language)
-                )
                 .accessibilityIdentifier(identifierPrefix)
 
                 if inListRow {
@@ -1213,10 +1187,6 @@ struct FolderPreparationDetails: View {
                     .accessibilityLabel(
                         FolderPreparationAccessibility.retryButtonAccessibilityLabel(
                             language: language)
-                    )
-                    .accessibilityHint(
-                        FolderPreparationAccessibility.retryButtonAccessibilityHint(
-                            for: status, language: language)
                     )
                     .accessibilityIdentifier("clove.preparation.retry")
                     .reportHeaderControlFrame("clove.preparation.retry")

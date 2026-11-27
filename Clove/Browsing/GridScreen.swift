@@ -418,7 +418,7 @@ struct GridScreen: View {
                         hiddenSelectedCount: browsing.hiddenSelectedCount
                     ) {
                         Task {
-                            await browsing.saveToPhotos(request.plan, language: language)
+                            await browsing.saveToPhotos(request.plan)
                         }
                     }
                 case .metadataFilters:
@@ -446,7 +446,7 @@ struct GridScreen: View {
                 ) {
                     pendingPhotosConfirmationPlan = nil
                     Task {
-                        await browsing.saveToPhotos(plan, language: language)
+                        await browsing.saveToPhotos(plan)
                     }
                 }
                 .accessibilityIdentifier("clove.photos.confirm.save")
@@ -1139,7 +1139,7 @@ struct GridScreen: View {
             pendingPhotosConfirmationPlan = plan
         } else if plan.eligibleCount > 0 {
             Task {
-                await browsing.saveToPhotos(plan, language: language)
+                await browsing.saveToPhotos(plan)
             }
         }
     }

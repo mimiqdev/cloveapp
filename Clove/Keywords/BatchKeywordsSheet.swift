@@ -216,11 +216,6 @@ struct BatchKeywordsSheet: View {
                         .accessibilityLabel(
                             AppLocalization.format("Remove %@", language: language, keyword)
                         )
-                        .accessibilityHint(
-                            AppLocalization.string(
-                                "Removes this keyword from all selected photos.",
-                                language: language)
-                        )
                         .accessibilityIdentifier("clove.keywords.remove.\(keyword)")
                     }
                 }
@@ -307,13 +302,6 @@ struct BatchKeywordsSheet: View {
                     .opacity(canOperate ? 1 : 0.4)
                     .accessibilityLabel(
                         AppLocalization.format("Add %@", language: language, keyword)
-                    )
-                    .accessibilityHint(
-                        AppLocalization.string(
-                            isStagedConfirmation
-                                ? "Stages this keyword to add to selected photos."
-                                : "Adds this keyword to all selected photos.",
-                            language: language)
                     )
                     .accessibilityIdentifier("clove.keywords.suggestion.\(keyword)")
                 }

@@ -76,9 +76,6 @@ final class DetailFocusRegionControl: UIControl {
         accessibilityLabel = region.kind.accessibilityName(language: language)
         if !region.isActionable {
             accessibilityValue = region.unavailableAccessibilityDescription(language: language)
-        } else {
-            accessibilityHint = AppLocalization.string(
-                "Shows 100% zoom centred on this region", language: language)
         }
     }
 
