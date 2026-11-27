@@ -274,10 +274,11 @@ struct MoveRejectsThumbnail: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                Rectangle().fill(Color.clove.surface.card)
+            Group {
                 if let image {
                     Image(decorative: image, scale: 1).resizable().scaledToFill()
+                } else {
+                    Rectangle().fill(Color.clove.surface.card)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)

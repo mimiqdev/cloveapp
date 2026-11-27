@@ -14,8 +14,10 @@ struct RejectedThumbnailDimmingTests {
     private static let lightThemes = CloveTheme.allCases.filter { $0.appearance == .light }
 
     @Test func gridAndSelectCellsDarkenAndDesaturateAcrossAllTwelveThemes() async throws {
-        let whiteImage = solidSRGBImage(red: 1, green: 1, blue: 1)
-        let coralImage = solidSRGBImage(red: 0.95, green: 0.35, blue: 0.20)
+        let splitWhiteImage = splitLeftRightSRGBImage(
+            left: (1, 1, 1), right: (0.08, 0.08, 0.08))
+        let splitCoralImage = splitLeftRightSRGBImage(
+            left: (0.95, 0.35, 0.20), right: (0.08, 0.08, 0.08))
         let skyImage = solidSRGBImage(red: 0.15, green: 0.55, blue: 0.95)
 
         let whiteID = photoID("GRID_WHITE")
@@ -24,10 +26,10 @@ struct RejectedThumbnailDimmingTests {
         let peekID = photoID("GRID_PEEK")
 
         let source = MapThumbnailSource(images: [
-            whiteID: whiteImage,
-            coralID: coralImage,
+            whiteID: splitWhiteImage,
+            coralID: splitCoralImage,
             skyID: skyImage,
-            peekID: whiteImage,
+            peekID: splitWhiteImage,
         ])
 
         let scene = try #require(
@@ -98,30 +100,37 @@ struct RejectedThumbnailDimmingTests {
 
             let normalWhitePx = try await renderCell(normalWhite)
             let rejectedWhitePx = try await renderCell(rejectedWhite)
-            let normalWhiteSample = normalWhitePx.pixel(x: 100, y: 100)
-            let rejectedWhiteSample = rejectedWhitePx.pixel(x: 100, y: 100)
+            let normalWhiteSample = normalWhitePx.pixel(x: 60, y: 100)
+            let rejectedWhiteSample = rejectedWhitePx.pixel(x: 60, y: 100)
 
-            assertDarkroomNeutralWhite(
-                rejectedWhiteSample,
-                normal: normalWhiteSample,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: rejectedWhiteSample,
+                darkHalf: rejectedWhitePx.pixel(x: 140, y: 100),
+                normalBrightHalf: normalWhiteSample,
+                normalDarkHalf: normalWhitePx.pixel(x: 140, y: 100),
                 context: "\(theme.rawValue) grid white")
             whiteRejectedRGBByTheme[theme] = rejectedWhiteSample
 
             let normalCoralPx = try await renderCell(normalCoral)
             let rejectedCoralPx = try await renderCell(rejectedCoral)
             assertDarkroomDesaturatedColor(
-                rejectedCoralPx.pixel(x: 100, y: 100),
-                normal: normalCoralPx.pixel(x: 100, y: 100),
+                rejectedCoralPx.pixel(x: 60, y: 100),
+                normal: normalCoralPx.pixel(x: 60, y: 100),
                 context: "\(theme.rawValue) grid coral")
+            #expect(
+                rejectedCoralPx.pixel(x: 140, y: 100).luminance <= 20,
+                "\(theme.rawValue) grid coral loaded dark half")
 
             // Select mode unfolded tray tile uses the same neutral darkroom dimming without corner badges.
             let trayPosition = GridGroupTrayPosition(
                 memberIndex: 1, memberCount: 2, connectsLeading: true, connectsTrailing: false)
             let selectTrayPx = try await renderCell(
                 rejectedWhite, isSelecting: true, trayPosition: trayPosition)
-            assertDarkroomNeutralWhite(
-                selectTrayPx.pixel(x: 100, y: 100),
-                normal: normalWhiteSample,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: selectTrayPx.pixel(x: 60, y: 100),
+                darkHalf: selectTrayPx.pixel(x: 140, y: 100),
+                normalBrightHalf: normalWhiteSample,
+                normalDarkHalf: normalWhitePx.pixel(x: 140, y: 100),
                 context: "\(theme.rawValue) select tray white")
 
             // Collapsed group stack cover and peeking card stay darkroom-dimmed and neutral.
@@ -134,13 +143,24 @@ struct RejectedThumbnailDimmingTests {
                     peekingPhotos: [peekID]),
                 isDimmed: true)
             let coverPx = try await renderCell(coverItem)
-            assertDarkroomNeutralWhite(
-                coverPx.pixel(x: 100, y: 110),
-                normal: normalWhiteSample,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: coverPx.pixel(x: 60, y: 110),
+                darkHalf: coverPx.pixel(x: 140, y: 110),
+                normalBrightHalf: normalWhiteSample,
+                normalDarkHalf: normalWhitePx.pixel(x: 140, y: 100),
                 context: "\(theme.rawValue) grid stack cover")
-            let peekSample = coverPx.pixel(x: 100, y: 4)
-            #expect(peekSample.luminance < 110, "\(theme.rawValue) peeking card dimmed over black")
-            #expect(peekSample.chromaSpread <= 6, "\(theme.rawValue) peeking card untinted")
+            let peekBrightSample = coverPx.pixel(x: 50, y: 4)
+            let peekDarkSample = coverPx.pixel(x: 150, y: 4)
+            #expect(
+                peekBrightSample.luminance >= 60 && peekBrightSample.luminance <= 105,
+                "\(theme.rawValue) peeking card loaded bright half \(peekBrightSample)")
+            #expect(
+                peekDarkSample.luminance <= 18,
+                "\(theme.rawValue) peeking card loaded dark half \(peekDarkSample)")
+            #expect(
+                peekBrightSample.luminance - peekDarkSample.luminance >= 50,
+                "\(theme.rawValue) peeking card distinguishes loaded image from placeholder")
+            #expect(peekBrightSample.chromaSpread <= 6, "\(theme.rawValue) peeking card untinted")
 
             // Zero corner reject flag badges, while colour label dots keep vivid colour.
             let rejectColor = try renderedColourPixel(Color.clove.reject, theme: theme)
@@ -176,8 +196,10 @@ struct RejectedThumbnailDimmingTests {
     }
 
     @Test func filmstripAndGroupPickerDarkenAndDesaturateAcrossAllSixLightThemes() async throws {
-        let whiteImage = solidSRGBImage(red: 1, green: 1, blue: 1)
-        let coralImage = solidSRGBImage(red: 0.95, green: 0.35, blue: 0.20)
+        let splitWhiteImage = splitLeftRightSRGBImage(
+            left: (1, 1, 1), right: (0.08, 0.08, 0.08))
+        let splitCoralImage = splitLeftRightSRGBImage(
+            left: (0.95, 0.35, 0.20), right: (0.08, 0.08, 0.08))
         let skyImage = solidSRGBImage(red: 0.15, green: 0.55, blue: 0.95)
 
         let normalWhitePhoto = makeGridPhoto(photoID("FS_NORM_W"))
@@ -195,11 +217,11 @@ struct RejectedThumbnailDimmingTests {
         let activeGroup = try #require(timeline.activeGroup(with: groupID))
 
         let source = MapThumbnailSource(images: [
-            normalWhitePhoto.id: whiteImage,
-            rejectedWhitePhoto.id: whiteImage,
-            normalCoralPhoto.id: coralImage,
-            rejectedCoralPhoto.id: coralImage,
-            groupA.id: whiteImage,
+            normalWhitePhoto.id: splitWhiteImage,
+            rejectedWhitePhoto.id: splitWhiteImage,
+            normalCoralPhoto.id: splitCoralImage,
+            rejectedCoralPhoto.id: splitCoralImage,
+            groupA.id: splitWhiteImage,
             groupB.id: skyImage,
         ])
 
@@ -251,9 +273,11 @@ struct RejectedThumbnailDimmingTests {
 
             let normalFrameWhite = try await renderFrame(normalWhitePhoto)
             let rejectedFrameWhite = try await renderFrame(rejectedWhitePhoto)
-            assertDarkroomNeutralWhite(
-                rejectedFrameWhite.pixel(x: 66, y: 72),
-                normal: normalFrameWhite.pixel(x: 66, y: 72),
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: rejectedFrameWhite.pixel(x: 40, y: 72),
+                darkHalf: rejectedFrameWhite.pixel(x: 92, y: 72),
+                normalBrightHalf: normalFrameWhite.pixel(x: 40, y: 72),
+                normalDarkHalf: normalFrameWhite.pixel(x: 92, y: 72),
                 context: "\(theme.rawValue) DetailPhotoFrame white")
 
             let normalFrameCoral = try await renderFrame(normalCoralPhoto)
@@ -261,13 +285,13 @@ struct RejectedThumbnailDimmingTests {
             let unDimmedRejectedCoral = try await renderFrame(
                 rejectedCoralPhoto, appliesRejectedDimming: false)
             assertDarkroomDesaturatedColor(
-                rejectedFrameCoral.pixel(x: 66, y: 72),
-                normal: normalFrameCoral.pixel(x: 66, y: 72),
+                rejectedFrameCoral.pixel(x: 40, y: 72),
+                normal: normalFrameCoral.pixel(x: 40, y: 72),
                 context: "\(theme.rawValue) DetailPhotoFrame coral")
             #expect(
                 rgbaDistance(
-                    unDimmedRejectedCoral.pixel(x: 66, y: 72),
-                    normalFrameCoral.pixel(x: 66, y: 72)) <= 4,
+                    unDimmedRejectedCoral.pixel(x: 40, y: 72),
+                    normalFrameCoral.pixel(x: 40, y: 72)) <= 4,
                 "\(theme.rawValue) Focus/un-dimmed frame preserves full colour")
 
             // 2. DetailFilmstrip standalone rejected tile + all-rejected collapsed group stack over light stage.
@@ -310,14 +334,17 @@ struct RejectedThumbnailDimmingTests {
                 (metrics.horizontalPadding + 2 * slotStep + metrics.thumbnailWidth / 2) * 2)
             let tileMidY = Int((metrics.bandHeight - metrics.verticalTrackPadding - 30) * 2)
 
-            let stripNormal = stripPx.pixel(x: slot0X, y: tileMidY)
-            let stripRejected = stripPx.pixel(x: slot1X, y: tileMidY)
-            let stripRejectedStack = stripPx.pixel(x: slot2X, y: tileMidY)
-            assertDarkroomNeutralWhite(
-                stripRejected, normal: stripNormal,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: stripPx.pixel(x: slot1X - 24, y: tileMidY),
+                darkHalf: stripPx.pixel(x: slot1X + 24, y: tileMidY),
+                normalBrightHalf: stripPx.pixel(x: slot0X - 24, y: tileMidY),
+                normalDarkHalf: stripPx.pixel(x: slot0X + 24, y: tileMidY),
                 context: "\(theme.rawValue) filmstrip rejected")
-            assertDarkroomNeutralWhite(
-                stripRejectedStack, normal: stripNormal,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: stripPx.pixel(x: slot2X - 24, y: tileMidY),
+                darkHalf: stripPx.pixel(x: slot2X + 24, y: tileMidY),
+                normalBrightHalf: stripPx.pixel(x: slot0X - 24, y: tileMidY),
+                normalDarkHalf: stripPx.pixel(x: slot0X + 24, y: tileMidY),
                 context: "\(theme.rawValue) filmstrip all-rejected stack")
 
             // 3. GroupPhotoGridPicker over light sheet background.
@@ -370,17 +397,24 @@ struct RejectedThumbnailDimmingTests {
                 return CGPoint(x: x * 2, y: y * 2)
             }
 
-            let pNormalWhite = pickerPx.pixel(at: cellCenter(col: 0, row: 0))
-            let pRejectedWhite = pickerPx.pixel(at: cellCenter(col: 1, row: 0))
-            let pNormalCoral = pickerPx.pixel(at: cellCenter(col: 2, row: 0))
-            let pRejectedCoral = pickerPx.pixel(at: cellCenter(col: 0, row: 1))
+            let c00 = cellCenter(col: 0, row: 0)
+            let c10 = cellCenter(col: 1, row: 0)
+            let c20 = cellCenter(col: 2, row: 0)
+            let c01 = cellCenter(col: 0, row: 1)
 
-            assertDarkroomNeutralWhite(
-                pRejectedWhite, normal: pNormalWhite,
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: pickerPx.pixel(x: Int(c10.x) - 50, y: Int(c10.y)),
+                darkHalf: pickerPx.pixel(x: Int(c10.x) + 50, y: Int(c10.y)),
+                normalBrightHalf: pickerPx.pixel(x: Int(c00.x) - 50, y: Int(c00.y)),
+                normalDarkHalf: pickerPx.pixel(x: Int(c00.x) + 50, y: Int(c00.y)),
                 context: "\(theme.rawValue) GroupPicker white")
             assertDarkroomDesaturatedColor(
-                pRejectedCoral, normal: pNormalCoral,
+                pickerPx.pixel(x: Int(c01.x) - 50, y: Int(c01.y)),
+                normal: pickerPx.pixel(x: Int(c20.x) - 50, y: Int(c20.y)),
                 context: "\(theme.rawValue) GroupPicker coral")
+            #expect(
+                pickerPx.pixel(x: Int(c01.x) + 50, y: Int(c01.y)).luminance <= 20,
+                "\(theme.rawValue) GroupPicker coral loaded dark half")
 
             // Blue colour label dot on cell (col 1, row 1) stays vivid; no reject corner badge.
             let blueDotColor = try renderedColourPixel(Color.clove.label.blue, theme: theme)
@@ -413,8 +447,10 @@ struct RejectedThumbnailDimmingTests {
     }
 
     @Test func moveRejectsExpandedQuickGridRestoresKeptPhotosAndDimsWillMovePhotos() async throws {
-        let whiteImage = solidSRGBImage(red: 1, green: 1, blue: 1)
-        let coralImage = solidSRGBImage(red: 0.95, green: 0.35, blue: 0.20)
+        let splitWhiteImage = splitLeftRightSRGBImage(
+            left: (1, 1, 1), right: (0.08, 0.08, 0.08))
+        let splitCoralImage = splitLeftRightSRGBImage(
+            left: (0.95, 0.35, 0.20), right: (0.08, 0.08, 0.08))
 
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -432,7 +468,7 @@ struct RejectedThumbnailDimmingTests {
             let library = DarkroomTestLibrary(
                 stems: ["p1", "p2"],
                 rejected: ["p1", "p2"],
-                imagesByStem: ["p1": whiteImage, "p2": coralImage])
+                imagesByStem: ["p1": splitWhiteImage, "p2": splitCoralImage])
             let browsing = BrowsingModel(library: library, similarGroupsEnabled: false)
             browsing.openFolder()
             library.finishScan()
@@ -474,24 +510,33 @@ struct RejectedThumbnailDimmingTests {
 
             let scrollFrame = gridScroll.convert(gridScroll.bounds, to: window)
             let tileSide = (scrollFrame.width - 3 * 4) / 4
-            let p1Center = CGPoint(
-                x: (scrollFrame.minX + tileSide / 2) * 2,
-                y: (scrollFrame.minY + tileSide / 2) * 2)
-            let p2Center = CGPoint(
-                x: (scrollFrame.minX + tileSide + 4 + tileSide / 2) * 2,
-                y: (scrollFrame.minY + tileSide / 2) * 2)
+            let p1MidY = Int(((scrollFrame.minY + tileSide / 2) * 2).rounded())
+            let p1BrightX = Int(((scrollFrame.minX + tileSide / 2) * 2).rounded()) - 32
+            let p1DarkX = Int(((scrollFrame.minX + tileSide / 2) * 2).rounded()) + 32
+            let p2MidY = p1MidY
+            let p2BrightX =
+                Int(((scrollFrame.minX + tileSide + 4 + tileSide / 2) * 2).rounded()) - 32
+            let p2DarkX = Int(((scrollFrame.minX + tileSide + 4 + tileSide / 2) * 2).rounded()) + 32
 
             // Initially both are "will move": white photo is darkroom neutral, coral photo is dark + desaturated.
             let initialPx = try captureWindowRegion(window.bounds, in: window, scale: 2)
-            let p1Initial = initialPx.pixel(at: p1Center)
-            let p2Initial = initialPx.pixel(at: p2Center)
             let fullWhite = RGBA(r: 255, g: 255, b: 255, a: 255)
+            let fullDark = RGBA(r: 20, g: 20, b: 20, a: 255)
             let fullCoral = RGBA(r: 242, g: 89, b: 51, a: 255)
 
-            assertDarkroomNeutralWhite(
-                p1Initial, normal: fullWhite, context: "\(theme.rawValue) MoveRejects p1 will-move")
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: initialPx.pixel(x: p1BrightX, y: p1MidY),
+                darkHalf: initialPx.pixel(x: p1DarkX, y: p1MidY),
+                normalBrightHalf: fullWhite,
+                normalDarkHalf: fullDark,
+                context: "\(theme.rawValue) MoveRejects p1 will-move")
             assertDarkroomDesaturatedColor(
-                p2Initial, normal: fullCoral, context: "\(theme.rawValue) MoveRejects p2 will-move")
+                initialPx.pixel(x: p2BrightX, y: p2MidY),
+                normal: fullCoral,
+                context: "\(theme.rawValue) MoveRejects p2 will-move")
+            #expect(
+                initialPx.pixel(x: p2DarkX, y: p2MidY).luminance <= 20,
+                "\(theme.rawValue) MoveRejects p2 loaded dark half")
 
             // Tap/keep p1: p1 restores full brightness while p2 stays darkroom-dimmed.
             let p1 = library.identity("p1")
@@ -500,14 +545,18 @@ struct RejectedThumbnailDimmingTests {
             try await Task.sleep(for: .milliseconds(250))
 
             let keptWhitePx = try captureWindowRegion(window.bounds, in: window, scale: 2)
-            let p1Kept = keptWhitePx.pixel(at: p1Center)
-            let p2StillDim = keptWhitePx.pixel(at: p2Center)
+            let p1KeptBright = keptWhitePx.pixel(x: p1BrightX, y: p1MidY)
+            let p1KeptDark = keptWhitePx.pixel(x: p1DarkX, y: p1MidY)
+            let p2StillDim = keptWhitePx.pixel(x: p2BrightX, y: p2MidY)
             #expect(
-                p1Kept.r >= 245 && p1Kept.g >= 245 && p1Kept.b >= 245,
-                "\(theme.rawValue) kept white photo restores 100% brightness: \(p1Kept)")
+                p1KeptBright.r >= 245 && p1KeptBright.g >= 245 && p1KeptBright.b >= 245,
+                "\(theme.rawValue) kept white photo restores 100% brightness: \(p1KeptBright)")
             #expect(
-                p1Kept.luminance > p2StillDim.luminance * 2.0,
-                "\(theme.rawValue) kept vs will-move contrast: \(p1Kept) vs \(p2StillDim)")
+                p1KeptDark.luminance <= 30,
+                "\(theme.rawValue) kept split dark half remains dark: \(p1KeptDark)")
+            #expect(
+                p1KeptBright.luminance > p2StillDim.luminance * 2.0,
+                "\(theme.rawValue) kept vs will-move contrast: \(p1KeptBright) vs \(p2StillDim)")
             assertDarkroomDesaturatedColor(
                 p2StillDim, normal: fullCoral,
                 context: "\(theme.rawValue) MoveRejects p2 stays dimmed")
@@ -518,16 +567,25 @@ struct RejectedThumbnailDimmingTests {
             try await Task.sleep(for: .milliseconds(250))
 
             let keptCoralPx = try captureWindowRegion(window.bounds, in: window, scale: 2)
-            let p1DimAgain = keptCoralPx.pixel(at: p1Center)
-            let p2Kept = keptCoralPx.pixel(at: p2Center)
-            assertDarkroomNeutralWhite(
-                p1DimAgain, normal: fullWhite,
+            let p1DimBrightAgain = keptCoralPx.pixel(x: p1BrightX, y: p1MidY)
+            let p1DimDarkAgain = keptCoralPx.pixel(x: p1DarkX, y: p1MidY)
+            let p2KeptBright = keptCoralPx.pixel(x: p2BrightX, y: p2MidY)
+            let p2KeptDark = keptCoralPx.pixel(x: p2DarkX, y: p2MidY)
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: p1DimBrightAgain,
+                darkHalf: p1DimDarkAgain,
+                normalBrightHalf: fullWhite,
+                normalDarkHalf: fullDark,
                 context: "\(theme.rawValue) MoveRejects p1 dims again")
             #expect(
-                rgbaDistance(p2Kept, fullCoral) <= 18,
-                "\(theme.rawValue) kept coral photo restores full colour & brightness: \(p2Kept)")
+                rgbaDistance(p2KeptBright, fullCoral) <= 18,
+                "\(theme.rawValue) kept coral photo restores full colour & brightness: \(p2KeptBright)"
+            )
             #expect(
-                p2Kept.chromaSpread > p1DimAgain.chromaSpread + 120,
+                p2KeptDark.luminance <= 30,
+                "\(theme.rawValue) kept coral split dark half stays dark: \(p2KeptDark)")
+            #expect(
+                p2KeptBright.chromaSpread > p1DimBrightAgain.chromaSpread + 120,
                 "\(theme.rawValue) kept colourful tile stands out cleanly against dimmed tile")
 
             // Verify zero corner reject badge on both tiles.
@@ -540,7 +598,128 @@ struct RejectedThumbnailDimmingTests {
         }
     }
 
+    @Test func compareFilmstripRejectedReferenceStaysDarkroomOpaqueAcrossLightThemes() async throws
+    {
+        let splitWhiteImage = splitLeftRightSRGBImage(
+            left: (1, 1, 1), right: (0.08, 0.08, 0.08))
+        let refRejected = makeGridPhoto(photoID("CMP_REF_REJ"), isRejected: true)
+        let refNormal = makeGridPhoto(photoID("CMP_REF_OK"), isRejected: false)
+        let challengerNormal = makeGridPhoto(photoID("CMP_CHAL_OK"), isRejected: false)
+
+        let source = MapThumbnailSource(images: [
+            refRejected.id: splitWhiteImage,
+            refNormal.id: splitWhiteImage,
+            challengerNormal.id: splitWhiteImage,
+        ])
+
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 120, width: 220, height: 72)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        for theme in Self.lightThemes {
+            let stageUIColor = UIColor(theme.tokens.stage.color)
+
+            func renderCompareStrip(reference: GridPhoto) async throws -> PixelBuffer {
+                let strip = ZStack {
+                    Rectangle().fill(Color.clove.bg.stage)
+                    CompareFilmstrip(
+                        photos: [reference, challengerNormal],
+                        reference: reference.id,
+                        challenger: challengerNormal.id,
+                        activeSide: .challenger,
+                        thumbnails: source,
+                        onSelectCandidate: { _ in }
+                    )
+                }
+                .frame(width: 220, height: 56)
+                .ignoresSafeArea()
+                .environment(\.cloveTheme, theme)
+
+                let host = UIHostingController(rootView: strip)
+                host.safeAreaRegions = []
+                host.view.backgroundColor = stageUIColor
+                window.backgroundColor = stageUIColor
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                host.view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(120))
+                let region = CGRect(
+                    x: 0, y: (window.bounds.height - 56) / 2, width: 220, height: 56)
+                return try captureWindowRegion(region, in: window, scale: 2)
+            }
+
+            let rejectedStripPx = try await renderCompareStrip(reference: refRejected)
+            // Slot 0 (Reference A, non-challenger): x = 4..48 pt (8..96 px), y = 9..53 pt (18..106 px).
+            // Sample below the top-leading A badge at y = 35 pt (70 px).
+            let refBright = rejectedStripPx.pixel(x: 34, y: 70)
+            let refDark = rejectedStripPx.pixel(x: 70, y: 70)
+            // Slot 1 (Challenger B, raised 6 pt): x = 51..95 pt (102..190 px), y = 3..47 pt (6..94 px).
+            let chalBright = rejectedStripPx.pixel(x: 128, y: 58)
+            let chalDark = rejectedStripPx.pixel(x: 164, y: 58)
+
+            assertDarkroomNeutralWhiteSplit(
+                brightHalf: refBright,
+                darkHalf: refDark,
+                normalBrightHalf: chalBright,
+                normalDarkHalf: chalDark,
+                context: "\(theme.rawValue) CompareFilmstrip rejected reference A")
+
+            // Verify the 'A' role badge pill remains crisp and opaque over top-leading corner.
+            let hasRolePill = hasMatchingPixel(
+                in: rejectedStripPx,
+                xRange: 8..<44,
+                yRange: 18..<48,
+                matching: RGBA(r: 255, g: 255, b: 255, a: 255),
+                tolerance: 35)
+            #expect(hasRolePill, "\(theme.rawValue) CompareFilmstrip A role badge stays crisp")
+
+            // Non-rejected Reference A keeps the subtle 0.78 treatment (blended over stage).
+            let normalStripPx = try await renderCompareStrip(reference: refNormal)
+            let normalRefDark = normalStripPx.pixel(x: 70, y: 70)
+            #expect(
+                normalRefDark.luminance > refDark.luminance + 25,
+                "\(theme.rawValue) non-rejected reference A retains 0.78 opacity vs opaque rejected dark half"
+            )
+        }
+    }
+
     // MARK: - Assertions & Pixel Helpers
+
+    private func assertDarkroomNeutralWhiteSplit(
+        brightHalf: RGBA,
+        darkHalf: RGBA,
+        normalBrightHalf: RGBA,
+        normalDarkHalf: RGBA,
+        context: String,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        assertDarkroomNeutralWhite(
+            brightHalf,
+            normal: normalBrightHalf,
+            context: context,
+            sourceLocation: sourceLocation)
+        #expect(
+            normalDarkHalf.luminance <= 35,
+            Comment(
+                rawValue: "\(context): expected dark half in normal split, got \(normalDarkHalf)"),
+            sourceLocation: sourceLocation)
+        #expect(
+            darkHalf.luminance <= 22,
+            Comment(rawValue: "\(context): expected dark half in dimmed split, got \(darkHalf)"),
+            sourceLocation: sourceLocation)
+        #expect(
+            brightHalf.luminance - darkHalf.luminance >= 70,
+            Comment(
+                rawValue:
+                    "\(context): split contrast too low (\(brightHalf) vs \(darkHalf)); placeholder leak?"
+            ),
+            sourceLocation: sourceLocation)
+    }
 
     private func assertDarkroomNeutralWhite(
         _ rejected: RGBA,
@@ -553,10 +732,10 @@ struct RejectedThumbnailDimmingTests {
             Comment(rawValue: "\(context): expected bright normal sample, got \(normal)"),
             sourceLocation: sourceLocation)
         #expect(
-            rejected.luminance >= 80 && rejected.luminance <= 140,
+            rejected.luminance >= 95 && rejected.luminance <= 126,
             Comment(
                 rawValue:
-                    "\(context): expected darkroom ~0.44 luminance (80...140), got \(rejected)"),
+                    "\(context): expected darkroom ~0.44 luminance (95...126), got \(rejected)"),
             sourceLocation: sourceLocation)
         #expect(
             rejected.luminance < normal.luminance * 0.6,
@@ -615,6 +794,23 @@ struct RejectedThumbnailDimmingTests {
             space: colorSpace, bitmapInfo: bitmapInfo)!
         context.setFillColor(red: red, green: green, blue: blue, alpha: 1)
         context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        return context.makeImage()!
+    }
+
+    private func splitLeftRightSRGBImage(
+        left: (CGFloat, CGFloat, CGFloat),
+        right: (CGFloat, CGFloat, CGFloat)
+    ) -> CGImage {
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        let bitmapInfo =
+            CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        let context = CGContext(
+            data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 64,
+            space: colorSpace, bitmapInfo: bitmapInfo)!
+        context.setFillColor(red: left.0, green: left.1, blue: left.2, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 16))
+        context.setFillColor(red: right.0, green: right.1, blue: right.2, alpha: 1)
+        context.fill(CGRect(x: 8, y: 0, width: 8, height: 16))
         return context.makeImage()!
     }
 
