@@ -197,7 +197,7 @@ struct SettingsScreen: View {
                 .listStyle(.insetGrouped)
                 .listSectionSpacing(4)
                 .contentMargins(.top, 4, for: .scrollContent)
-                .contentMargins(.horizontal, Self.splitDividerInset, for: .scrollContent)
+                .contentMargins(.trailing, Self.splitDividerInset, for: .scrollContent)
                 .scrollContentBackground(.hidden)
                 .background(Color.clove.surface.sheet)
             }

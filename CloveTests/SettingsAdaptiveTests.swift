@@ -468,18 +468,34 @@ struct SettingsAdaptiveTests {
 
         struct Case {
             let size: CGSize
+            let leadingSafeArea: CGFloat
             let trailingSafeArea: CGFloat
             let theme: CloveTheme
             let label: String
+
+            init(
+                size: CGSize,
+                leadingSafeArea: CGFloat = 0,
+                trailingSafeArea: CGFloat = 0,
+                theme: CloveTheme,
+                label: String
+            ) {
+                self.size = size
+                self.leadingSafeArea = leadingSafeArea
+                self.trailingSafeArea = trailingSafeArea
+                self.theme = theme
+                self.label = label
+            }
         }
 
+        let boundary680Label = "1036x768 (detailPane=680) trailingSafeArea=59 light"
+        let boundary681Label = "1037x768 (detailPane=681) trailingSafeArea=59 light"
+
         let cases: [Case] = [
-            Case(
-                size: CGSize(width: 1024, height: 768), trailingSafeArea: 0, theme: .light,
-                label: "1024x768 light"),
-            Case(
-                size: CGSize(width: 1366, height: 1024), trailingSafeArea: 0, theme: .light,
-                label: "1366x1024 light"),
+            Case(size: CGSize(width: 680, height: 680), theme: .light, label: "680x680 light"),
+            Case(size: CGSize(width: 840, height: 680), theme: .light, label: "840x680 light"),
+            Case(size: CGSize(width: 1024, height: 768), theme: .light, label: "1024x768 light"),
+            Case(size: CGSize(width: 1366, height: 1024), theme: .light, label: "1366x1024 light"),
             Case(
                 size: CGSize(width: 1024, height: 768), trailingSafeArea: 59, theme: .light,
                 label: "1024x768 trailingSafeArea=59 light"),
@@ -488,14 +504,22 @@ struct SettingsAdaptiveTests {
                 label: "932x430 trailingSafeArea=59 light"),
             Case(
                 size: CGSize(width: 1036, height: 768), trailingSafeArea: 59, theme: .light,
-                label: "1036x768 (detailPane=680) trailingSafeArea=59 light"),
+                label: boundary680Label),
             Case(
                 size: CGSize(width: 1037, height: 768), trailingSafeArea: 59, theme: .light,
-                label: "1037x768 (detailPane=681) trailingSafeArea=59 light"),
+                label: boundary681Label),
             Case(
                 size: CGSize(width: 1366, height: 1024), trailingSafeArea: 59, theme: .dark,
                 label: "1366x1024 trailingSafeArea=59 dark"),
+            Case(
+                size: CGSize(width: 932, height: 430), leadingSafeArea: 59, theme: .light,
+                label: "932x430 leadingSafeArea=59 light"),
+            Case(
+                size: CGSize(width: 1024, height: 768), leadingSafeArea: 59, theme: .light,
+                label: "1024x768 leadingSafeArea=59 light"),
         ]
+
+        var recordedDetailCardWidths: [String: CGFloat] = [:]
 
         for testCase in cases {
             let navigation = SettingsNavigationState()
@@ -514,9 +538,12 @@ struct SettingsAdaptiveTests {
             host.traitOverrides.horizontalSizeClass = .regular
             host.overrideUserInterfaceStyle =
                 testCase.theme.appearance == .dark ? .dark : .light
-            if testCase.trailingSafeArea > 0 {
+            if testCase.leadingSafeArea > 0 || testCase.trailingSafeArea > 0 {
                 host.additionalSafeAreaInsets = UIEdgeInsets(
-                    top: 0, left: 0, bottom: 0, right: testCase.trailingSafeArea)
+                    top: 0,
+                    left: testCase.leadingSafeArea,
+                    bottom: 0,
+                    right: testCase.trailingSafeArea)
             }
 
             let window = UIWindow(windowScene: scene)
@@ -541,18 +568,29 @@ struct SettingsAdaptiveTests {
                     $0.convert($0.bounds, to: window).minX
                         < $1.convert($1.bounds, to: window).minX
                 }
+                let sidebar = sorted[0]
                 let detail = sorted[1]
                 return framesBox.frames["clove.settings.wideDivider"] != nil
+                    && framesBox.frames["clove.settings.sidebarTitle"] != nil
                     && framesBox.frames["clove.settings.done"] != nil
+                    && sidebar.numberOfSections >= 1
+                    && sidebar.cellForItem(at: IndexPath(item: 0, section: 0)) != nil
                     && detail.numberOfSections >= 1
                     && detail.numberOfItems(inSection: 0) == 3
                     && detail.cellForItem(at: IndexPath(item: 0, section: 0)) != nil
+                    && detail.cellForItem(at: IndexPath(item: 1, section: 0)) != nil
                     && detail.cellForItem(at: IndexPath(item: 2, section: 0)) != nil
             }
 
             let divider = try #require(framesBox.frames["clove.settings.wideDivider"])
+            let sidebarTitle = try #require(framesBox.frames["clove.settings.sidebarTitle"])
             let doneFrame = try #require(framesBox.frames["clove.settings.done"])
+            let leadingSafeMinX = host.view.safeAreaInsets.left
             let trailingSafeMaxX = testCase.size.width - host.view.safeAreaInsets.right
+            #expect(
+                sidebarTitle.minX - leadingSafeMinX >= 19.5,
+                "\(testCase.label): Settings sidebar title (\(sidebarTitle.minX)) encroaches on leading safe area (\(leadingSafeMinX))"
+            )
             #expect(
                 trailingSafeMaxX - doneFrame.maxX >= 19.5,
                 "\(testCase.label): Done button encroaches on trailing safe area")
@@ -562,7 +600,46 @@ struct SettingsAdaptiveTests {
                     $0.convert($0.bounds, to: window).minX
                         < $1.convert($1.bounds, to: window).minX
                 }
+            let sidebarCollection = try #require(collections.first)
             let detailCollection = try #require(collections.last)
+
+            let expectedSheet = try renderedRGBA(testCase.theme.tokens.sheet.color)
+            let expectedCard = try renderedRGBA(testCase.theme.tokens.card.color)
+            let snapshot = windowPixels(from: window)
+
+            // Verify selected sidebar pill stays clear of any leading safe area and retains
+            // rounded left corners + divider gap.
+            let selectedSidebarCell = try #require(
+                sidebarCollection.cellForItem(at: IndexPath(item: 0, section: 0)))
+            let selectedSidebarFrame = selectedSidebarCell.convert(
+                selectedSidebarCell.bounds, to: window)
+            #expect(
+                selectedSidebarFrame.minX - leadingSafeMinX >= 19.5,
+                "\(testCase.label): sidebar cell minX (\(selectedSidebarFrame.minX)) encroaches on leading safe area (\(leadingSafeMinX))"
+            )
+            #expect(
+                divider.minX - selectedSidebarFrame.maxX >= 19.5,
+                "\(testCase.label): sidebar cell trailing gap < 19.5")
+            let sidebarBodyX = Int(selectedSidebarFrame.minX.rounded()) + 4
+            let sidebarBodyY = Int(selectedSidebarFrame.midY.rounded())
+            assertRGBAClose(
+                snapshot.pixel(x: sidebarBodyX, y: sidebarBodyY), expectedCard,
+                "\(testCase.label): selected sidebar pill body near left edge")
+            assertRGBAClose(
+                snapshot.pixel(
+                    x: Int(selectedSidebarFrame.minX.rounded()) + 1,
+                    y: Int(selectedSidebarFrame.minY.rounded()) + 1),
+                expectedSheet,
+                "\(testCase.label): selected sidebar pill top-left corner should be rounded (sheet)"
+            )
+            assertRGBAClose(
+                snapshot.pixel(
+                    x: Int(selectedSidebarFrame.minX.rounded()) + 1,
+                    y: Int(selectedSidebarFrame.maxY.rounded()) - 2),
+                expectedSheet,
+                "\(testCase.label): selected sidebar pill bottom-left corner should be rounded (sheet)"
+            )
+
             for cell in detailCollection.visibleCells {
                 let cellFrame = cell.convert(cell.bounds, to: window)
                 #expect(
@@ -579,59 +656,72 @@ struct SettingsAdaptiveTests {
 
             let firstCell = try #require(
                 detailCollection.cellForItem(at: IndexPath(item: 0, section: 0)))
+            let middleCell = try #require(
+                detailCollection.cellForItem(at: IndexPath(item: 1, section: 0)))
             let lastCell = try #require(
                 detailCollection.cellForItem(at: IndexPath(item: 2, section: 0)))
             let firstFrame = firstCell.convert(firstCell.bounds, to: window)
+            let middleFrame = middleCell.convert(middleCell.bounds, to: window)
             let lastFrame = lastCell.convert(lastCell.bounds, to: window)
+            recordedDetailCardWidths[testCase.label] = firstFrame.width
 
-            let expectedSheet = try renderedRGBA(testCase.theme.tokens.sheet.color)
-            let expectedCard = try renderedRGBA(testCase.theme.tokens.card.color)
-            let snapshot = windowPixels(from: window)
-
-            // Sanity: card body near the right edge is filled with `card` color.
+            // Verify card body near the right edge across multiple rows so right-edge curvature
+            // is contrasted against filled card interior rather than empty sheet space.
             let bodyX = Int(firstFrame.maxX.rounded()) - 4
-            let bodyY = Int(firstFrame.midY.rounded())
             assertRGBAClose(
-                snapshot.pixel(x: bodyX, y: bodyY), expectedCard,
-                "\(testCase.label): card body near right edge")
+                snapshot.pixel(x: bodyX, y: Int(firstFrame.midY.rounded())), expectedCard,
+                "\(testCase.label): row 0 card body near right edge")
+            assertRGBAClose(
+                snapshot.pixel(x: bodyX, y: Int(middleFrame.midY.rounded())), expectedCard,
+                "\(testCase.label): row 1 card body near right edge")
 
             // Top-right and bottom-right outer corner pixels must show `surface/sheet`
             // (rounded corners intact, not flat-clipped `card`).
-            let topRightX = Int(firstFrame.maxX.rounded()) - 1
-            let topRightY = Int(firstFrame.minY.rounded()) + 1
+            let rightEdge = Int(firstFrame.maxX.rounded())
+            let topEdge = Int(firstFrame.minY.rounded())
+            let bottomEdge = Int(lastFrame.maxY.rounded())
             assertRGBAClose(
-                snapshot.pixel(x: topRightX, y: topRightY), expectedSheet,
-                "\(testCase.label): top-right corner should be rounded (sheet), not flat-clipped")
-
-            let bottomRightX = Int(lastFrame.maxX.rounded()) - 1
-            let bottomRightY = Int(lastFrame.maxY.rounded()) - 2
+                snapshot.pixel(x: rightEdge - 1, y: topEdge + 1), expectedSheet,
+                "\(testCase.label): top-right outer corner (1,1) should be rounded (sheet)")
             assertRGBAClose(
-                snapshot.pixel(x: bottomRightX, y: bottomRightY), expectedSheet,
-                "\(testCase.label): bottom-right corner should be rounded (sheet), not flat-clipped"
-            )
+                snapshot.pixel(x: rightEdge - 2, y: topEdge + 2), expectedSheet,
+                "\(testCase.label): top-right corner arc (2,2) should be rounded (sheet)")
+            assertRGBAClose(
+                snapshot.pixel(x: rightEdge - 1, y: bottomEdge - 2), expectedSheet,
+                "\(testCase.label): bottom-right outer corner (1,2) should be rounded (sheet)")
+            assertRGBAClose(
+                snapshot.pixel(x: rightEdge - 2, y: bottomEdge - 3), expectedSheet,
+                "\(testCase.label): bottom-right corner arc (2,3) should be rounded (sheet)")
 
-            // No row separator pixels may bleed past `cellFrame.maxX` into the trailing gutter.
-            let minY = max(0, Int(firstFrame.minY.rounded()))
-            let maxY = min(Int(testCase.size.height) - 1, Int(lastFrame.maxY.rounded()))
-            for offset in [8, 20] {
-                let sampleX = Int(firstFrame.maxX.rounded()) + offset
-                guard sampleX < Int(testCase.size.width) else { continue }
-                var mismatchedY: Int?
-                var mismatchedPixel: TileRGBA?
-                for y in minY...maxY {
-                    let pixel = snapshot.pixel(x: sampleX, y: y)
-                    if !rgbaClose(pixel, expectedSheet, tolerance: 6) {
-                        mismatchedY = y
-                        mismatchedPixel = pixel
-                        break
+            // Scan every column from `maxX + 2` through `maxX + 24` across the section's vertical
+            // span so even a short separator overflow cannot hide in the trailing gutter.
+            let minY = max(0, topEdge)
+            let maxY = min(Int(testCase.size.height) - 1, bottomEdge)
+            let scanStartX = rightEdge + 2
+            let scanEndX = min(rightEdge + 24, Int(testCase.size.width) - 1)
+            if scanStartX <= scanEndX {
+                var mismatch: (x: Int, y: Int, pixel: TileRGBA)?
+                outer: for sampleX in scanStartX...scanEndX {
+                    for y in minY...maxY {
+                        let pixel = snapshot.pixel(x: sampleX, y: y)
+                        if !rgbaClose(pixel, expectedSheet, tolerance: 6) {
+                            mismatch = (sampleX, y, pixel)
+                            break outer
+                        }
                     }
                 }
                 #expect(
-                    mismatchedY == nil,
-                    "\(testCase.label): separator/card bleed at x=\(sampleX) (maxX+\(offset)), y=\(mismatchedY ?? -1): actual \(String(describing: mismatchedPixel)) != expected sheet \(expectedSheet)"
+                    mismatch == nil,
+                    "\(testCase.label): separator/card bleed at x=\(mismatch?.x ?? -1) (maxX+\((mismatch?.x ?? rightEdge) - rightEdge)), y=\(mismatch?.y ?? -1): actual \(String(describing: mismatch?.pixel)) != expected sheet \(expectedSheet)"
                 )
             }
         }
+
+        let width680 = try #require(recordedDetailCardWidths[boundary680Label])
+        let width681 = try #require(recordedDetailCardWidths[boundary681Label])
+        #expect(
+            abs(width680 - width681) <= 1,
+            "detail card width jumped across 680/681 threshold: \(width680) vs \(width681)")
     }
 
     private func verifySidebarTitlesSingleLineAndUntruncated(
