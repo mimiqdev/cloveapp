@@ -1479,17 +1479,20 @@ struct DetailMarkingView: View {
                             ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
                         value: transientToastIdentity ?? stagePill?.identifier
                     )
-                } else if hasTransientToast {
-                    activeTransientToastView
-                        .padding(.horizontal, 16)
-                        .transition(
-                            CloveMotion.slideTransition(
-                                edge: .bottom, offset: 12, reduceMotion: reduceMotion)
-                        )
-                        .animation(
-                            CloveMotion.chrome(reduceMotion: reduceMotion),
-                            value: transientToastIdentity
-                        )
+                } else {
+                    Group {
+                        if hasTransientToast {
+                            activeTransientToastView
+                                .padding(.horizontal, 16)
+                                .transition(
+                                    CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                        }
+                    }
+                    .animation(
+                        CloveMotion.chrome(reduceMotion: reduceMotion),
+                        value: transientToastIdentity
+                    )
                 }
             } else if showsFilmstrip && chromeIsVisible {
                 // The pill or transient toast rides the floating chrome band above the strip.
@@ -1593,21 +1596,16 @@ struct DetailMarkingView: View {
                     .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 8)
-            } else if hasTransientToast {
-                activeTransientToastView
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(
-                        CloveMotion.slideTransition(
-                            edge: .bottom, offset: 12, reduceMotion: reduceMotion)
-                    )
-                    .animation(
-                        CloveMotion.chrome(reduceMotion: reduceMotion),
-                        value: transientToastIdentity
-                    )
-            } else if !showsFilmstrip && chromeIsVisible {
+            } else {
                 Group {
-                    if let stagePill {
+                    if hasTransientToast {
+                        activeTransientToastView
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .transition(
+                                CloveMotion.slideTransition(
+                                    edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                    } else if !showsFilmstrip && chromeIsVisible, let stagePill {
                         stagePill
                             .padding(.bottom, 12)
                             .transition(
@@ -1619,9 +1617,10 @@ struct DetailMarkingView: View {
                     }
                 }
                 .animation(
-                    stagePill != nil
+                    hasTransientToast || (!showsFilmstrip && chromeIsVisible && stagePill != nil)
                         ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                    value: stagePill?.identifier
+                    value: transientToastIdentity
+                        ?? ((!showsFilmstrip && chromeIsVisible) ? stagePill?.identifier : nil)
                 )
             }
         }

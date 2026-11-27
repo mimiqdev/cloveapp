@@ -33,6 +33,8 @@ struct DetailScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isDuoCover) private var isDuoCover
 
+    @State private var widePresentation: DetailPresentation
+
     /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
     @State private var autoAdvance = MarkAutoAdvance()
 
@@ -45,6 +47,7 @@ struct DetailScreen: View {
     @State private var allReviewedToast: DetailAllReviewedToast?
     @State private var allReviewedContextPhoto: PhotoIdentity?
     @State private var allReviewedContextExpandedGroup: GroupID?
+    @State private var allReviewedContextPresentation: DetailPresentation?
 
     /// Brief non-blocking toast shown when Compare exits on rotation to portrait.
     static let compareRotateToastAutoDismissDelay: Duration = .seconds(2)
@@ -63,6 +66,10 @@ struct DetailScreen: View {
     private var timeline: DetailTimeline {
         DetailTimeline(
             photos: browsing.photos, groups: browsing.groups, groupsEnabled: groupsEnabled)
+    }
+
+    private var activePresentation: DetailPresentation {
+        presentation?.wrappedValue ?? duo?.presentation.wrappedValue ?? widePresentation
     }
 
     private var activeExpandedGroup: ActiveBrowsingGroup? {
@@ -86,6 +93,7 @@ struct DetailScreen: View {
         self.duo = duo
         self.presentation = presentation
         self.initialPresentation = initialPresentation
+        _widePresentation = State(initialValue: initialPresentation)
     }
 
     var body: some View {
@@ -190,6 +198,9 @@ struct DetailScreen: View {
                 dismissCompareRotateToast()
             }
         }
+        .onChange(of: activePresentation) { _, _ in
+            dismissAllReviewedToast()
+        }
         .task(id: undoToast?.id) {
             guard let toastID = undoToast?.id else { return }
             try? await Task.sleep(for: DetailUndoToast.autoDismissDelay)
@@ -226,9 +237,10 @@ struct DetailScreen: View {
             order: currentTimeline.stageOrder(expandedGroup: expanded?.id),
             actions: actions,
             duo: duo,
-            presentation: presentation,
+            presentation: presentation ?? (duo == nil ? $widePresentation : nil),
             initialPresentation: compareRotateToastID != nil ? .focus : initialPresentation,
-            allReviewedToast: allReviewedToast,
+            allReviewedToast: activePresentation == allReviewedContextPresentation
+                ? allReviewedToast : nil,
             undoToast: undoToast,
             compareRotateToastID: compareRotateToastID)
     }
@@ -355,6 +367,7 @@ struct DetailScreen: View {
         if showsRotateToast {
             presentation?.wrappedValue = .focus
             duo?.presentation.wrappedValue = .focus
+            widePresentation = .focus
             presentCompareRotateToast(animated: false)
         } else {
             dismissCompareRotateToast()
@@ -399,6 +412,7 @@ struct DetailScreen: View {
         dismissCompareRotateToast()
         allReviewedContextPhoto = browsing.state.currentPhoto
         allReviewedContextExpandedGroup = browsing.expandedGroup
+        allReviewedContextPresentation = activePresentation
         withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
             allReviewedToast = DetailAllReviewedToast(totalCount: totalCount)
         }
@@ -407,6 +421,7 @@ struct DetailScreen: View {
     private func dismissAllReviewedToast() {
         allReviewedContextPhoto = nil
         allReviewedContextExpandedGroup = nil
+        allReviewedContextPresentation = nil
         guard allReviewedToast != nil else { return }
         withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
             allReviewedToast = nil

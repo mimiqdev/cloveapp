@@ -574,6 +574,134 @@ struct DetailAllReviewedToastTests {
         #expect(framesBox.frames["clove.detail.allReviewedToast"] == nil)
     }
 
+    @Test func switchingPresentationOutOfFocusViewDismissesToastForExplicitAndDuoBindings()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = ControlledPhotoLibrary(rejected: ["p2"], stems: ["p1", "p2"])
+        let browsing = BrowsingModel(library: library, similarGroupsEnabled: false)
+        browsing.openFolder()
+        library.reportScanFinished()
+        try await waitFor("folder did not open") { !browsing.isFolderOpening }
+
+        let p1 = library.identity("p1")
+        let fourStars = try #require(Rating(rawValue: 4))
+        let store = makeSettingsStore(destination: .stay)
+
+        // 1. Explicit `presentation` binding switching `.focus` -> `.photoPreview` dismisses toast.
+        let explicitPresentation = AllReviewedPresentationBox(value: .focus)
+        let explicitFrames = AllReviewedFrameBox()
+        let explicitTriggers = AllReviewedTriggerBox()
+        let explicitWindow = UIWindow(windowScene: scene)
+        explicitWindow.frame = CGRect(x: 0, y: 0, width: 900, height: 768)
+        let explicitHost = UIHostingController(
+            rootView: AllReviewedDetailHost(
+                browsing: browsing,
+                images: SampleDetailImages(),
+                store: store,
+                presentation: explicitPresentation,
+                triggerBox: explicitTriggers,
+                idiom: .pad
+            )
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                explicitFrames.frames = $0
+            })
+        explicitHost.traitOverrides.horizontalSizeClass = .regular
+        explicitWindow.rootViewController = explicitHost
+        explicitWindow.makeKeyAndVisible()
+        defer {
+            explicitWindow.isHidden = true
+            explicitWindow.rootViewController = nil
+        }
+
+        browsing.openPhoto(p1)
+        try await waitFor("iPad DetailScreen mounted in Focus View", host: explicitHost) {
+            self.findPreview(in: explicitWindow)?.allowsMarking == true
+                && self.isPreviewBound(to: "p1.ARW", in: explicitWindow)
+        }
+        let explicitPreview = try #require(findPreview(in: explicitWindow))
+        explicitPreview.onMarkingSwipe?(fourStars)
+        try await waitFor("All reviewed toast appeared in Focus View", host: explicitHost) {
+            explicitFrames.frames["clove.detail.allReviewedToast"] != nil
+        }
+
+        explicitPresentation.value = .photoPreview
+        try await waitFor(
+            "Switching presentation to Photo Preview dismissed All reviewed toast",
+            host: explicitHost
+        ) {
+            explicitFrames.frames["clove.detail.allReviewedToast"] == nil
+                && explicitFrames.frames["clove.detail.filmstrip"] == nil
+        }
+        explicitPresentation.value = .focus
+        try await waitFor(
+            "Returned to Focus View without resurrecting All reviewed toast", host: explicitHost
+        ) {
+            explicitFrames.frames["clove.detail.filmstrip"] != nil
+        }
+        #expect(explicitFrames.frames["clove.detail.allReviewedToast"] == nil)
+
+        // 2. Duo `duo?.presentation` binding switching `.focus` -> `.photoPreview` dismisses toast.
+        explicitWindow.isHidden = true
+        explicitWindow.rootViewController = nil
+        browsing.apply(.rating(.unrated), to: p1)
+        await browsing.drainActions()
+
+        let duoPresentation = AllReviewedPresentationBox(value: .focus)
+        let duoFrames = AllReviewedFrameBox()
+        let duoTriggers = AllReviewedTriggerBox()
+        let duoWindow = UIWindow(windowScene: scene)
+        duoWindow.frame = CGRect(x: 0, y: 0, width: 900, height: 768)
+        let duoHost = UIHostingController(
+            rootView: AllReviewedDetailHost(
+                browsing: browsing,
+                images: SampleDetailImages(),
+                store: store,
+                presentation: duoPresentation,
+                usesDuoLayout: true,
+                triggerBox: duoTriggers,
+                idiom: .pad
+            )
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                duoFrames.frames = $0
+            })
+        duoHost.traitOverrides.horizontalSizeClass = .regular
+        duoWindow.rootViewController = duoHost
+        duoWindow.makeKeyAndVisible()
+        defer {
+            duoWindow.isHidden = true
+            duoWindow.rootViewController = nil
+        }
+
+        try await waitFor("Duo DetailScreen mounted in Focus View", host: duoHost) {
+            self.findPreview(in: duoWindow)?.allowsMarking == true
+                && self.isPreviewBound(to: "p1.ARW", in: duoWindow)
+        }
+        let duoPreview = try #require(findPreview(in: duoWindow))
+        duoPreview.onMarkingSwipe?(fourStars)
+        try await waitFor("All reviewed toast appeared in Duo Focus View", host: duoHost) {
+            duoFrames.frames["clove.detail.allReviewedToast"] != nil
+        }
+
+        duoPresentation.value = .photoPreview
+        try await waitFor(
+            "Switching Duo presentation to Photo Preview dismissed All reviewed toast",
+            host: duoHost
+        ) {
+            duoFrames.frames["clove.detail.allReviewedToast"] == nil
+                && duoFrames.frames["clove.detail.filmstrip"] == nil
+        }
+        duoPresentation.value = .focus
+        try await waitFor(
+            "Returned Duo to Focus View without resurrecting All reviewed toast", host: duoHost
+        ) {
+            duoFrames.frames["clove.detail.filmstrip"] != nil
+        }
+        #expect(duoFrames.frames["clove.detail.allReviewedToast"] == nil)
+    }
+
     private func makeSettingsStore(destination: AutoAdvanceDestination) -> SettingsStore {
         let storage = SampleSettingsStorage()
         let store = SettingsStore(
@@ -681,6 +809,7 @@ private struct AllReviewedDetailHost: View {
     let images: any DetailImageSource
     let store: SettingsStore
     @Bindable var presentation: AllReviewedPresentationBox
+    var usesDuoLayout = false
     let triggerBox: AllReviewedTriggerBox
     var idiom: UIUserInterfaceIdiom = .phone
 
@@ -688,7 +817,9 @@ private struct AllReviewedDetailHost: View {
         DetailScreen(
             browsing: browsing,
             images: images,
-            presentation: $presentation.value
+            duo: usesDuoLayout
+                ? DuoDetailLayout(presentation: $presentation.value, showsGrid: true) : nil,
+            presentation: usesDuoLayout ? nil : $presentation.value
         )
         .environment(store)
         .environment(\.cloveUserInterfaceIdiom, idiom)
