@@ -61,9 +61,11 @@ whole-file list, and symbol-scoped declaration list used by the drift gate live 
 `model/source-sync.json`.
 
 Four pure state-machine files are tracked whole-file, and five mixed Swift files are tracked by
-exact normalized declaration signature and brace-matched body (stripping Swift comments and
-whitespace-only formatting differences outside string literals, and failing closed on missing,
-renamed, or ambiguous symbols):
+exact declaration tokens (`Scope :: member` when scoped inside a type, protocol, or extension),
+active `#if`/`#elseif`/`#else`/`#endif` directive stack, and brace-matched body (preserving
+string interpolation boundaries and operator runs, stripping Swift comments and whitespace-only
+formatting differences outside string literals, and failing closed on missing, renamed, or
+ambiguous symbols):
 
 | Tracked file | Mode | Covered declarations / scope |
 | --- | --- | --- |
@@ -71,9 +73,9 @@ renamed, or ambiguous symbols):
 | `Clove/Detail/MarkAutoAdvance.swift` | Whole file | `schedule` and `cancel` |
 | `Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift` | Whole file | `apply`, `shown`, `finish`, `removeAll`, and `DesiredMarkRestore.change` |
 | `Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift` | Whole file | `submit`, `beginNext`, `hasPendingMark`, `removePending`, and `finish` |
-| `Clove/Browsing/BrowsingModel.swift` | Symbol-scoped (38) | `hasFinishedScan`, `isScanning`, `openFolder`, `openPickedFolder`, `openPickedFolderNow`, `reopen`, `reopenNow`, `reopenOpenFolder`, `openPhoto`, `openGroup`, `selectGroupPhoto`, `collapseGroup`, `setSimilarGroupsEnabled`, `back`, `shownMarks`, `canMark`, `apply(_ change:to:)`, `canUndoMark`, `undoLastMark`, `request`, `requestBatch`, `stageMark`, `applyShownMarks`, `recordUndo`, `submit`, `drainActions`, `consumeActions`, `finishPendingMarks`, `persist`, `discardDisconnectedChanges`, `leaveFolder`, `showEntryAfterLeaving`, `apply(_ update:)`, `showOpenFolder`, `applyReads`, `refresh`, `reconcileRemovedPhotos`, `reconcileExpandedGroup` |
-| `Clove/Browsing/FolderLibrary.swift` | Symbol-scoped (16) | `FolderLibraryUpdate`, protocol `folder`/`photos`/`groups`/`updates`/`openGeneration` requirements, and `FolderLibrary` extension contracts (`openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`) |
-| `Clove/Folder/FolderLibrarySession.swift` | Symbol-scoped (24) | `photos`, `groups`, `openGeneration`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `uninstallFolder`, `apply`, `rereadMarks`, `pick`, `reopen`, `openSavedFolder`, `open`, `install`, `endOpenFolder`, `scan`, `admit`, `applyReads`, `finishScan`, `failedScan`, `locationLost`, `record`, `applyConfirmedProgressChange`, `setSimilarGroupsEnabled` |
+| `Clove/Browsing/BrowsingModel.swift` | Symbol-scoped (40) | `openGeneration`, `init`, `hasFinishedScan`, `isScanning`, `openFolder`, `openPickedFolder`, `openPickedFolderNow`, `reopen`, `reopenNow`, `reopenOpenFolder`, `openPhoto`, `openGroup`, `selectGroupPhoto`, `collapseGroup`, `setSimilarGroupsEnabled`, `back`, `shownMarks`, `canMark`, `apply(_ change:to:)`, `canUndoMark`, `undoLastMark`, `request`, `requestBatch`, `stageMark`, `applyShownMarks`, `recordUndo`, `submit`, `drainActions`, `consumeActions`, `finishPendingMarks`, `persist`, `discardDisconnectedChanges`, `leaveFolder`, `showEntryAfterLeaving`, `apply(_ update:)`, `showOpenFolder`, `applyReads`, `refresh`, `reconcileRemovedPhotos`, `reconcileExpandedGroup` |
+| `Clove/Browsing/FolderLibrary.swift` | Symbol-scoped (25) | `FolderLibraryUpdate`, 14 `protocol FolderLibrary` requirements (`folder`, `photos`, `groups`, `updates`, `openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`), and 10 `extension FolderLibrary` defaults (`openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`) |
+| `Clove/Folder/FolderLibrarySession.swift` | Symbol-scoped (28) | `photos`, `groups`, `openGeneration`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `uninstallFolder`, `apply`, `rereadMarks`, `pick`, `reopen`, `openSavedFolder`, `open`, `install`, `endOpenFolder`, `scan`, `admit`, `applyReads`, `finishScan`, `failedScan`, `locationLost`, `record`, `applyConfirmedProgressChange`, `makeGrouping`, `startGrouping`, `publishGroups`, `setSimilarGroupsEnabled`, `publish` |
 | `Clove/Browsing/DetailScreen.swift` | Symbol-scoped (13) | `groupsEnabled`, `timeline`, `activeExpandedGroup`, `actions`, `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `performUndo`, `startAutoAdvance`, `schedule`, `rules` |
 | `Clove/Detail/DetailMarkingView.swift` | Symbol-scoped (27) | `currentTimelineGroup`, `isReadOnlyCollapsedGroup`, `allowsMarkingInput`, `captureZoomForPresentationTransition`, `loadPreview`, `refreshPrefetchForOrderChange`, `show`, `openingScale`, `nativeFullResolutionScale`, `renderFitAndPrefetch`, `zoomChanged`, `isAtFullResolution`, `doubleTap`, `focusRegionTapped`, `inspectFullResolution`, `retargetFullResolution`, `setZoom`, `beginToolbarMarking`, `beginMarkingGesture`, `undo`, `markKey`, `rate`, `choose`, `toggleReject`, `applyMarkingSwipe`, `apply(_ result:)`, `rules` |
 

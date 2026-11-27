@@ -10,9 +10,16 @@ toast, filter, and readout edits (19/30 recent commits on `main`, while 0/30 tou
 state-machine files). `model/source-sync.json` and `scripts/check` (via `scripts/source_drift.py`)
 now keep whole-file tracking for the 4 pure state-machine files, drop the 2 stateless UI dispatch
 shells (`GridScreen.swift`, `DetailFilmstrip.swift`, whose tap/gesture wiring is covered by
-`CloveTests` / `CloveUITests`), and enforce fail-closed symbol-scoped tracking across 118 modeled
-Swift declarations in the 5 mixed files (stripping comments and collapsing non-string whitespace,
-failing closed on 0 matches, >1 matches, or missing files).
+`CloveTests` / `CloveUITests`), and enforce fail-closed symbol-scoped tracking across 133 modeled
+Swift declarations in the 5 mixed files (supporting `Scope :: member` lookup across bodyless
+protocol requirements and extension defaults, tracking active `#if`/`#elseif`/`#else`/`#endif`
+directive stacks, preserving string interpolation delimiters and maximal operator token runs,
+stripping comments, and failing closed on 0 matches, >1 matches, or missing files). Covering
+`BrowsingModel.openGeneration`, `BrowsingModel.init` (which subscribes to `library.updates` and
+initializes `shownGeneration`), `protocol FolderLibrary` bodyless requirements alongside `extension
+FolderLibrary` defaults, and `FolderLibrarySession` grouping/publication helpers (`makeGrouping`,
+`startGrouping`, `publishGroups`, `publish`) closes remaining model-boundary blind spots without
+widening into UI code.
 
 Changes between the prior sync commit (`1affa6dc86cb568ce835ce40bb67ce2f124a3a95`) and
 `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec` were audited before advancing `model/source-sync.json`:
@@ -272,7 +279,7 @@ The source was restored. Covered product files have no diff, the sync commit is 
 normal command passed the drift gate, the model, mutation checks, and the rollback witness.
 The current action audit additionally checks all 35 invariants, 50 mutants, and 53 action/branch
 witnesses. The reviewed source commit (`3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`), 4 whole-file
-targets, and 118 tracked declarations across 5 mixed files have not changed.
+targets, and 133 tracked declarations across 5 mixed files have not changed.
 
 ## Evidence limits
 

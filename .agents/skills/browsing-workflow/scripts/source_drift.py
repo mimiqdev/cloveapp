@@ -48,30 +48,10 @@ OTHER_DECL_KEYWORDS = frozenset(
 )
 ALL_DECL_KEYWORDS = TYPE_KEYWORDS | FUNC_KEYWORDS | OTHER_DECL_KEYWORDS
 DIRECTIVE_KEYWORDS = frozenset({"if", "elseif", "else", "endif"})
-LINE_CONTINUATION_PREV = frozenset({"=", "->", ".", "+", "*", "/", "&&", "||", "??", ":"})
-MULTI_CHAR_OPS = (
-    "===",
-    "!==",
-    "...",
-    "..<",
-    "->",
-    "==",
-    "!=",
-    "<=",
-    ">=",
-    "&&",
-    "||",
-    "??",
-    "+=",
-    "-=",
-    "*=",
-    "/=",
-    "%=",
-    "&=",
-    "|=",
-    "^=",
-    "~=",
+LINE_CONTINUATION_PREV = frozenset(
+    {"=", "->", ".", ",", "&", "where", "+", "*", "/", "&&", "||", "??", ":"}
 )
+OP_RUN_CHARS = frozenset("=+-*/%<>|&^~")
 
 
 class SwiftParseError(RuntimeError):
@@ -90,11 +70,18 @@ class Token:
 
 @dataclass(frozen=True)
 class Declaration:
+    scope: tuple[tuple[str, ...], ...]
+    conditions: tuple[tuple[tuple[str, ...], ...], ...]
     header_tokens: tuple[str, ...]
     full_tokens: tuple[str, ...]
+    token_kinds: tuple[str, ...]
     normalized: str
     start_line: int
     end_line: int
+
+    @property
+    def fingerprint(self) -> tuple[object, ...]:
+        return (self.scope, self.conditions, self.full_tokens, self.token_kinds)
 
 
 @dataclass(frozen=True)
@@ -135,7 +122,8 @@ def tokenize_swift(source: str) -> list[Token]:
 
     Handles line comments, nested /* ... */ block comments, normal strings,
     multiline strings (\"\"\"...\"\"\"), raw strings (#\"...\"# / #\"\"\"...\"\"\"#),
-    string interpolations (\\(...) / \\#(...)), and raw regex literals (#/.../#).
+    string interpolations (\\(...) / \\#(...)), raw regex literals (#/.../#),
+    and maximal operator runs respecting whitespace boundaries.
     """
     tokens: list[Token] = []
     n = len(source)
@@ -337,35 +325,72 @@ def tokenize_swift(source: str) -> list[Token]:
         if "0" <= ch <= "9":
             start = pos
             pos += 1
-            while pos < n and (_is_ident_continue(source[pos])):
+            while pos < n and _is_ident_continue(source[pos]):
                 pos += 1
             if pos + 1 < n and source[pos] == "." and ("0" <= source[pos + 1] <= "9"):
                 pos += 1
-                while pos < n and (_is_ident_continue(source[pos])):
+                while pos < n and _is_ident_continue(source[pos]):
                     pos += 1
             if pos < n and source[pos] in ("e", "E", "p", "P"):
                 if pos + 1 < n and source[pos + 1] in ("+", "-"):
                     pos += 2
                 else:
                     pos += 1
-                while pos < n and (_is_ident_continue(source[pos])):
+                while pos < n and _is_ident_continue(source[pos]):
                     pos += 1
             emit("NUMBER", source[start:pos], start, pos, line)
             continue
 
-        # Multi-character operators
-        matched_op = None
-        for op in MULTI_CHAR_OPS:
-            if source.startswith(op, pos):
-                matched_op = op
-                break
-        if matched_op is not None:
-            emit("OP", matched_op, pos, pos + len(matched_op), line)
-            pos += len(matched_op)
+        # Dot operators (..., ..<, etc.) vs member-access dot (.)
+        if ch == ".":
+            if pos + 1 < n and source[pos + 1] == ".":
+                start = pos
+                pos += 2
+                while pos < n and (source[pos] == "." or source[pos] in OP_RUN_CHARS):
+                    if source.startswith("//", pos) or source.startswith("/*", pos):
+                        break
+                    pos += 1
+                emit("OP", source[start:pos], start, pos, line)
+            else:
+                emit("PUNCT", ".", pos, pos + 1, line)
+                pos += 1
             continue
 
-        # Single-character punctuation or operator
-        kind = "PUNCT" if ch in "()[]{};:,.@#?!" else "OP"
+        # Special ?, ! operator forms (??, !=, !==) vs single ? / ! punctuation
+        if ch == "?":
+            if source.startswith("??", pos):
+                emit("OP", "??", pos, pos + 2, line)
+                pos += 2
+            else:
+                emit("PUNCT", "?", pos, pos + 1, line)
+                pos += 1
+            continue
+
+        if ch == "!":
+            if source.startswith("!==", pos):
+                emit("OP", "!==", pos, pos + 3, line)
+                pos += 3
+            elif source.startswith("!=", pos):
+                emit("OP", "!=", pos, pos + 2, line)
+                pos += 2
+            else:
+                emit("PUNCT", "!", pos, pos + 1, line)
+                pos += 1
+            continue
+
+        # Maximal operator runs respecting whitespace boundaries (a + +b != a ++ b)
+        if ch in OP_RUN_CHARS:
+            start = pos
+            pos += 1
+            while pos < n and source[pos] in OP_RUN_CHARS:
+                if source.startswith("//", pos) or source.startswith("/*", pos):
+                    break
+                pos += 1
+            emit("OP", source[start:pos], start, pos, line)
+            continue
+
+        # Single-character punctuation
+        kind = "PUNCT" if ch in "()[]{};:,@" else "OP"
         emit(kind, ch, pos, pos + 1, line)
         pos += 1
 
@@ -375,14 +400,34 @@ def tokenize_swift(source: str) -> list[Token]:
     return tokens
 
 
+def _is_punct(tok: Token, text: str) -> bool:
+    return tok.kind == "PUNCT" and tok.text == text
+
+
+def _is_word(tok: Token, text: str | frozenset[str]) -> bool:
+    if tok.kind != "WORD":
+        return False
+    if isinstance(text, str):
+        return tok.text == text
+    return tok.text in text
+
+
+def _is_op(tok: Token, text: str | frozenset[str]) -> bool:
+    if tok.kind != "OP":
+        return False
+    if isinstance(text, str):
+        return tok.text == text
+    return tok.text in text
+
+
 def _build_brace_map(tokens: list[Token]) -> dict[int, int]:
-    """Return {open_idx: close_idx} for every '{' and fail closed on unbalanced braces."""
+    """Return {open_idx: close_idx} for every PUNCT '{' and fail closed on unbalanced braces."""
     stack: list[int] = []
     mapping: dict[int, int] = {}
     for idx, tok in enumerate(tokens):
-        if tok.text == "{":
+        if _is_punct(tok, "{"):
             stack.append(idx)
-        elif tok.text == "}":
+        elif _is_punct(tok, "}"):
             if not stack:
                 raise SwiftParseError(f"Unmatched '}}' at line {tok.line}")
             open_idx = stack.pop()
@@ -394,14 +439,14 @@ def _build_brace_map(tokens: list[Token]) -> dict[int, int]:
 
 
 def _skip_balanced(tokens: list[Token], idx: int, end: int, open_ch: str, close_ch: str) -> int:
-    if idx >= end or tokens[idx].text != open_ch:
+    if idx >= end or not _is_punct(tokens[idx], open_ch):
         raise SwiftParseError(f"Expected '{open_ch}' at token {idx}")
     depth = 0
     while idx < end:
-        text = tokens[idx].text
-        if text == open_ch:
+        tok = tokens[idx]
+        if _is_punct(tok, open_ch):
             depth += 1
-        elif text == close_ch:
+        elif _is_punct(tok, close_ch):
             depth -= 1
             if depth == 0:
                 return idx + 1
@@ -413,9 +458,13 @@ def _skip_attribute(tokens: list[Token], idx: int, end: int) -> int:
     idx += 1
     if idx < end and tokens[idx].kind == "WORD":
         idx += 1
-        while idx + 1 < end and tokens[idx].text == "." and tokens[idx + 1].kind == "WORD":
+        while (
+            idx + 1 < end
+            and _is_punct(tokens[idx], ".")
+            and tokens[idx + 1].kind == "WORD"
+        ):
             idx += 2
-    if idx < end and tokens[idx].text == "(":
+    if idx < end and _is_punct(tokens[idx], "("):
         idx = _skip_balanced(tokens, idx, end, "(", ")")
     return idx
 
@@ -425,47 +474,58 @@ def _is_class_modifier(tokens: list[Token], idx: int, end: int) -> bool:
     k = idx + 1
     while k < end:
         tok = tokens[k]
-        if tok.text == "@":
+        if _is_punct(tok, "@"):
             k = _skip_attribute(tokens, k, end)
             continue
-        if tok.text in MODIFIERS:
+        if _is_word(tok, MODIFIERS):
             mod = tok.text
             k += 1
-            if mod in PAREN_MODIFIERS and k < end and tokens[k].text == "(":
+            if mod in PAREN_MODIFIERS and k < end and _is_punct(tokens[k], "("):
                 k = _skip_balanced(tokens, k, end, "(", ")")
             continue
-        return tok.text in {"func", "var", "let", "subscript", "class"}
+        return _is_word(tok, {"func", "var", "let", "subscript", "class"})
     return False
 
 
-def _is_decl_start(tokens: list[Token], idx: int, end: int, prev_text: str) -> bool:
+def _is_directive(tokens: list[Token], idx: int, end: int) -> bool:
+    return (
+        idx + 1 < end
+        and _is_punct(tokens[idx], "#")
+        and _is_word(tokens[idx + 1], DIRECTIVE_KEYWORDS)
+    )
+
+
+def _is_decl_start(tokens: list[Token], idx: int, end: int, prev_tok: Token | None) -> bool:
     if idx >= end:
         return True
-    text = tokens[idx].text
-    if text in ("}", ";"):
+    tok = tokens[idx]
+    if _is_punct(tok, "}") or _is_punct(tok, ";"):
         return True
-    if text == "#" and idx + 1 < end and tokens[idx + 1].text in DIRECTIVE_KEYWORDS:
+    if _is_directive(tokens, idx, end):
         return True
-    if prev_text in LINE_CONTINUATION_PREV:
-        return False
-    if text == "@":
+    if prev_tok is not None and prev_tok.kind in ("PUNCT", "OP", "WORD"):
+        if prev_tok.text in LINE_CONTINUATION_PREV and prev_tok.kind != "STRING":
+            if prev_tok.kind != "WORD" or prev_tok.text == "where":
+                return False
+    if _is_punct(tok, "@"):
         return True
-    if text in ALL_DECL_KEYWORDS:
+    if _is_word(tok, ALL_DECL_KEYWORDS):
         return True
-    if text in MODIFIERS:
+    if _is_word(tok, MODIFIERS):
         k = idx
         while k < end:
-            cur = tokens[k].text
-            if cur == "@":
+            cur = tokens[k]
+            if _is_punct(cur, "@"):
                 k = _skip_attribute(tokens, k, end)
-            elif cur in MODIFIERS:
+            elif _is_word(cur, MODIFIERS):
+                mod = cur.text
                 k += 1
-                if cur in PAREN_MODIFIERS and k < end and tokens[k].text == "(":
+                if mod in PAREN_MODIFIERS and k < end and _is_punct(tokens[k], "("):
                     k = _skip_balanced(tokens, k, end, "(", ")")
-            elif cur == "class":
+            elif _is_word(cur, "class"):
                 return _is_class_modifier(tokens, k, end)
             else:
-                return cur in ALL_DECL_KEYWORDS
+                return _is_word(cur, ALL_DECL_KEYWORDS)
     return False
 
 
@@ -477,25 +537,25 @@ def _end_of_statement(tokens: list[Token], idx: int, end: int) -> int:
     while k < end:
         tok = tokens[k]
         if paren == 0 and bracket == 0 and brace == 0:
-            if tok.text == ";":
+            if _is_punct(tok, ";"):
                 return k + 1
-            if tok.text == "}":
+            if _is_punct(tok, "}"):
                 return k
             if tok.has_newline_before:
-                prev_text = tokens[k - 1].text if k > 0 else ""
-                if _is_decl_start(tokens, k, end, prev_text):
+                prev_tok = tokens[k - 1] if k > 0 else None
+                if _is_decl_start(tokens, k, end, prev_tok):
                     return k
-        if tok.text == "(":
+        if _is_punct(tok, "("):
             paren += 1
-        elif tok.text == ")":
+        elif _is_punct(tok, ")"):
             paren -= 1
-        elif tok.text == "[":
+        elif _is_punct(tok, "["):
             bracket += 1
-        elif tok.text == "]":
+        elif _is_punct(tok, "]"):
             bracket -= 1
-        elif tok.text == "{":
+        elif _is_punct(tok, "{"):
             brace += 1
-        elif tok.text == "}":
+        elif _is_punct(tok, "}"):
             brace -= 1
         if paren < 0 or bracket < 0 or brace < 0:
             raise SwiftParseError(f"Unbalanced delimiter '{tok.text}' at line {tok.line}")
@@ -503,49 +563,127 @@ def _end_of_statement(tokens: list[Token], idx: int, end: int) -> int:
     return k
 
 
+def _find_open_brace(tokens: list[Token], idx: int, end: int, kw: str, kw_line: int) -> int:
+    k = idx
+    paren = 0
+    bracket = 0
+    while k < end:
+        tok = tokens[k]
+        if paren == 0 and bracket == 0 and _is_punct(tok, "{"):
+            return k
+        if _is_punct(tok, "("):
+            paren += 1
+        elif _is_punct(tok, ")"):
+            paren -= 1
+        elif _is_punct(tok, "["):
+            bracket += 1
+        elif _is_punct(tok, "]"):
+            bracket -= 1
+        if paren < 0 or bracket < 0:
+            raise SwiftParseError(f"Unbalanced delimiter '{tok.text}' at line {tok.line}")
+        k += 1
+    raise SwiftParseError(f"Expected '{{' for '{kw}' at line {kw_line}")
+
+
+def _format_conditions(conditions: tuple[tuple[tuple[str, ...], ...], ...]) -> str:
+    if not conditions:
+        return ""
+    return " ; ".join(
+        " / ".join("#" + " ".join(branch) for branch in block) for block in conditions
+    )
+
+
 def extract_declarations(source: str) -> list[Declaration]:
-    """Extract all brace-delimited Swift declarations at file/type/extension scope."""
+    """Extract brace-delimited and protocol-requirement Swift declarations with scope and #if context."""
     tokens = tokenize_swift(source)
     brace_map = _build_brace_map(tokens)
     declarations: list[Declaration] = []
 
-    def record(decl_start: int, open_brace: int, close_brace: int) -> None:
-        header = tuple(tok.text for tok in tokens[decl_start:open_brace])
-        full = tuple(tok.text for tok in tokens[decl_start : close_brace + 1])
+    def record(
+        decl_start: int,
+        header_end: int,
+        full_end: int,
+        scope: tuple[tuple[str, ...], ...],
+        cond_stack: list[list[tuple[str, ...]]],
+    ) -> None:
+        header = tuple(tok.text for tok in tokens[decl_start:header_end])
+        full = tuple(tok.text for tok in tokens[decl_start:full_end])
+        kinds = tuple(tok.kind for tok in tokens[decl_start:full_end])
+        frozen_conds = tuple(tuple(block) for block in cond_stack)
+        scope_str = " :: ".join(" ".join(part) for part in scope)
+        cond_str = _format_conditions(frozen_conds)
+        body_str = " ".join(full)
+        if scope_str or cond_str:
+            normalized = f"[scope={scope_str}] [if={cond_str}] {body_str}"
+        else:
+            normalized = body_str
         declarations.append(
             Declaration(
+                scope=scope,
+                conditions=frozen_conds,
                 header_tokens=header,
                 full_tokens=full,
-                normalized=" ".join(full),
+                token_kinds=kinds,
+                normalized=normalized,
                 start_line=tokens[decl_start].line,
-                end_line=tokens[close_brace].line,
+                end_line=tokens[full_end - 1].line,
             )
         )
 
-    def scan_container(start: int, end: int, in_protocol: bool) -> None:
+    def scan_container(
+        start: int,
+        end: int,
+        in_protocol: bool,
+        scope: tuple[tuple[str, ...], ...],
+        cond_stack: list[list[tuple[str, ...]]],
+    ) -> None:
+        initial_cond_depth = len(cond_stack)
         i = start
         while i < end:
-            if tokens[i].text in (";", "}"):
+            if _is_punct(tokens[i], ";") or _is_punct(tokens[i], "}"):
                 i += 1
                 continue
-            if tokens[i].text == "#" and i + 1 < end and tokens[i + 1].text in DIRECTIVE_KEYWORDS:
+            if _is_directive(tokens, i, end):
+                directive = tokens[i + 1].text
+                directive_line = tokens[i].line
                 k = i + 2
+                cond_toks: list[str] = []
                 while k < end and not tokens[k].has_newline_before:
+                    cond_toks.append(tokens[k].text)
                     k += 1
+                if directive == "if":
+                    cond_stack.append([("if", *cond_toks)])
+                elif directive == "elseif":
+                    if len(cond_stack) <= initial_cond_depth:
+                        raise SwiftParseError(f"Unmatched '#elseif' at line {directive_line}")
+                    if cond_stack[-1][-1][0] == "else":
+                        raise SwiftParseError(f"Unexpected '#elseif' after '#else' at line {directive_line}")
+                    cond_stack[-1].append(("elseif", *cond_toks))
+                elif directive == "else":
+                    if len(cond_stack) <= initial_cond_depth:
+                        raise SwiftParseError(f"Unmatched '#else' at line {directive_line}")
+                    if cond_stack[-1][-1][0] == "else":
+                        raise SwiftParseError(f"Duplicate '#else' at line {directive_line}")
+                    cond_stack[-1].append(("else",))
+                elif directive == "endif":
+                    if len(cond_stack) <= initial_cond_depth:
+                        raise SwiftParseError(f"Unmatched '#endif' at line {directive_line}")
+                    cond_stack.pop()
                 i = k
                 continue
 
             decl_start = i
             j = i
             while j < end:
-                cur = tokens[j].text
-                if cur == "@":
+                cur = tokens[j]
+                if _is_punct(cur, "@"):
                     j = _skip_attribute(tokens, j, end)
-                elif cur in MODIFIERS:
+                elif _is_word(cur, MODIFIERS):
+                    mod = cur.text
                     j += 1
-                    if cur in PAREN_MODIFIERS and j < end and tokens[j].text == "(":
+                    if mod in PAREN_MODIFIERS and j < end and _is_punct(tokens[j], "("):
                         j = _skip_balanced(tokens, j, end, "(", ")")
-                elif cur == "class" and _is_class_modifier(tokens, j, end):
+                elif _is_word(cur, "class") and _is_class_modifier(tokens, j, end):
                     j += 1
                 else:
                     break
@@ -553,60 +691,37 @@ def extract_declarations(source: str) -> list[Declaration]:
             if j >= end:
                 break
 
-            kw = tokens[j].text
+            kw_tok = tokens[j]
+            if kw_tok.kind != "WORD":
+                i = _end_of_statement(tokens, j + 1, end)
+                continue
+
+            kw = kw_tok.text
             if kw in TYPE_KEYWORDS:
-                k = j + 1
-                paren = 0
-                bracket = 0
-                open_brace = None
-                while k < end:
-                    t = tokens[k].text
-                    if paren == 0 and bracket == 0 and t == "{":
-                        open_brace = k
-                        break
-                    if t == "(":
-                        paren += 1
-                    elif t == ")":
-                        paren -= 1
-                    elif t == "[":
-                        bracket += 1
-                    elif t == "]":
-                        bracket -= 1
-                    k += 1
-                if open_brace is None:
-                    raise SwiftParseError(f"Expected '{{' for '{kw}' at line {tokens[j].line}")
+                open_brace = _find_open_brace(tokens, j + 1, end, kw, kw_tok.line)
                 close_brace = brace_map[open_brace]
-                record(decl_start, open_brace, close_brace)
-                scan_container(open_brace + 1, close_brace, in_protocol=(kw == "protocol"))
+                record(decl_start, open_brace, close_brace + 1, scope, cond_stack)
+                child_scope = scope + (tuple(tok.text for tok in tokens[decl_start:open_brace]),)
+                scan_container(
+                    open_brace + 1,
+                    close_brace,
+                    in_protocol=(kw == "protocol"),
+                    scope=child_scope,
+                    cond_stack=cond_stack,
+                )
                 i = close_brace + 1
                 continue
 
             if kw in FUNC_KEYWORDS:
-                if in_protocol:
-                    i = _end_of_statement(tokens, j + 1, end)
+                if in_protocol and kw in {"func", "init"}:
+                    stmt_end = _end_of_statement(tokens, j + 1, end)
+                    full_end = stmt_end - 1 if stmt_end > decl_start and _is_punct(tokens[stmt_end - 1], ";") else stmt_end
+                    record(decl_start, full_end, full_end, scope, cond_stack)
+                    i = stmt_end
                     continue
-                k = j + 1
-                paren = 0
-                bracket = 0
-                open_brace = None
-                while k < end:
-                    t = tokens[k].text
-                    if paren == 0 and bracket == 0 and t == "{":
-                        open_brace = k
-                        break
-                    if t == "(":
-                        paren += 1
-                    elif t == ")":
-                        paren -= 1
-                    elif t == "[":
-                        bracket += 1
-                    elif t == "]":
-                        bracket -= 1
-                    k += 1
-                if open_brace is None:
-                    raise SwiftParseError(f"Expected '{{' for '{kw}' at line {tokens[j].line}")
+                open_brace = _find_open_brace(tokens, j + 1, end, kw, kw_tok.line)
                 close_brace = brace_map[open_brace]
-                record(decl_start, open_brace, close_brace)
+                record(decl_start, open_brace, close_brace + 1, scope, cond_stack)
                 i = close_brace + 1
                 continue
 
@@ -618,33 +733,33 @@ def extract_declarations(source: str) -> list[Declaration]:
                 while k < end:
                     tok = tokens[k]
                     if paren == 0 and bracket == 0:
-                        if tok.text == "=":
+                        if _is_op(tok, "="):
                             i = _end_of_statement(tokens, k + 1, end)
                             handled = True
                             break
-                        if tok.text == "{":
+                        if _is_punct(tok, "{"):
                             close_brace = brace_map[k]
-                            record(decl_start, k, close_brace)
+                            record(decl_start, k, close_brace + 1, scope, cond_stack)
                             i = close_brace + 1
                             handled = True
                             break
-                        if tok.text == ";":
+                        if _is_punct(tok, ";"):
                             i = k + 1
                             handled = True
                             break
                         if tok.has_newline_before:
-                            prev_text = tokens[k - 1].text if k > 0 else ""
-                            if _is_decl_start(tokens, k, end, prev_text):
+                            prev_tok = tokens[k - 1] if k > 0 else None
+                            if _is_decl_start(tokens, k, end, prev_tok):
                                 i = k
                                 handled = True
                                 break
-                    if tok.text == "(":
+                    if _is_punct(tok, "("):
                         paren += 1
-                    elif tok.text == ")":
+                    elif _is_punct(tok, ")"):
                         paren -= 1
-                    elif tok.text == "[":
+                    elif _is_punct(tok, "["):
                         bracket += 1
-                    elif tok.text == "]":
+                    elif _is_punct(tok, "]"):
                         bracket -= 1
                     k += 1
                 if not handled:
@@ -653,8 +768,41 @@ def extract_declarations(source: str) -> list[Declaration]:
 
             i = _end_of_statement(tokens, j + 1, end)
 
-    scan_container(0, len(tokens), in_protocol=False)
+        if len(cond_stack) != initial_cond_depth:
+            raise SwiftParseError("Unclosed '#if' directive in container")
+
+    scan_container(0, len(tokens), in_protocol=False, scope=(), cond_stack=[])
     return declarations
+
+
+def _split_scoped_symbol(signature: str) -> tuple[list[tuple[str, ...]], tuple[str, ...]]:
+    """Split `<scope> :: <member>` using the Swift lexer so `"::"` inside strings is ignored."""
+    tokens = tokenize_swift(signature)
+    if not tokens:
+        raise SwiftParseError("Empty symbol signature prefix")
+
+    parts: list[tuple[str, ...]] = []
+    cur: list[str] = []
+    idx = 0
+    while idx < len(tokens):
+        if (
+            idx + 1 < len(tokens)
+            and _is_punct(tokens[idx], ":")
+            and _is_punct(tokens[idx + 1], ":")
+        ):
+            if not cur:
+                raise SwiftParseError(f"Empty scope segment in symbol '{signature}'")
+            parts.append(tuple(cur))
+            cur = []
+            idx += 2
+            continue
+        cur.append(tokens[idx].text)
+        idx += 1
+
+    if not cur:
+        raise SwiftParseError(f"Missing member signature after '::' in '{signature}'")
+    parts.append(tuple(cur))
+    return parts[:-1], parts[-1]
 
 
 def normalize_signature_prefix(signature: str) -> tuple[str, ...]:
@@ -665,13 +813,31 @@ def normalize_signature_prefix(signature: str) -> tuple[str, ...]:
     return tuple(tok.text for tok in tokens)
 
 
+def _scope_matches(decl_scope: tuple[tuple[str, ...], ...], scope_prefixes: list[tuple[str, ...]]) -> bool:
+    if not scope_prefixes:
+        return True
+    if len(decl_scope) < len(scope_prefixes):
+        return False
+    tail = decl_scope[-len(scope_prefixes) :]
+    return all(
+        len(actual) >= len(expected) and actual[: len(expected)] == expected
+        for actual, expected in zip(tail, scope_prefixes)
+    )
+
+
 def find_matching_declarations(
     declarations: Iterable[Declaration], signature_prefix: str
 ) -> list[Declaration]:
-    """Return every extracted declaration whose normalized tokens start with `signature_prefix`."""
-    prefix = normalize_signature_prefix(signature_prefix)
-    n = len(prefix)
-    return [decl for decl in declarations if len(decl.full_tokens) >= n and decl.full_tokens[:n] == prefix]
+    """Return every extracted declaration matching optional enclosing scope and signature prefix."""
+    scope_prefixes, member_prefix = _split_scoped_symbol(signature_prefix)
+    n = len(member_prefix)
+    return [
+        decl
+        for decl in declarations
+        if _scope_matches(decl.scope, scope_prefixes)
+        and len(decl.full_tokens) >= n
+        and decl.full_tokens[:n] == member_prefix
+    ]
 
 
 def resolve_unique_declaration(
@@ -763,7 +929,7 @@ def check_drift(repo_root: Path, sync_path: Path, target_ref: str | None = None)
             return _git_show_bytes(repo_root, target_ref, rel_path)
         file_path = repo_root / rel_path
         if not file_path.is_file():
-            raise FileNotFoundError(f"missing in working tree")
+            raise FileNotFoundError("missing in working tree")
         return file_path.read_bytes()
 
     # 1. Whole-file checks (fail closed if missing on either side or bytes differ)
@@ -832,7 +998,7 @@ def check_drift(repo_root: Path, sync_path: Path, target_ref: str | None = None)
                 failures.append(base_err)
             if cur_err is not None:
                 failures.append(cur_err)
-            if base_decl is not None and cur_decl is not None and base_decl.normalized != cur_decl.normalized:
+            if base_decl is not None and cur_decl is not None and base_decl.fingerprint != cur_decl.fingerprint:
                 failures.append(
                     DriftFailure(
                         rel_path,
