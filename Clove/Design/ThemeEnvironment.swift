@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// The theme in effect, for every view below the one that sets it
-/// (`design/handoff/tokens/tokens.md`).
+/// The theme in effect, for every view below the one that sets it.
 ///
 /// `RootView` writes the value once, works it out from the Appearance setting and the system
 /// appearance, and the tokens, the glass and the controls read it from there. A view that draws a

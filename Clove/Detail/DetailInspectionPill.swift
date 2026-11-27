@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// Paired native Liquid Glass capsule (`[ Focus | Compare ]`) for iPad and expanded Duo Detail
-/// (`design/handoff/components.md`, Inspection pill).
+/// Paired native Liquid Glass capsule (`[ Focus | Compare ]`) for iPad and expanded Duo Detail.
 ///
 /// Toggles camera/face focus overlays on the leading half and enters side-by-side Compare on the
 /// trailing half, disabling Compare gracefully when fewer than two photos or narrow bounds prevent

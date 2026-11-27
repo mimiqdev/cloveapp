@@ -57,7 +57,7 @@ results. A passing variant is a failed check because the defect did not break it
 Source sync commit: `1affa6dc86cb568ce835ce40bb67ce2f124a3a95`. The machine-readable copy and
 covered-path list used by the drift gate live in `model/source-sync.json`.
 
-The model was manually compared with these functions at that commit:
+The model was manually compared with these 11 covered files at that commit:
 
 | Covered file | Functions and properties |
 | --- | --- |
@@ -72,7 +72,6 @@ The model was manually compared with these functions at that commit:
 | `Clove/Detail/MarkAutoAdvance.swift` | `schedule` and `cancel` |
 | `Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift` | `apply`, `shown`, `finish`, `removeAll`, and `DesiredMarkRestore.change` |
 | `Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift` | `submit`, `beginNext`, `hasPendingMark`, `removePending`, and `finish` |
-| `design/handoff/interactions.md` | App flow, Groups in detail, Opening a folder, and Errors |
 
 Before trusting a run after a source change, compare the covered files with the sync commit:
 
@@ -88,8 +87,7 @@ git diff 1affa6dc86cb568ce835ce40bb67ce2f124a3a95 -- \
   Clove/Detail/DetailFilmstrip.swift \
   Clove/Detail/MarkAutoAdvance.swift \
   Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift \
-  Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift \
-  design/handoff/interactions.md
+  Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift
 ```
 
 If this diff changes the workflow, update the model and its mutations before treating a pass as

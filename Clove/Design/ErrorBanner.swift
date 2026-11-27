@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The glass error banner that pins under the toolbar when a folder cannot be read
-/// (`design/handoff/components.md`, Banner).
+/// The glass error banner that pins under the toolbar when a folder cannot be read.
 ///
 /// It holds the message, an optional explanation, and one button, Reopen or Open, filled with
 /// `accent`. The grid behind it is dimmed by the screen showing it (screens.md, Errors).

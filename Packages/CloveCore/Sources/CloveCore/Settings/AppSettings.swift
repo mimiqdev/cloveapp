@@ -74,8 +74,8 @@ public struct AppSettings: Hashable, Sendable {
     /// Maximum capture-time gap between consecutive photos in a similar group; `2s` by default.
     public var groupingTimeWindow: GroupingTimeWindow
 
-    /// The three-way appearance mode (Light, Dark, System) and paired theme family
-    /// (`design/handoff/tokens/tokens.md`); System + Default by default.
+    /// The three-way appearance mode (Light, Dark, System) and paired theme family;
+    /// System + Default by default.
     public var appearance: AppearanceChoice
 
     /// An explicit display choice. Absent means use the measured device default.

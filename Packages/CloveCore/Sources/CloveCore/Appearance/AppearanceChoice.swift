@@ -1,5 +1,5 @@
 /// The Appearance setting: an independent three-way appearance mode (Light / Dark / System)
-/// and a paired theme family (`design/handoff/tokens/tokens.md`).
+/// and a paired theme family.
 ///
 /// Changing mode preserves the selected family, and changing family preserves the selected mode.
 /// In System mode, the effective palette follows the actual system appearance within the selected

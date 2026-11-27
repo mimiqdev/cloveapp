@@ -145,7 +145,7 @@ G1 is decided; M3 starts now in parallel with M2. Use [G1's starting performance
 
 ## M4 iPhone main flow
 
-Depends on C-series interfaces (start with mock data). G2 follows when all are done. Behavior and copy follow the design handoff in `design/handoff/` (adopted 2026-11-10). Use system components for visuals and mark the places the visual design will replace; Q6 applies the visuals.
+Depends on C-series interfaces (start with mock data). G2 follows when all are done. Behavior and copy follow the live Figma file (*Clove — Native concept*) and GitHub issues (originally adopted 2026-11-10). Use system components for visuals and mark the places the visual design will replace; Q6 applies the visuals.
 
 | ID | Task | Output and acceptance | Depends on | Size | PRD |
 | --- | --- | --- | --- | --- | --- |
@@ -163,11 +163,11 @@ Depends on C-series interfaces (start with mock data). G2 follows when all are d
 
 ### Design implementation
 
-The owner decided on 2026-11-10 that the design handoff in `design/handoff/` is built into the app before G2, and that G2 can wait for it. This replaces Q6. V1 adds new files only, so it runs alongside the U tasks. Each screen pass starts once the behavior tasks for its screens have merged, so the same files are not edited twice in parallel. Behavior in the handoff that differs from the PRD lands in the screen pass for that screen.
+The owner decided on 2026-11-10 that the MVP visual design (originally delivered as a static handoff, now maintained in the live Figma file *Clove — Native concept* and GitHub issues) is built into the app before G2, and that G2 can wait for it. This replaces Q6. V1 adds new files only, so it runs alongside the U tasks. Each screen pass starts once the behavior tasks for its screens have merged, so the same files are not edited twice in parallel. Behavior in the visual design that differs from the PRD lands in the screen pass for that screen.
 
 | ID | Task | Output and acceptance | Depends on | Size | Device |
 | --- | --- | --- | --- | --- | --- |
-| V1 | Design foundation | Theme tokens from `design/handoff/tokens/clove-themes.json` (21 tokens × 8 themes), with tests that the code matches the JSON; `Color.clove` resolved from the current theme; the Appearance setting (Match system light/dark, theme) in C12 and the Settings screen; the shared glass style (system Liquid Glass on iOS 26 and later, `surface/glass` as the fallback); the shared controls from `components.md`; a component gallery for previews and UI tests. No screen changes | U11 | M | No |
+| V1 | Design foundation | Theme tokens in `CloveCore` (`ThemeTokens` / `CloveTheme`), synced from the Figma variable collections with self-contained invariant tests; `Color.clove` resolved from the current theme; the Appearance setting (Match system light/dark, theme) in C12 and the Settings screen; the shared glass style (system Liquid Glass on iOS 26 and later, `surface/glass` as the fallback); the shared controls from the design spec; a component gallery for previews and UI tests. No screen changes | U11 | M | No |
 | V2 | iPhone grid and detail | Grid (tiles, stacks, dimmed rejects, the Move Rejects button, filter, select mode with the capsule, opening states, toasts) and detail (the mark capsule, swipe-up star bar and swipe-down Reject, filmstrip, top bar with Info and Undo, the Info sheet, the subtitle save state) per the handoff, including #82's companion badge | V1, U7, U8 | L | Yes |
 | V3 | Group review and Move Rejects | Group review per the handoff: one finishing action, Reject N unmarked (C10's availability becomes any photo rated or labeled), the header, always-synced zoom, Undecided only in the "…" menu, Continue →; the Move Rejects sheet, quick grid, toasts and Details sheet, with Undo wired through C14 | V1, U8, U9, U10, C14 | M | Yes |
 | V4 | Entry, Settings and errors | The hero resume card, Recents rows (absorbing #82's path display), first launch, the Open folder capsule, the Settings layout and theme picker, error banners and alerts | V1, U7 | M | Yes |
@@ -178,9 +178,9 @@ The owner decided on 2026-11-10 that the design handoff in `design/handoff/` is 
 
 | ID | Task | Output and acceptance | Depends on | Size | Device |
 | --- | --- | --- | --- | --- | --- |
-| P1 | iPad layout | Per `design/handoff/` (iPad sections). Sidebar (locations, filters, labels, similar groups); five-column grid; right-hand marking rail in detail; group view with large preview and sidebar grid | G2 | M | Yes |
+| P1 | iPad layout | Per the live Figma file (*Clove — Native concept*, iPad frames) and GitHub issues. Sidebar (locations, filters, labels, similar groups); five-column grid; right-hand marking rail in detail; group view with large preview and sidebar grid | G2 | M | Yes |
 | P2 | External keyboard | `0`–`5`, `6`–`9`, `↑`, `↓`, `←` `→`, `⌘Z`; only enabled ratings accepted; also works on iPhone with a keyboard | U6, U8 | S | Yes |
-| P3 | Duo adaptive layout | Per `design/handoff/` (Duo sections, including the dock and the split state machine) and [G1's fold-state approach](decisions/G1-technical-approach.md#3-recommended-by-the-spikes-accepted), subject to the S7 Duo run: compact cover layout; inner grid and detail follow available geometry; controls avoid the hinge when half-folded, with no hard-coded hinge position. Public hinge API on iOS 27.1+ behind availability checks; minimum remains iOS 18. Navigation and selection state live outside layout | G2, S7 | L | Yes |
+| P3 | Duo adaptive layout | Per the live Figma file (*Clove — Native concept*, Duo frames, including the dock and the split state machine) and [G1's fold-state approach](decisions/G1-technical-approach.md#3-recommended-by-the-spikes-accepted), subject to the S7 Duo run: compact cover layout; inner grid and detail follow available geometry; controls avoid the hinge when half-folded, with no hard-coded hinge position. Public hinge API on iOS 27.1+ behind availability checks; minimum remains iOS 18. Navigation and selection state live outside layout | G2, S7 | L | Yes |
 | P4 | Duo state continuity | Cover ↔ inner, half-fold, and window resizing preserve folder, photo, filters, selection, group-view position, and write status | U1, P3 | M | Yes |
 
 ## M6 Polish and beta

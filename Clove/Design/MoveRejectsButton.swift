@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The glass circle that opens Move Rejects (`design/handoff/components.md`, Move Rejects button).
+/// The glass circle that opens Move Rejects.
 ///
 /// It is 48 × 48 with `tray.and.arrow.down` at 22 pt, and it appears only when there are rejects
 /// and the folder is not opening; the screen decides that. It carries no count and always opens

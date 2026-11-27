@@ -222,7 +222,7 @@ struct BrowsingToolbar<
 
 /// Shared Photo Preview 30/70 divider interaction for both `ArrangementView` and `SplitPhotoView`.
 /// Renders an `8 pt` `bg/stage` gutter with a hairline in `separator` and a small centered drag
-/// handle, without any opaque white fill (`design/handoff/components.md`, Split divider).
+/// handle, without any opaque white fill.
 struct SplitDivider: View {
     @Binding var presentation: DetailPresentation
     let horizontal: Bool

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// A theme token as a shape style that resolves from the theme in effect.
 ///
-/// `design/handoff/tokens/tokens.md` names the tokens `Color.clove.<group>.<name>`, and that is
+/// The tokens are named `Color.clove.<group>.<name>`, and that is
 /// how the controls write them: `Color.clove.bg.canvas`, `Color.clove.rating.on`. A `Color` value
 /// cannot read the environment, so the leaves are shape styles: `foregroundStyle`, `fill`,
 /// `background` and `stroke` resolve them against the theme the view is drawn in, and a theme

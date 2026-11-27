@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// The round glass button the navigation chrome uses for Info, Undo, Filter and "…"
-/// (`design/handoff/components.md`, Glass icon button).
+/// The round glass button the navigation chrome uses for Info, Undo, Filter and "…".
 ///
 /// It is 44 × 44 with a 20 pt symbol on iPhone, 40 on iPad and 36 in the Duo dock. The active
 /// state keeps the translucent glass circle and tints only the symbol in `accent`, matching the
@@ -12,7 +11,7 @@ struct GlassIconButton: View {
     /// The theme in effect, for the symbol colour (tokens.md).
     @Environment(\.cloveTheme) private var theme
 
-    /// The accessibility label, from `design/handoff/copy.md` where it names one.
+    /// The accessibility label.
     let label: String
 
     /// The SF Symbol, from components.md's icon list.

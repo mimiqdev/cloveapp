@@ -1,10 +1,8 @@
-/// One of the 23 tokens the themes share, named as `design/handoff/tokens/clove-themes.json`
-/// names it.
+/// One of the 23 tokens the themes share, keyed by its semantic token name.
 ///
 /// The colour tokens are the 22 `Color.clove.*` values the chrome uses; `opacity/rejected` is a
-/// number and stays on ``ThemeTokens/rejectedOpacity``. A token added to the JSON needs a case
-/// here, and the switch in ``ThemeTokens/subscript(_:)`` then fails to compile until all twelve
-/// palettes carry it.
+/// number and stays on ``ThemeTokens/rejectedOpacity``. A token added here needs a corresponding
+/// case in ``ThemeTokens/subscript(_:)``, which fails to compile until all twelve palettes carry it.
 public enum ThemeToken: String, CaseIterable, Hashable, Sendable {
     /// App background behind lists, grids and chrome.
     case canvas = "bg/canvas"
@@ -75,9 +73,8 @@ public enum ThemeToken: String, CaseIterable, Hashable, Sendable {
 
 /// The 22 colour tokens and the rejected-photo opacity of one theme.
 ///
-/// Values come from `design/handoff/tokens/clove-themes.json`, the file a test reads and compares
-/// token by token. The twelve palettes live on this type; ``CloveTheme/tokens`` picks the one a
-/// theme uses.
+/// The twelve palettes (six Light/Dark pairs from the Figma theme collections) live on this type;
+/// ``CloveTheme/tokens`` picks the one a theme uses.
 public struct ThemeTokens: Hashable, Sendable {
     /// See `bg/canvas`.
     public var canvas: ThemeColour
@@ -159,7 +156,7 @@ public struct ThemeTokens: Hashable, Sendable {
 // MARK: - The twelve palettes
 
 extension ThemeTokens {
-    /// Light: the system light default (clove-themes.json).
+    /// Light: the system light default.
     static let light = ThemeTokens(
         canvas: ThemeColour(hex: 0xFFFFFF),
         stage: ThemeColour(hex: 0xE6E6EB),
@@ -186,7 +183,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Dark: the system dark default (clove-themes.json).
+    /// Dark: the system dark default.
     static let dark = ThemeTokens(
         canvas: ThemeColour(hex: 0x000000),
         stage: ThemeColour(hex: 0x000000),
@@ -213,7 +210,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
-    /// Darkroom Light: Clove-designed light companion for Darkroom (clove-themes.json).
+    /// Darkroom Light: Clove-designed light companion for Darkroom.
     static let darkroomLight = ThemeTokens(
         canvas: ThemeColour(hex: 0xF3F3F3),
         stage: ThemeColour(hex: 0xD3D3D3),
@@ -240,8 +237,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Darkroom: a neutral mid-grey stage and muted accents for judging color and exposure
-    /// (clove-themes.json).
+    /// Darkroom: a neutral mid-grey stage and muted accents for judging color and exposure.
     static let darkroom = ThemeTokens(
         canvas: ThemeColour(hex: 0x1E1E1E),
         stage: ThemeColour(hex: 0x474747),
@@ -268,7 +264,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.35
     )
 
-    /// Night Light: Clove-designed warm light companion for Night (clove-themes.json).
+    /// Night Light: Clove-designed warm light companion for Night.
     static let nightLight = ThemeTokens(
         canvas: ThemeColour(hex: 0xF7F0E8),
         stage: ThemeColour(hex: 0xE6DBD0),
@@ -295,7 +291,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Night: warm, dim chrome with no blue light (clove-themes.json).
+    /// Night: warm, dim chrome with no blue light.
     static let night = ThemeTokens(
         canvas: ThemeColour(hex: 0x0C0908),
         stage: ThemeColour(hex: 0x000000),
@@ -322,7 +318,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
-    /// Catppuccin Latte: the light editor palette (clove-themes.json).
+    /// Catppuccin Latte: the light editor palette.
     static let catppuccinLatte = ThemeTokens(
         canvas: ThemeColour(hex: 0xEFF1F5),
         stage: ThemeColour(hex: 0xDCE0E8),
@@ -349,7 +345,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Catppuccin Mocha: the dark editor palette (clove-themes.json).
+    /// Catppuccin Mocha: the dark editor palette.
     static let catppuccinMocha = ThemeTokens(
         canvas: ThemeColour(hex: 0x1E1E2E),
         stage: ThemeColour(hex: 0x11111B),
@@ -376,7 +372,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
-    /// Nord Light: Clove-designed light companion for Nord (clove-themes.json).
+    /// Nord Light: Clove-designed light companion for Nord.
     static let nordLight = ThemeTokens(
         canvas: ThemeColour(hex: 0xECEFF4),
         stage: ThemeColour(hex: 0xD8DEE9),
@@ -403,7 +399,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Nord: the arctic blue-grey editor palette (clove-themes.json).
+    /// Nord: the arctic blue-grey editor palette.
     static let nord = ThemeTokens(
         canvas: ThemeColour(hex: 0x2E3440),
         stage: ThemeColour(hex: 0x242933),
@@ -430,7 +426,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.3
     )
 
-    /// Gruvbox Light: Clove-designed light companion for Gruvbox (clove-themes.json).
+    /// Gruvbox Light: Clove-designed light companion for Gruvbox.
     static let gruvboxLight = ThemeTokens(
         canvas: ThemeColour(hex: 0xFBF1C7),
         stage: ThemeColour(hex: 0xEBDBB2),
@@ -457,7 +453,7 @@ extension ThemeTokens {
         rejectedOpacity: 0.28
     )
 
-    /// Gruvbox: the retro warm editor palette (clove-themes.json).
+    /// Gruvbox: the retro warm editor palette.
     static let gruvbox = ThemeTokens(
         canvas: ThemeColour(hex: 0x282828),
         stage: ThemeColour(hex: 0x1D2021),

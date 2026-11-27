@@ -2,7 +2,7 @@ import CloveCore
 import SwiftUI
 
 /// The shared visual tap-color picker: a glass capsule holding None (`circle.slash`) and the
-/// colour dots (`design/handoff/components.md`, Label picker).
+/// colour dots.
 ///
 /// Both horizontal (`288 × 52` pt) and vertical (`52 × 288` pt) orientations preserve the exact
 /// same top-to-bottom / left-to-right choice order (`None, Red, Yellow, Green, Blue, Purple`, plus

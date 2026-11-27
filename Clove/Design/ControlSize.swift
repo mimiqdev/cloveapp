@@ -1,4 +1,4 @@
-/// The device sizes `design/handoff/components.md` measures a control at.
+/// The device sizes measured for shared adaptive controls.
 ///
 /// The mark capsule, stars, toast, banner and pill action have one size, measured on the iPhone
 /// frames, so they take no size. The controls that appear on more than one device take it.
