@@ -27,6 +27,9 @@ struct GlassIconButton: View {
     /// The size components.md measures on the device.
     var size: ControlSize = .phone
 
+    /// Optional explicit button diameter when a narrow container needs tighter fit.
+    var diameterOverride: CGFloat? = nil
+
     /// The identifier the screen's UI test uses.
     let identifier: String
 
@@ -70,15 +73,18 @@ struct GlassIconButton: View {
     }
 
     private var diameter: CGFloat {
-        Self.diameter(for: size)
+        diameterOverride ?? Self.diameter(for: size)
     }
 
     /// The 20 pt symbol of the 44 pt button, at the size each device's button takes (components.md).
     private var symbolFont: Font {
+        if let diameterOverride, diameterOverride < 36 {
+            return .footnote
+        }
         switch size {
-        case .phone: .title3
-        case .pad: .body
-        case .duo: .callout
+        case .phone: return .title3
+        case .pad: return .body
+        case .duo: return .callout
         }
     }
 }

@@ -1505,7 +1505,7 @@ struct CompareFlowTests {
         try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
 
         let p1 = library.identity("p1")
-        let p2 = library.identity("p2")
+        _ = library.identity("p2")
         model.openPhoto(p1)
         let timeline = DetailTimeline(
             photos: model.photos, groups: model.groups, groupsEnabled: true)

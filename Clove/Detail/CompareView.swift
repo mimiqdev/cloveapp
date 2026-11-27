@@ -300,7 +300,8 @@ struct CompareView: View {
     }
 
     private var compareBody: some View {
-        VStack(spacing: 8) {
+        let overrideVerticalDivision = overrideVerticalDivisionRange
+        return VStack(spacing: 8) {
             if !usesDuoSystemToolbar {
                 topBar
             }
@@ -325,7 +326,7 @@ struct CompareView: View {
         .onGeometryChange(for: CompareGeometrySnapshot.self) { proxy in
             let size = proxy.size
             let verticalFold = Self.resolvedVerticalDivisionRange(
-                override: overrideVerticalDivisionRange,
+                override: overrideVerticalDivision,
                 in: proxy,
                 containerWidth: size.width)
             return CompareGeometrySnapshot(size: size, verticalFold: verticalFold)
@@ -529,17 +530,29 @@ struct CompareView: View {
                     }
                     .frame(width: max(0, CGFloat(foldLayout.split.referenceWidth)))
 
-                    HStack(spacing: 8) {
-                        if session.mode == .stepping {
-                            steppingControls
-                                .layoutPriority(1)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            if session.mode == .stepping {
+                                steppingControls()
+                                    .layoutPriority(1)
+                            }
+                            reviewActionCluster
+                                .layoutPriority(2)
                         }
-                        reviewActionCluster
-                            .layoutPriority(2)
+                        HStack(spacing: 4) {
+                            if session.mode == .stepping {
+                                steppingControls(spacing: 4, buttonDiameter: 32)
+                                    .layoutPriority(1)
+                            }
+                            reviewActionCluster
+                                .layoutPriority(2)
+                        }
                     }
                     .frame(
                         width: max(0, CGFloat(foldLayout.split.challengerWidth)),
-                        alignment: .trailing)
+                        alignment: .trailing
+                    )
+                    .clipped()
                 }
                 .padding(.horizontal, foldLayout.horizontalInset)
                 .frame(width: proxy.size.width, height: proxy.size.height)
@@ -549,10 +562,10 @@ struct CompareView: View {
                         if layoutPolicy.showsFilmstrip {
                             compareFilmstrip
                                 .frame(maxWidth: .infinity)
-                            steppingControls
+                            steppingControls()
                                 .layoutPriority(1)
                         } else {
-                            steppingControls
+                            steppingControls()
                             Spacer(minLength: 8)
                         }
                     } else {
@@ -583,12 +596,16 @@ struct CompareView: View {
         )
     }
 
-    private var steppingControls: some View {
-        HStack(spacing: 6) {
+    private func steppingControls(
+        spacing: CGFloat = 6,
+        buttonDiameter: CGFloat? = nil
+    ) -> some View {
+        HStack(spacing: spacing) {
             GlassIconButton(
                 label: AppLocalization.string("Previous candidate", language: language),
                 symbol: "chevron.left",
                 size: paneControlSize,
+                diameterOverride: buttonDiameter,
                 identifier: "clove.compare.prev"
             ) {
                 tapPickerDismissToken += 1
@@ -602,6 +619,7 @@ struct CompareView: View {
                 label: AppLocalization.string("Next candidate", language: language),
                 symbol: "chevron.right",
                 size: paneControlSize,
+                diameterOverride: buttonDiameter,
                 identifier: "clove.compare.next"
             ) {
                 tapPickerDismissToken += 1

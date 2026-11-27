@@ -3278,7 +3278,19 @@ struct BrowsingLayoutTests {
             let syncFrame = try #require(snapshot.frame(for: "clove.compare.syncToggle"))
             let setAsAFrame = try #require(snapshot.frame(for: "clove.compare.setAsA"))
 
+            for frame in [doneFrame, focusFrame, syncFrame, setAsAFrame] {
+                #expect(frame.width > 0 && frame.height > 0)
+                #expect(window.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame))
+            }
+
             if host.traitCollection.verticalBarEdge != .unspecified {
+                let railContainer = findVerticalBarView(in: window) ?? findNavigationBar(in: window)
+                let railView = try #require(railContainer)
+                let railFrame = railView.convert(railView.bounds, to: window)
+                #expect(railFrame.width > 0 && railFrame.height > 0)
+                for frame in [doneFrame, focusFrame, syncFrame, setAsAFrame] {
+                    #expect(railFrame.insetBy(dx: -1, dy: -1).contains(frame))
+                }
                 #expect(doneFrame.maxY < focusFrame.minY)
                 #expect(focusFrame.minY - doneFrame.maxY >= 18)
                 #expect(focusFrame.maxY < syncFrame.minY)
@@ -3467,12 +3479,85 @@ struct BrowsingLayoutTests {
             #expect(fixedCapsule.minX >= tightFoldMaxX + 4 - 0.5)
             #expect(fixedCapsule.maxX <= tightWindow.bounds.width - tightOriginX - 8 + 0.5)
 
-            // Restore stepping mode for Duo Portrait checks below.
+            // Restore stepping mode for narrow-hinge & Duo Portrait checks below.
             model.exitCompare()
             model.openPhoto(first)
             let restoredTimeline = DetailTimeline(
                 photos: model.photos, groups: model.groups, groupsEnabled: true)
             #expect(model.enterCompareFromDetail(timeline: restoredTimeline))
+        }
+
+        // 1c. Narrow trailing-pane Duo Landscape (Compare content width 740 pt -> 780x669 window
+        // with 20 pt horizontal container margins and foldRange 466...485 -> challengerWidth ≈ 243 pt):
+        // ViewThatFits switches stepping controls to compact diameter so [‹] [›] + MarkingToolbar
+        // stay unclipped and strictly right of the hinge without touching it.
+        do {
+            let foldRange: ClosedRange<CGFloat> = 466...485
+            let narrowWindow = UIWindow(windowScene: scene)
+            narrowWindow.frame = CGRect(x: 0, y: 0, width: 780, height: 669)
+            let tapFrames = TestTapPickerFramesBox()
+            let narrowHost = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(
+                        browsing: model,
+                        thumbnails: model.thumbnails,
+                        initialPresentation: .focus)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, true)
+                .environment(\.hasFoldRegion, true)
+                .environment(\.duoVerticalDivisionRange, foldRange)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    tapFrames.frames = frames
+                })
+            narrowHost.traitOverrides.horizontalSizeClass = .regular
+            narrowHost.traitOverrides.verticalSizeClass = .regular
+            narrowWindow.rootViewController = narrowHost
+            narrowWindow.makeKeyAndVisible()
+            defer {
+                narrowWindow.isHidden = true
+                narrowWindow.rootViewController = nil
+            }
+
+            try await waitFor("Narrow Duo Landscape Compare did not mount") {
+                self.findComparePanes(in: narrowWindow).count == 2
+                    && tapFrames.frames["clove.compare.filmstrip"] != nil
+                    && tapFrames.frames["clove.compare.prev"] != nil
+                    && tapFrames.frames["clove.compare.next"] != nil
+                    && tapFrames.frames["clove.compare.capsule"] != nil
+            }
+
+            let narrowPanes = findComparePanes(in: narrowWindow).sorted {
+                $0.convert($0.bounds, to: narrowWindow).minX
+                    < $1.convert($1.bounds, to: narrowWindow).minX
+            }
+            #expect(narrowPanes.count == 2)
+            let narrowPaneAFrame = narrowPanes[0].convert(narrowPanes[0].bounds, to: narrowWindow)
+            let narrowPaneBFrame = narrowPanes[1].convert(narrowPanes[1].bounds, to: narrowWindow)
+            let narrowOriginX = narrowPaneAFrame.minX - 8
+            let compareMaxX = narrowWindow.bounds.width - narrowOriginX
+            let compareContentWidth = compareMaxX - narrowOriginX
+            #expect(abs(compareContentWidth - 740) <= 2)
+            let windowFoldMinX = narrowOriginX + foldRange.lowerBound
+            let windowFoldMaxX = narrowOriginX + foldRange.upperBound
+
+            let narrowStrip = try #require(tapFrames.frames["clove.compare.filmstrip"])
+            let prevFrame = try #require(tapFrames.frames["clove.compare.prev"])
+            let nextFrame = try #require(tapFrames.frames["clove.compare.next"])
+            let capsuleFrame = try #require(tapFrames.frames["clove.compare.capsule"])
+            #expect(narrowStrip.maxX <= windowFoldMinX - 4 + 0.5)
+            #expect(prevFrame.width >= 31.5 && prevFrame.width <= 32.5)
+            #expect(nextFrame.width >= 31.5 && nextFrame.width <= 32.5)
+            #expect(capsuleFrame.width >= 167.5)
+            #expect(prevFrame.minX >= windowFoldMaxX + 4 - 0.5)
+            #expect(prevFrame.minX >= narrowPaneBFrame.minX - 0.5)
+            #expect(prevFrame.maxX <= nextFrame.minX)
+            #expect(nextFrame.maxX <= capsuleFrame.minX)
+            #expect(capsuleFrame.maxX <= compareMaxX - 8 + 0.5)
         }
 
         // 2. Duo Portrait (669x951): hides custom topBar, mounts native horizontal .toolbar
@@ -3585,6 +3670,102 @@ struct BrowsingLayoutTests {
                 (navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems) ?? []).allSatisfy {
                     $0.customView == nil
                 })
+        }
+
+        // 2b. Duo Portrait horizontal Live-Activity budget (439x951 = 669 - 230 pt reserve):
+        // Host NavigationStack inside a 439x951 window while sizing GridScreen at 669 pt so
+        // Compare stays open while UIKit lays out the real UINavigationBar inside 0...439.
+        do {
+            let liveActivityWindow = UIWindow(windowScene: scene)
+            liveActivityWindow.frame = CGRect(x: 0, y: 0, width: 439, height: 951)
+            let headerFrames = TestHeaderFramesBox()
+            let tapFrames = TestTapPickerFramesBox()
+            let liveActivityHost = UIHostingController(
+                rootView: NavigationStack {
+                    GridScreen(
+                        browsing: model,
+                        thumbnails: model.thumbnails,
+                        initialPresentation: .focus
+                    )
+                    .frame(width: 669)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.isDuoExpanded, true)
+                .environment(\.isDuoCover, false)
+                .environment(\.usesSystemBrowsingToolbar, true)
+                .environment(\.usesVerticalBrowsingToolbar, false)
+                .environment(\.hasFoldRegion, true)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    headerFrames.frames = frames
+                }
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                    tapFrames.frames = frames
+                })
+            liveActivityHost.traitOverrides.horizontalSizeClass = .regular
+            liveActivityHost.traitOverrides.verticalSizeClass = .regular
+            liveActivityWindow.rootViewController = liveActivityHost
+            liveActivityWindow.makeKeyAndVisible()
+            defer {
+                liveActivityWindow.isHidden = true
+                liveActivityWindow.rootViewController = nil
+            }
+
+            try await waitFor(
+                "Duo Portrait Compare (439) toolbar did not mount: \(self.describeToolbarState(in: liveActivityHost, window: liveActivityWindow, isCompare: true))"
+            ) {
+                let state = self.inspectToolbarState(
+                    in: liveActivityHost, window: liveActivityWindow, isCompare: true)
+                let hasHorizontalCenter =
+                    liveActivityHost.traitCollection.verticalBarEdge != .unspecified
+                    || self.findNavigationBar(in: liveActivityWindow).flatMap {
+                        self.centerBarGroupFrame(in: $0, relativeTo: liveActivityWindow)
+                    } != nil
+                return state.frame(for: "clove.compare.done") != nil
+                    && state.frame(for: "clove.compare.focusRegions") != nil
+                    && state.frame(for: "clove.compare.syncToggle") != nil
+                    && state.frame(for: "clove.compare.setAsA") != nil
+                    && hasHorizontalCenter
+            }
+
+            let snapshot = inspectToolbarState(
+                in: liveActivityHost, window: liveActivityWindow, isCompare: true)
+            let navBar = try #require(findNavigationBar(in: liveActivityWindow))
+            let navBarFrame = navBar.convert(navBar.bounds, to: liveActivityWindow)
+            #expect(navBarFrame.width <= 439 + 0.5)
+            #expect(model.compareSession != nil)
+            #expect(headerFrames.frames["clove.compare.topBar"] == nil)
+            #expect(snapshot.leadingIDs == ["clove.compare.done"])
+            #expect(
+                snapshot.trailingIDs == [
+                    "clove.compare.focusRegions",
+                    "clove.compare.syncToggle",
+                    "clove.compare.setAsA",
+                ])
+            let leadingRawCount =
+                navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0
+            let trailingRawCount =
+                navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
+            #expect(leadingRawCount == 1)
+            #expect(trailingRawCount == 3)
+
+            if liveActivityHost.traitCollection.verticalBarEdge == .unspecified {
+                let doneFrame = try #require(snapshot.frame(for: "clove.compare.done"))
+                let titleFrame = try #require(
+                    centerBarGroupFrame(in: navBar, relativeTo: liveActivityWindow))
+                let focusFrame = try #require(snapshot.frame(for: "clove.compare.focusRegions"))
+                let syncFrame = try #require(snapshot.frame(for: "clove.compare.syncToggle"))
+                let setAsAFrame = try #require(snapshot.frame(for: "clove.compare.setAsA"))
+                for frame in [doneFrame, titleFrame, focusFrame, syncFrame, setAsAFrame] {
+                    #expect(frame.width > 0 && frame.height > 0)
+                }
+                #expect(doneFrame.minX >= 0)
+                #expect(doneFrame.maxX <= titleFrame.minX + 2)
+                #expect(titleFrame.maxX <= focusFrame.minX + 2)
+                #expect(focusFrame.maxX <= syncFrame.minX + 2)
+                #expect(syncFrame.maxX <= setAsAFrame.minX + 2)
+                #expect(setAsAFrame.maxX <= 439 + 0.5)
+            }
         }
     }
 
@@ -4141,6 +4322,18 @@ struct BrowsingLayoutTests {
         if let navBar = view as? UINavigationBar { return navBar }
         for child in view.subviews {
             if let navBar = findNavigationBar(in: child) { return navBar }
+        }
+        return nil
+    }
+
+    private func findVerticalBarView(in view: UIView) -> UIView? {
+        if String(describing: type(of: view)).contains("VerticalBar"),
+            view.bounds.width > 0, view.bounds.height > 0
+        {
+            return view
+        }
+        for child in view.subviews {
+            if let found = findVerticalBarView(in: child) { return found }
         }
         return nil
     }
