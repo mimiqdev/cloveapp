@@ -1,5 +1,5 @@
 {
-  "commit": "3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec",
+  "commit": "f4f6c34920365785882ed0895fcc5a2869709616",
   "wholeFiles": [
     "Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift",
     "Clove/Detail/MarkAutoAdvance.swift",
@@ -117,14 +117,13 @@
       "private func expandGroup(_ groupID: GroupID)",
       "private func collapseGroup()",
       "private func performUndo()",
+      "private func performBackToGrid()",
       "private func startAutoAdvance(after kind: MarkKind, change: MarkChange, from photo: GridPhoto)",
       "private func schedule(_ plan: AutoAdvancePlan)",
       "private var rules: MarkingInputRules"
     ],
     "Clove/Detail/DetailMarkingView.swift": [
       "private var currentTimelineGroup: ActiveBrowsingGroup?",
-      "private var isReadOnlyCollapsedGroup: Bool",
-      "private var allowsMarkingInput: Bool",
       "private func captureZoomForPresentationTransition()",
       "private func loadPreview(for photo: GridPhoto) async",
       "private func refreshPrefetchForOrderChange(for photo: GridPhoto) async",
@@ -142,12 +141,14 @@
       "private func beginToolbarMarking()",
       "private func beginMarkingGesture()",
       "private func undo()",
-      "private func markKey(_ key: MarkingKey)",
-      "private func rate(_ rating: Rating)",
-      "private func choose(_ label: ColourLabel)",
-      "private func toggleReject()",
+      "private func backToGrid()",
+      "func markKey(_ key: MarkingKey)",
+      "func rate(_ rating: Rating)",
+      "func choose(_ label: ColourLabel)",
+      "func toggleReject()",
       "func applyMarkingSwipe(_ rating: Rating, touchCount: Int = 1)",
       "private func apply(_ result: MarkingResult)",
+      "@MainActor static func apply(_ result: MarkingResult, currentTimelineGroup: ActiveBrowsingGroup?, expandedGroup: ActiveBrowsingGroup?, photo: GridPhoto, canMark: Bool, actions: DetailMarkingActions, undo: () -> Void, dismissGestureGuide: () -> Void = {})",
       "private var rules: MarkingInputRules"
     ]
   }

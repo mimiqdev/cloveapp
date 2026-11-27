@@ -18,20 +18,20 @@ From the repository root, run:
 .agents/skills/browsing-workflow/scripts/check
 ```
 
-The command checks source drift, runs the current model, and runs 50 model variants. A
+The command checks source drift, runs the current model, and runs 52 model variants. A
 successful run has these results:
 
 - Covered source matches the reviewed sync commit.
 - The current model passes every invariant with an empty TLC queue.
-- All 50 model mutations fail on their named invariants.
-- The mutation summary reports `Mutation score: 50/50 expected failures caught`.
-- All 24 `Next` actions execute in full-depth reachability queries; 53 queries cover selected request
+- All 52 model mutations fail on their named invariants.
+- The mutation summary reports `Mutation score: 52/52 expected failures caught`.
+- All 24 `Next` actions execute in full-depth reachability queries; 56 queries cover selected request
   and pre-state branches. The manifest must agree with `Next`, configured properties, and mutants.
 - The separate reachability query finds the Rated-confirmed, Reject-pending, location-loss rollback
   state. Its intentionally failing predicate is a witness, not a failed safety invariant.
 
 Use `--good-only` for only the current model. Use `--mutant <name>` to reproduce one counterexample.
-Use `--witness-only` for the rollback reachability query. Use `--actions-only` for the 53 action
+Use `--witness-only` for the rollback reachability query. Use `--actions-only` for the 56 action
 queries and regenerated coverage table. All modes enforce source drift.
 The script prints each counterexample as an action path and stores full TLC output under
 `.build/formal-verification/`. The TLA+ version, download URL, checksum, and Java selection are in
@@ -56,7 +56,7 @@ results. A passing variant is a failed check because the defect did not break it
 
 ## Compare the model with the code
 
-Source sync commit: `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`. The machine-readable copy,
+Source sync commit: `f4f6c34920365785882ed0895fcc5a2869709616`. The machine-readable copy,
 whole-file list, and symbol-scoped declaration list used by the drift gate live in
 `model/source-sync.json`.
 
@@ -76,8 +76,8 @@ ambiguous symbols):
 | `Clove/Browsing/BrowsingModel.swift` | Symbol-scoped (40) | `openGeneration`, `init`, `hasFinishedScan`, `isScanning`, `openFolder`, `openPickedFolder`, `openPickedFolderNow`, `reopen`, `reopenNow`, `reopenOpenFolder`, `openPhoto`, `openGroup`, `selectGroupPhoto`, `collapseGroup`, `setSimilarGroupsEnabled`, `back`, `shownMarks`, `canMark`, `apply(_ change:to:)`, `canUndoMark`, `undoLastMark`, `request`, `requestBatch`, `stageMark`, `applyShownMarks`, `recordUndo`, `submit`, `drainActions`, `consumeActions`, `finishPendingMarks`, `persist`, `discardDisconnectedChanges`, `leaveFolder`, `showEntryAfterLeaving`, `apply(_ update:)`, `showOpenFolder`, `applyReads`, `refresh`, `reconcileRemovedPhotos`, `reconcileExpandedGroup` |
 | `Clove/Browsing/FolderLibrary.swift` | Symbol-scoped (25) | `FolderLibraryUpdate`, 14 `protocol FolderLibrary` requirements (`folder`, `photos`, `groups`, `updates`, `openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`), and 10 `extension FolderLibrary` defaults (`openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`) |
 | `Clove/Folder/FolderLibrarySession.swift` | Symbol-scoped (28) | `photos`, `groups`, `openGeneration`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `uninstallFolder`, `apply`, `rereadMarks`, `pick`, `reopen`, `openSavedFolder`, `open`, `install`, `endOpenFolder`, `scan`, `admit`, `applyReads`, `finishScan`, `failedScan`, `locationLost`, `record`, `applyConfirmedProgressChange`, `makeGrouping`, `startGrouping`, `publishGroups`, `setSimilarGroupsEnabled`, `publish` |
-| `Clove/Browsing/DetailScreen.swift` | Symbol-scoped (13) | `groupsEnabled`, `timeline`, `activeExpandedGroup`, `actions`, `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `performUndo`, `startAutoAdvance`, `schedule`, `rules` |
-| `Clove/Detail/DetailMarkingView.swift` | Symbol-scoped (27) | `currentTimelineGroup`, `isReadOnlyCollapsedGroup`, `allowsMarkingInput`, `captureZoomForPresentationTransition`, `loadPreview`, `refreshPrefetchForOrderChange`, `show`, `openingScale`, `nativeFullResolutionScale`, `renderFitAndPrefetch`, `zoomChanged`, `isAtFullResolution`, `doubleTap`, `focusRegionTapped`, `inspectFullResolution`, `retargetFullResolution`, `setZoom`, `beginToolbarMarking`, `beginMarkingGesture`, `undo`, `markKey`, `rate`, `choose`, `toggleReject`, `applyMarkingSwipe`, `apply(_ result:)`, `rules` |
+| `Clove/Browsing/DetailScreen.swift` | Symbol-scoped (14) | `groupsEnabled`, `timeline`, `activeExpandedGroup`, `actions`, `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `performUndo`, `performBackToGrid`, `startAutoAdvance`, `schedule`, `rules` |
+| `Clove/Detail/DetailMarkingView.swift` | Symbol-scoped (27) | `currentTimelineGroup`, `captureZoomForPresentationTransition`, `loadPreview`, `refreshPrefetchForOrderChange`, `show`, `openingScale`, `nativeFullResolutionScale`, `renderFitAndPrefetch`, `zoomChanged`, `isAtFullResolution`, `doubleTap`, `focusRegionTapped`, `inspectFullResolution`, `retargetFullResolution`, `setZoom`, `beginToolbarMarking`, `beginMarkingGesture`, `undo`, `backToGrid`, `markKey`, `rate`, `choose`, `toggleReject`, `applyMarkingSwipe`, `apply(_ result:)`, `@MainActor static func apply(...)`, `rules` |
 
 Two pure stateless UI dispatch shells are intentionally excluded from `model/source-sync.json`
 because they own zero workflow state-machine rules (`GridScreen.swift` dispatches `openPhoto` /
@@ -89,7 +89,7 @@ Before trusting a run after a source change, compare the tracked files against t
 run the drift gate:
 
 ```sh
-git diff 3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec -- \
+git diff f4f6c34920365785882ed0895fcc5a2869709616 -- \
   Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift \
   Clove/Detail/MarkAutoAdvance.swift \
   Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift \
@@ -126,6 +126,13 @@ The earlier always-fit interpretation was a specification error. Correcting it f
 owner-approved exception; it does not weaken a rule to conceal a product bug. See
 [the correspondence record](references/findings.md).
 
+Marking a collapsed group's representative in Timeline (`#507`, PR `#512`) immediately enters Group
+Focus on that representative (preserving zoom), plans auto-advance against the expanded group, and
+applies the mark. `CollapsedStackMarkEntersGroupFocus` checks all three effects and is verified by
+three dedicated mutants (`collapsed-stack-mark-stays-timeline`,
+`collapsed-stack-mark-plans-before-expand`, `collapsed-stack-mark-resets-zoom`). Undo reverts the
+mark while remaining in Group Focus.
+
 ## Audit every claimed action
 
 Read [the complete action/property/mutation table](references/actions.md). The authoritative inventory
@@ -151,12 +158,12 @@ assumptions; these checks are not an independent proof of arbitrary Swift or tho
 All outcome mutations execute their actions with an incorrect assignment. Extra boundary mutations
 admit illegal outward requests; none is credited for merely making an action unreachable. Each
 positive query retains all normal properties and intentionally violates only its action witness.
-An unreachable action or branch causes that query to fail. The 53 witnesses establish existence,
+An unreachable action or branch causes that query to fail. The 56 witnesses establish existence,
 not that every enabled request is eventually performed or that every possible guard change is caught.
 These are transition postconditions and bounded safety checks, not liveness.
 
-The full command now makes 105 TLC runs: one baseline, 50 mutations, one rollback witness, and
-53 action/branch witnesses. Its total runtime can exceed a shell tool's 60-second invocation window;
+The full command now makes 110 TLC runs: one baseline, 52 mutations, one rollback witness, and
+56 action/branch witnesses. Its total runtime can exceed a shell tool's 60-second invocation window;
 allow the command to finish and inspect its exit code. No depth, queue, state, or mutation-search
 bound was reduced. Logs and generated tables remain under the ignored build directory.
 
@@ -203,7 +210,7 @@ prove those Swift implementations. Keep the full and chart configurations' invar
 ## Separate the evidence
 
 - Bounded model safety covers all enabled action orders through depth 12 in the stated small world.
-- Model mutation sensitivity covers 50 injected defects and their expected invariants.
+- Model mutation sensitivity covers 52 injected defects and their expected invariants.
 - Source correspondence comes from manual review at the sync commit and Git drift detection after
   that review. The drift gate requires another review when covered source changes. It does not
   establish arbitrary Swift behavior with regexes or model-only mutations.

@@ -1,7 +1,38 @@
 # Model correspondence and run evidence
 
-Source sync commit: `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`.
+Source sync commit: `f4f6c34920365785882ed0895fcc5a2869709616`.
 No product defect is diagnosed by this verification revision.
+
+## Collapsed group marking and sync at `f4f6c34` (`#507` / PR `#512`)
+
+Changes between `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec` and
+`f4f6c34920365785882ed0895fcc5a2869709616` were audited across all 4 whole-file targets and 5
+symbol-scoped mixed files before advancing `model/source-sync.json`:
+
+- **#507 / PR #512 (`f4f6c34`, `feat(detail): enter Group Focus when marking a collapsed group representative`) — Promise changed on purpose:**
+  - *Evidence:* Commit `f4f6c34`, `DetailMarkingView.apply(_:currentTimelineGroup:expandedGroup:photo:canMark:actions:undo:dismissGestureGuide:)`, `MarkingInputRules.swift` doc comment, `DetailDisplayPresentationTests.markingCollapsedGroupRepresentativeOrdersExpandBeforePlanAndApplyAcrossInputs`, `markingCollapsedGroupRepresentativeEntersGroupFocusAdvancesRejectsAndUndoStays`, `DetailTimelineTests.markingCollapsedRepresentativePlansAgainstExpandedGroupAndUnlocksRejectUnmarked`, and `CloveFlowTests.testSwipeRatingCollapsedGroupRepresentativeEntersGroupFocus`.
+  - *Old wording (`CollapsedStackIsReadOnly`):* Collapsed group stacks in Timeline rejected all marking inputs (`isReadOnlyCollapsedGroup` / `allowsMarkingInput`).
+  - *New wording (`CollapsedStackMarkEntersGroupFocus`):* Marking a collapsed group's representative in Timeline immediately expands into Group Focus on that representative (keeping zoom/anchor via `refreshPrefetchForOrderChange`), plans auto-advance against the expanded group (`GroupAdvanceBeforeMark` before `apply` mutates marks), and applies the mark. Undo reverts the mark while staying in Group Focus (`UndoReturnsToTarget`).
+  - *Model/mutant updates:* Removed the collapsed-stack exclusion from `CanMarkCurrent` and `ReferenceAdmissible`, updated `Mark` and `ReferenceMark` to enter Group Focus and plan `GroupAdvanceBeforeMark` when `route = "Timeline" /\ grouped /\ p \in MemberSet(activeFolder)`, replaced `CollapsedStackIsReadOnly` with `CollapsedStackMarkEntersGroupFocus` in both `BrowsingWorkflow.cfg` and `BrowsingWorkflowChart.cfg`, replaced `collapsed-stack-marking` with three mutants (`collapsed-stack-mark-stays-timeline`, `collapsed-stack-mark-plans-before-expand`, `collapsed-stack-mark-resets-zoom`), and added three `Mark` witnesses (`collapsed-stack`, `collapsed-stack-100`, `collapsed-stack-second-pass`).
+- **#506 / PR #511 (`b338132`) — No model effect:** Removed the keep-before-move grid from Move Rejects, deleting `.keep`, `kept:`, and kept-edit restore tracking from `PhotoActionPipeline.swift` and `BrowsingModel.consumeActions()`. Move Rejects remains outside the modeled state machine.
+- **#499 / PR #509 (`d31d396`) — No model effect:** Removed VoiceOver-only `UIAccessibility.post` announcements from `BrowsingModel` and `DetailScreen`.
+- **#508 (`d452ea3`) and #505 / PR #510 (`5823cb9`) — No model effect:** Added Compare portrait rotate toast and `allReviewedToast` dismissal/context tracking in `DetailScreen` (`actions`, `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `performUndo`, `schedule`) and `DetailMarkingView`. Added `DetailScreen :: private func performBackToGrid()`, `DetailMarkingView :: private func backToGrid()`, and `DetailMarkingView :: @MainActor static func apply(...)` to `model/source-sync.json`, removed deleted `isReadOnlyCollapsedGroup` / `allowsMarkingInput`, and updated `markKey`/`rate`/`choose`/`toggleReject` visibility prefixes (134 tracked symbols total).
+
+Real-source scratch-break verification at `f4f6c34920365785882ed0895fcc5a2869709616` inside
+`DetailMarkingView.apply(_:currentTimelineGroup:expandedGroup:photo:canMark:actions:undo:dismissGestureGuide:)`:
+
+```diff
+-            if let group = currentTimelineGroup {
+-                actions.expandGroup(group.id)
+-            }
++            if let group = currentTimelineGroup {
++                _ = group
++            }
+```
+
+`.agents/skills/browsing-workflow/scripts/check --good-only` exited `1` before TLC and reported:
+`Clove/Detail/DetailMarkingView.swift :: @MainActor static func apply(_ result: MarkingResult, currentTimelineGroup: ActiveBrowsingGroup?, expandedGroup: ActiveBrowsingGroup?, photo: GridPhoto, canMark: Bool, actions: DetailMarkingActions, undo: () -> Void, dismissGestureGuide: () -> Void = {}) [drift]: declaration changed (baseline lines 3156-3197, working tree lines 3156-3197)`.
+The Swift file was restored with `git checkout -- Clove/Detail/DetailMarkingView.swift`.
 
 ## Symbol-scoped drift tracking and sync at `3aa0f2c`
 
@@ -173,11 +204,10 @@ Run from the repository root:
 ```
 
 The current run uses TLA+ tools 1.7.4, one TLC worker, depth 12, two folders with three photos each,
-and `MaxPending = 2`. It generated 1,245,725 states, found 370,189 distinct states, exhausted the
-queue, and passed all 35 configured safety and transition-effect invariants. All 50 model mutations
+and `MaxPending = 2`. It generated 1,305,983 states, found 385,837 distinct states, exhausted the
+queue, and passed all 35 configured safety and transition-effect invariants. All 52 model mutations
 failed on relevant configured properties. The separate full-depth reachability pass found all 24
-actions and all 53 selected branch witnesses. The full normal gate on this revision's final
-verification content exited 0 in 101.666 seconds. No new run mode was added.
+actions and all 56 selected branch witnesses. No new run mode was added.
 
 No world, queue, or depth bound changed in the action audit or Undo zoom correction. The state
 count remains 1,245,725 generated and 370,189 distinct after the zoom fix. The earlier increase
@@ -275,11 +305,10 @@ The unchanged normal command exited 1 before TLC and named
 This is drift detection, not semantic proof. Review the source and model, then rerun. Do not advance the sync commit merely to bypass review.
 ```
 
-The source was restored. Covered product files have no diff, the sync commit is unchanged, and the
-normal command passed the drift gate, the model, mutation checks, and the rollback witness.
-The current action audit additionally checks all 35 invariants, 50 mutants, and 53 action/branch
-witnesses. The reviewed source commit (`3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`), 4 whole-file
-targets, and 133 tracked declarations across 5 mixed files have not changed.
+The source was restored. Covered product files have no diff at sync commit
+`f4f6c34920365785882ed0895fcc5a2869709616`, and the normal command passed the drift gate (4
+whole-file targets and 134 tracked declarations across 5 mixed files), all 35 invariants, 52
+mutants, the rollback witness, and 56 action/branch witnesses across 24 actions.
 
 ## Evidence limits
 

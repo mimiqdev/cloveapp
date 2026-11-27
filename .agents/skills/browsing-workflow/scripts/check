@@ -31,11 +31,52 @@ BUILD = ROOT / ".build" / "formal-verification"
 JAR = BUILD / "tools" / f"tla2tools-{TLA_VERSION}.jar"
 
 MUTANTS = {
-    "collapsed-stack-marking": {
-        "old": '/\\ (route = "GroupFocus" \\/ ~grouped \\/ currentPhoto = Standalone(activeFolder))',
-        "new": "/\\ TRUE",
-        "invariant": "CollapsedStackIsReadOnly",
-        "defect": "DetailMarkingView.allowsMarkingInput accepts a collapsed Timeline stack.",
+    "collapsed-stack-mark-stays-timeline": {
+        "action": "Mark(p, value)",
+        "old": r"""    /\ route' = IF InGroupOnMark(p) THEN "GroupFocus" ELSE "Timeline"
+    /\ expandedGroup' = IF InGroupOnMark(p) THEN activeFolder ELSE NoFolder""",
+        "new": r"""    /\ route' = IF route = "GroupFocus" THEN "GroupFocus" ELSE "Timeline"
+    /\ expandedGroup' = IF route = "GroupFocus" THEN activeFolder ELSE NoFolder""",
+        "extra": [
+            (
+                r"""    /\ advance' =
+        IF InGroupOnMark(p) THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
+        ELSE TimelineAdvance(activeFolder, p, grouped, marks)""",
+                r"""    /\ advance' =
+        IF route = "GroupFocus" THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
+        ELSE IF grouped /\ p \in MemberSet(activeFolder) THEN NoAdvance
+        ELSE TimelineAdvance(activeFolder, p, grouped, marks)""",
+            )
+        ],
+        "invariant": "CollapsedStackMarkEntersGroupFocus",
+        "defect": "DetailMarkingView.apply omits expandGroup when marking a collapsed Timeline stack.",
+    },
+    "collapsed-stack-mark-plans-before-expand": {
+        "action": "Mark(p, value)",
+        "old": r"""    /\ advance' =
+        IF InGroupOnMark(p) THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
+        ELSE TimelineAdvance(activeFolder, p, grouped, marks)""",
+        "new": r"""    /\ advance' =
+        IF route = "GroupFocus" THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
+        ELSE IF grouped /\ p \in MemberSet(activeFolder) THEN NoAdvance
+        ELSE TimelineAdvance(activeFolder, p, grouped, marks)""",
+        "invariant": "CollapsedStackMarkEntersGroupFocus",
+        "defect": "DetailMarkingView.apply plans auto-advance before expanding a collapsed Timeline stack.",
+    },
+    "collapsed-stack-mark-resets-zoom": {
+        "action": "Mark(p, value)",
+        "old": r"currentPhoto, scale, anchor, diskMarks",
+        "new": r"currentPhoto, diskMarks",
+        "extra": [
+            (
+                r"/\ event'",
+                r"""/\ scale' = IF EntersGroupOnMark(p) THEN "fit" ELSE scale
+    /\ anchor' = IF EntersGroupOnMark(p) THEN "centre" ELSE anchor
+    /\ event'""",
+            )
+        ],
+        "invariant": "CollapsedStackMarkEntersGroupFocus",
+        "defect": "Marking a collapsed Timeline stack incorrectly resets zoom when entering Group Focus.",
     },
     "early-group-exit": {
         "old": "ELSE IF NextUnmarkedAfter(f, p, m) /= NoPhoto THEN",

@@ -473,7 +473,7 @@ class RealRepoSanityTests(unittest.TestCase):
         self.assertTrue(report.passed, [f.format_line() for f in report.failures])
         self.assertEqual(len(report.whole_files), 4)
         self.assertEqual(report.symbol_file_count, 5)
-        self.assertEqual(report.symbol_count, 133)
+        self.assertEqual(report.symbol_count, 134)
 
         sync_data = json.loads(SKILL_SYNC.read_text(encoding="utf-8"))
         browsing = sync_data["symbolFiles"]["Clove/Browsing/BrowsingModel.swift"]
