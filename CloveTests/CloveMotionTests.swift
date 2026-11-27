@@ -11,11 +11,13 @@ struct CloveMotionTests {
         #expect(CloveMotion.micro(reduceMotion: false) != nil)
         #expect(CloveMotion.chrome(reduceMotion: false) != nil)
         #expect(CloveMotion.progress(reduceMotion: false) != nil)
+        #expect(CloveMotion.focusArrival(reduceMotion: false) != nil)
         #expect(CloveMotion.nudge(reduceMotion: false) != nil)
 
         #expect(CloveMotion.micro(reduceMotion: true) == nil)
         #expect(CloveMotion.chrome(reduceMotion: true) == nil)
         #expect(CloveMotion.progress(reduceMotion: true) == nil)
+        #expect(CloveMotion.focusArrival(reduceMotion: true) == nil)
         #expect(CloveMotion.nudge(reduceMotion: true) == nil)
     }
 

@@ -445,9 +445,11 @@ struct CompareView: View {
             badgeTitle: side == .reference ? "A" : "B",
             photoID: photoID,
             photo: photo,
+            photoSet: browsing.scannedSet(for: photoID)?.photoSet,
             marks: browsing.shownMarks(for: photoID),
             isActive: isActive,
             isSyncLocked: session.isSyncLocked,
+            hasFolderLocationLoss: browsing.folderLocationLoss != nil,
             controller: controller,
             images: images,
             thumbnails: browsing.thumbnails,
@@ -970,6 +972,7 @@ private final class ComparePaneController {
     var upgradeToken: UUID?
     var zoomReportTask: Task<Void, Never>?
     var screenPixels: Int = 2400
+    let progressiveDecode = RawProgressiveDecodeController()
 
     init(side: CompareSide) {
         self.side = side
@@ -982,6 +985,42 @@ private final class ComparePaneController {
         upgradeToken = nil
         zoomReportTask?.cancel()
         zoomReportTask = nil
+        progressiveDecode.reset()
+    }
+
+    var isScaleAtFullResolution: Bool {
+        DetailProgressiveDecodeSupport.isAtOrAboveFullResolution(
+            scale: scale,
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale)
+    }
+
+    var isFullResolutionUpgradeInFlight: Bool {
+        upgradeTask != nil && upgradeRequest?.need == .fullResolution
+    }
+
+    var isShowingProgressiveZoomState: Bool {
+        DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: scale,
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase)
+    }
+
+    func progressiveZoomText(language: ResolvedAppLanguage) -> String {
+        DetailProgressiveDecodeSupport.zoomLabelText(
+            scale: scale,
+            scaledZoomText: zoomLabel(language: language),
+            fitText: AppLocalization.string("Fit", language: language),
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase,
+            language: language) ?? zoomLabel(language: language)
     }
 
     var pixelSizeOfShown: CGSize {
@@ -1081,9 +1120,11 @@ private struct ComparePaneView: View {
     let badgeTitle: String
     let photoID: PhotoIdentity
     let photo: GridPhoto?
+    let photoSet: PhotoSet?
     let marks: PhotoMarks
     let isActive: Bool
     let isSyncLocked: Bool
+    let hasFolderLocationLoss: Bool
     let controller: ComparePaneController
     let images: any DetailImageSource
     let thumbnails: any GridThumbnailSource
@@ -1126,6 +1167,24 @@ private struct ComparePaneView: View {
             controller.inspectedFocusRegionID = nil
             controller.focusAnalysisID = UUID()
             controller.focusRegionState = DetailFocusRegionState()
+        }
+        .onChange(of: hasFolderLocationLoss) { _, isLost in
+            guard controller.isShowingProgressiveZoomState else { return }
+            if isLost {
+                DetailProgressiveDecodeSupport.syncAtFullResolution(
+                    controller: controller.progressiveDecode,
+                    photoID: photoID,
+                    fileName: photo?.fileName,
+                    photoSet: photoSet,
+                    displayMode: displayMode,
+                    shown: controller.shown,
+                    isPreviewOnly: controller.previewOnly,
+                    isLocationLost: true,
+                    startingUpgrade: false)
+            } else if controller.progressiveDecode.phase == .previewOnly, !controller.previewOnly {
+                controller.progressiveDecode.reset()
+                upgradeIfNeeded(for: photoID)
+            }
         }
         .task(id: photoID) {
             await loadPixels(for: photoID)
@@ -1172,11 +1231,19 @@ private struct ComparePaneView: View {
 
             Spacer(minLength: 8)
 
-            Text(controller.zoomLabel(language: language))
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.clove.text.secondary)
-                .lineLimit(1)
-                .accessibilityIdentifier("\(identifierPrefix).zoom")
+            DetailProgressiveDecodeReadout(
+                photoID: photoID,
+                prefixText: nil,
+                zoomText: controller.progressiveZoomText(language: language),
+                showsProgressiveState: controller.isShowingProgressiveZoomState,
+                phase: controller.progressiveDecode.phase,
+                language: language,
+                tone: .header,
+                font: .caption,
+                lineLimit: 1,
+                identifier: "\(identifierPrefix).zoom"
+            )
+            .layoutPriority(1)
 
             ComparePaneMarksSummary(
                 marks: marks,
@@ -1428,6 +1495,22 @@ private struct ComparePaneView: View {
         if image.limitation != nil {
             controller.previewOnly = true
         }
+        if targetID == photoID {
+            if image.limitation == nil, image.quality == .nativeRAW || image.isBestAvailable {
+                controller.progressiveDecode.completeIfTracking(photoID: targetID)
+            } else if image.limitation != nil, controller.isShowingProgressiveZoomState {
+                DetailProgressiveDecodeSupport.syncAtFullResolution(
+                    controller: controller.progressiveDecode,
+                    photoID: targetID,
+                    fileName: photo?.fileName,
+                    photoSet: photoSet,
+                    displayMode: displayMode,
+                    shown: image,
+                    isPreviewOnly: true,
+                    isLocationLost: hasFolderLocationLoss,
+                    startingUpgrade: false)
+            }
+        }
         if controller.loadedPhotoID != targetID {
             controller.loadedPhotoID = targetID
             let openingCapture: KeptCompareZoom? =
@@ -1514,32 +1597,79 @@ private struct ComparePaneView: View {
 
     private func handleZoomScaleChange(_ newScale: CGFloat, fromUserGesture: Bool) {
         controller.scale = newScale
-        guard newScale > DetailFitScale.tolerance else {
-            controller.inspectedFocusRegionID = nil
-            controller.zoomMode = .fit
-            controller.commandedScale = 1
-            controller.anchor = .centre
-            if fromUserGesture && controller.loadedPhotoID != photoID {
-                controller.keptZoom = nil
-            }
-            controller.upgradeTask?.cancel()
-            controller.upgradeTask = nil
-            controller.upgradeRequest = nil
-            controller.upgradeToken = nil
-            return
-        }
         if abs(newScale - controller.commandedScale) > 0.01 {
             controller.zoomMode = .manual
+        }
+        guard newScale > DetailFitScale.tolerance else {
+            controller.inspectedFocusRegionID = nil
+            if !controller.zoomMode.isFullResolution {
+                controller.zoomMode = .fit
+                controller.commandedScale = 1
+                controller.anchor = .centre
+                if fromUserGesture && controller.loadedPhotoID != photoID {
+                    controller.keptZoom = nil
+                }
+                controller.upgradeTask?.cancel()
+                controller.upgradeTask = nil
+                controller.upgradeRequest = nil
+                controller.upgradeToken = nil
+                controller.progressiveDecode.reset()
+            }
+            return
+        }
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: newScale,
+            zoomModeIsFullResolution: controller.zoomMode.isFullResolution,
+            fullResolutionPixels: controller.shown?.fullResolutionPixels,
+            viewSize: controller.viewSize,
+            screenScale: controller.displayScale,
+            isFullResolutionUpgradeInFlight: controller.isFullResolutionUpgradeInFlight)
+            && controller.progressiveDecode.phase != .idle
+        {
+            controller.progressiveDecode.reset()
         }
         upgradeIfNeeded(for: photoID)
     }
 
     private func upgradeIfNeeded(for targetID: PhotoIdentity) {
-        guard controller.scale > DetailFitScale.tolerance,
-            !controller.previewOnly,
-            let shown = controller.shown,
-            controller.requestPixels(scale: controller.scale) > max(shown.width, shown.height)
+        guard controller.zoomMode.isFullResolution || controller.scale > DetailFitScale.tolerance
+        else {
+            controller.progressiveDecode.reset()
+            return
+        }
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: controller.scale,
+            zoomModeIsFullResolution: controller.zoomMode.isFullResolution,
+            fullResolutionPixels: controller.shown?.fullResolutionPixels,
+            viewSize: controller.viewSize,
+            screenScale: controller.displayScale,
+            isFullResolutionUpgradeInFlight: controller.isFullResolutionUpgradeInFlight)
+            && controller.progressiveDecode.phase != .idle
+        {
+            controller.progressiveDecode.reset()
+        }
+        if (controller.previewOnly || hasFolderLocationLoss), controller.isScaleAtFullResolution {
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: controller.progressiveDecode,
+                photoID: targetID,
+                fileName: photo?.fileName,
+                photoSet: photoSet,
+                displayMode: displayMode,
+                shown: controller.shown,
+                isPreviewOnly: controller.previewOnly,
+                isLocationLost: hasFolderLocationLoss,
+                startingUpgrade: false)
+            return
+        }
+        guard !controller.previewOnly,
+            !hasFolderLocationLoss,
+            let shown = controller.shown
         else { return }
+        let needsUpgrade =
+            (controller.zoomMode.isFullResolution && shown.fullResolutionPixels == nil)
+            ? !shown.isBestAvailable
+            : (controller.requestPixels(scale: controller.scale) > max(shown.width, shown.height))
+        guard needsUpgrade else { return }
         let need: DetailPixelRequest.Need =
             controller.isAtFullResolution ? .fullResolution : .morePixels
         let request = DetailPixelRequest(
@@ -1547,7 +1677,11 @@ private struct ComparePaneView: View {
             need: need,
             mode: displayMode,
             screenPixels: controller.screenPixels)
-        if controller.upgradeTask != nil, controller.upgradeRequest == request {
+        if controller.upgradeTask != nil,
+            let existing = controller.upgradeRequest,
+            existing == request
+                || (existing.need == .fullResolution && request.need == .fullResolution)
+        {
             return
         }
         launchUpgradeTask(for: targetID, request: request)
@@ -1558,6 +1692,19 @@ private struct ComparePaneView: View {
         let token = UUID()
         controller.upgradeRequest = request
         controller.upgradeToken = token
+        let decodeToken: RawProgressiveDecodeToken? =
+            request.need == .fullResolution
+            ? DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: controller.progressiveDecode,
+                photoID: targetID,
+                fileName: photo?.fileName,
+                photoSet: photoSet,
+                displayMode: displayMode,
+                shown: controller.shown,
+                isPreviewOnly: controller.previewOnly,
+                isLocationLost: hasFolderLocationLoss,
+                startingUpgrade: true)
+            : nil
         controller.upgradeTask = Task {
             defer {
                 if controller.upgradeToken == token {
@@ -1568,19 +1715,40 @@ private struct ComparePaneView: View {
             }
             let outcome = await images.image(
                 for: targetID, request: request, consumer: controller.consumer)
-            guard !Task.isCancelled, self.photoID == targetID else { return }
+            guard !Task.isCancelled, self.photoID == targetID else {
+                if let decodeToken {
+                    controller.progressiveDecode.cancel(token: decodeToken)
+                }
+                return
+            }
             if case .image(let image) = outcome {
                 show(image, for: targetID)
+            }
+            if request.need == .fullResolution {
+                DetailProgressiveDecodeSupport.settle(
+                    controller: controller.progressiveDecode,
+                    token: decodeToken,
+                    outcome: outcome,
+                    photoID: targetID,
+                    fileName: photo?.fileName,
+                    photoSet: photoSet,
+                    isLocationLost: hasFolderLocationLoss)
             }
         }
     }
 
     private func handleDoubleTap(at tap: DetailDoubleTapLocation) {
         guard settings.doubleTap != .off else { return }
-        guard controller.scale <= DetailFitScale.tolerance else {
+        guard controller.scale <= DetailFitScale.tolerance && !controller.zoomMode.isFullResolution
+        else {
             controller.inspectedFocusRegionID = nil
             controller.keptZoom = nil
             controller.zoomMode = .fit
+            controller.upgradeTask?.cancel()
+            controller.upgradeTask = nil
+            controller.upgradeRequest = nil
+            controller.upgradeToken = nil
+            controller.progressiveDecode.reset()
             controller.issueZoom(.fit)
             onViewportChanged(DetailZoomSnapshot(scale: 1, anchor: .centre))
             return
@@ -1621,7 +1789,26 @@ private struct ComparePaneView: View {
             controller.issueZoom(.scale(target, anchor: anchor))
             onViewportChanged(DetailZoomSnapshot(scale: target, anchor: chosen))
         }
-        guard !controller.previewOnly else { return }
+        if controller.previewOnly || hasFolderLocationLoss {
+            controller.upgradeTask?.cancel()
+            controller.upgradeTask = nil
+            controller.upgradeRequest = nil
+            controller.upgradeToken = nil
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: controller.progressiveDecode,
+                photoID: photoID,
+                fileName: photo?.fileName,
+                photoSet: photoSet,
+                displayMode: displayMode,
+                shown: shown,
+                isPreviewOnly: controller.previewOnly,
+                isLocationLost: hasFolderLocationLoss,
+                startingUpgrade: false)
+            return
+        }
+        if controller.upgradeTask != nil, controller.upgradeRequest?.need == .fullResolution {
+            return
+        }
         let request = DetailPixelRequest(
             displayPixels: controller.requestPixels(scale: controller.scale),
             need: .fullResolution,
