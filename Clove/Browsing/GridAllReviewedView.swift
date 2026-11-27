@@ -105,6 +105,38 @@ enum GridEmptyStateKind: Equatable, Sendable {
     case allReviewed(GridReviewSummary)
     case filteredEmpty(isOpening: Bool, canClearFilters: Bool)
 
+    /// O(1) trigger predicate avoiding `GridDisplay` cell construction or photo scans during
+    /// ordinary browsing.
+    static func isAllReviewed(
+        isFolderOpening: Bool,
+        hasFolderContents: Bool,
+        visiblePhotoCount: Int,
+        filter: PhotoFilter,
+        labelFilter: LabelColour?,
+        metadataFilter: PhotoMetadataFilter,
+        placedPhotoCount: Int
+    ) -> Bool {
+        !isFolderOpening
+            && hasFolderContents
+            && visiblePhotoCount == 0
+            && filter == .unmarked
+            && labelFilter == nil
+            && metadataFilter.isEmpty
+            && placedPhotoCount > 0
+    }
+
+    @MainActor
+    static func isAllReviewed(browsing: BrowsingModel) -> Bool {
+        isAllReviewed(
+            isFolderOpening: browsing.isFolderOpening,
+            hasFolderContents: browsing.hasFolderContents,
+            visiblePhotoCount: browsing.photos.count,
+            filter: browsing.state.filter,
+            labelFilter: browsing.labelFilter,
+            metadataFilter: browsing.metadataFilter,
+            placedPhotoCount: browsing.allPlacedPhotos.count)
+    }
+
     static func resolve(
         isFolderOpening: Bool,
         hasFolderContents: Bool,
@@ -120,13 +152,14 @@ enum GridEmptyStateKind: Equatable, Sendable {
         if !hasFolderContents && !isFolderOpening {
             return .emptyFolder
         }
-        if !isFolderOpening,
-            hasFolderContents,
-            visiblePhotoCount == 0,
-            filter == .unmarked,
-            labelFilter == nil,
-            metadataFilter.isEmpty,
-            !placedPhotos.isEmpty
+        if isAllReviewed(
+            isFolderOpening: isFolderOpening,
+            hasFolderContents: hasFolderContents,
+            visiblePhotoCount: visiblePhotoCount,
+            filter: filter,
+            labelFilter: labelFilter,
+            metadataFilter: metadataFilter,
+            placedPhotoCount: placedPhotos.count)
         {
             return .allReviewed(
                 GridReviewSummary(
@@ -163,6 +196,7 @@ struct GridAllReviewedView: View {
 
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @ScaledMetric(relativeTo: .title2) private var badgeSize: CGFloat = 56
 
     private var effectiveBadgeSize: CGFloat {
@@ -182,6 +216,16 @@ struct GridAllReviewedView: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.grid.allReviewed")
         .reportHeaderControlFrame("clove.grid.allReviewed")
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            switch request?.id {
+            case "clove.grid.allReviewed.moveRejects" where summary.offersMoveRejects:
+                onMoveRejects()
+            case "clove.grid.allReviewed.showAll":
+                onShowAll()
+            default:
+                break
+            }
+        }
     }
 
     private var content: some View {
@@ -250,9 +294,14 @@ struct GridAllReviewedView: View {
 
     static func pillForegroundToken(on fill: ThemeColour, in theme: CloveTheme) -> ThemeColour {
         let white = ThemeColour(hex: 0xFFFFFF)
-        guard theme.appearance == .dark else { return white }
+        if contrastRatio(fill, white) >= 4.5 {
+            return white
+        }
         let canvas = theme.tokens.canvas
-        return contrastRatio(fill, white) >= contrastRatio(fill, canvas) ? white : canvas
+        if theme.appearance == .dark, contrastRatio(fill, canvas) >= 4.5 {
+            return canvas
+        }
+        return ThemeColour(hex: 0x000000)
     }
 
     static func contrastRatio(_ lhs: ThemeColour, _ rhs: ThemeColour) -> Double {

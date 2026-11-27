@@ -125,16 +125,32 @@ struct GridScreen: View {
         ).supportsCompare
     }
     private var showsMoveRejects: Bool {
-        store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
-            && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
-    }
-    private var emptyStateKind: GridEmptyStateKind {
-        GridEmptyStateKind.resolve(
-            browsing: browsing, moveRejectsEnabled: store.settings.moveRejectsEnabled)
+        Self.showsMoveRejectsControl(
+            moveRejectsEnabled: store.settings.moveRejectsEnabled,
+            rejectedPhotoCount: browsing.rejectedPhotoCount,
+            isFolderOpening: browsing.isFolderOpening,
+            isMovingRejects: browsing.isMovingRejects,
+            isSelecting: isSelecting,
+            isShowingAllReviewed: isShowingAllReviewed)
     }
     private var isShowingAllReviewed: Bool {
-        if cells.isEmpty, case .allReviewed = emptyStateKind { return true }
-        return false
+        GridEmptyStateKind.isAllReviewed(browsing: browsing)
+    }
+
+    static func showsMoveRejectsControl(
+        moveRejectsEnabled: Bool,
+        rejectedPhotoCount: Int,
+        isFolderOpening: Bool,
+        isMovingRejects: Bool,
+        isSelecting: Bool,
+        isShowingAllReviewed: Bool
+    ) -> Bool {
+        moveRejectsEnabled
+            && rejectedPhotoCount > 0
+            && !isFolderOpening
+            && !isMovingRejects
+            && !isSelecting
+            && !isShowingAllReviewed
     }
 
     private var activeToastKey: String? {
@@ -242,7 +258,7 @@ struct GridScreen: View {
                 filterHandoff.dismissFiltersAndCancelPending()
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isRegular, !usesVerticalGridDock, showsMoveRejects, !isShowingAllReviewed {
+                if !isRegular, !usesVerticalGridDock, showsMoveRejects {
                     MoveRejectsButton(identifier: "clove.grid.moveRejects") {
                         presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
@@ -256,9 +272,9 @@ struct GridScreen: View {
                 }
             }
             .animation(
-                (!isRegular && !usesVerticalGridDock && showsMoveRejects && !isShowingAllReviewed)
+                (!isRegular && !usesVerticalGridDock && showsMoveRejects)
                     ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                value: showsMoveRejects && !isShowingAllReviewed
+                value: showsMoveRejects
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting && !(usesDock && browsing.state.route == .detail) {
@@ -1054,7 +1070,9 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        switch emptyStateKind {
+        switch GridEmptyStateKind.resolve(
+            browsing: browsing, moveRejectsEnabled: store.settings.moveRejectsEnabled)
+        {
         case .emptyFolder:
             EntryEmptyState(isEmptyFolder: true) { isPickingEmptyFolder = true }
                 .accessibilityIdentifier("clove.grid.empty")
