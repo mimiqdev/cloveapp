@@ -6817,6 +6817,28 @@
         }
       }
     },
+    "Preview only": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅预览"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅預覽"
+          }
+        }
+      }
+    },
     "Preview only — full resolution is unavailable.": {
       "localizations": {
         "en": {

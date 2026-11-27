@@ -39,6 +39,12 @@ enum CloveMotion {
         reduceMotion ? nil : .easeInOut(duration: progressDuration)
     }
 
+    /// Subtle ease-out settle for progressive RAW arrival (`focusArrivalDuration`), instant under
+    /// Reduce Motion.
+    static func focusArrival(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeOut(duration: focusArrivalDuration)
+    }
+
     static func nudge(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.52)
     }

@@ -651,6 +651,24 @@ struct AppLocalizationTests {
                 == "對比相片 IMG_02.ARW")
     }
 
+    @Test func rawProgressiveDecodeStringsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Preview", "Preview", "预览", "預覽"),
+            ("Preview only", "Preview only", "仅预览", "僅預覽"),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+        #expect(
+            AppLocalization.format("%@ · %@", language: .simplifiedChinese, "100%", "预览")
+                == "100% · 预览")
+        #expect(
+            AppLocalization.format("%@ · %@", language: .traditionalChinese, "100%", "預覽")
+                == "100% · 預覽")
+    }
+
     @Test func groupPickerStringsLocalizeAcrossLanguages() {
         let pairs: [(key: String, en: String, hans: String, hant: String)] = [
             ("Show group photos", "Show group photos", "显示组内照片", "顯示群組相片"),

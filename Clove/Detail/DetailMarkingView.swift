@@ -199,6 +199,12 @@ struct DetailMarkingView: View {
 
     /// The debounced render request a pinch may need (G1 "Scheduling and cache").
     @State private var upgradeTask: Task<Void, Never>?
+    @State private var activeUpgradePhotoID: PhotoIdentity?
+    @State private var activeUpgradeNeed: DetailPixelRequest.Need?
+    @State private var activeUpgradeToken: UUID?
+
+    /// 250 ms delay-gated 100% RAW progressive decode readout state.
+    @State private var progressiveDecode = RawProgressiveDecodeController()
 
     /// The rating or Reject badge the marking swipe draws near the finger (PRD P0-06).
     @State private var swipeFeedback = DetailSwipeFeedback()
@@ -252,11 +258,30 @@ struct DetailMarkingView: View {
             }
             .onAppear { hasKeyFocus = true }
             .onChange(of: photo.id) { _, _ in
+                cancelUpgradeTask()
                 inspectedFocusRegionID = nil
                 pendingRestoredZoom = nil
                 focusAnalysisID = UUID()
                 focusRegionState = DetailFocusRegionState()
                 focusTracking.cancelPendingRecenter()
+            }
+            .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
+                guard scale > DetailFitScale.tolerance, isScaleAtFullResolution else { return }
+                if isLost {
+                    DetailProgressiveDecodeSupport.syncAtFullResolution(
+                        controller: progressiveDecode,
+                        photoID: photo.id,
+                        fileName: photo.fileName,
+                        photoSet: browsing.scannedSet(for: photo.id)?.photoSet,
+                        displayMode: currentWindow?.mode ?? displayMode,
+                        shown: shown,
+                        isPreviewOnly: previewOnly,
+                        isLocationLost: true,
+                        startingUpgrade: false)
+                } else if progressiveDecode.phase == .previewOnly, !previewOnly {
+                    progressiveDecode.reset()
+                    upgradeIfNeeded()
+                }
             }
             .onChange(of: expandedGroup?.id) { oldGroup, newGroup in
                 if oldGroup != nil, newGroup == nil {
@@ -302,7 +327,7 @@ struct DetailMarkingView: View {
             .onDisappear {
                 cancelPendingMetadataFiltersHandoff()
                 filterHandoff.dismissFiltersAndCancelPending()
-                upgradeTask?.cancel()
+                cancelUpgradeTask()
                 shown = nil
                 shownPhoto = nil
                 phase = .placeholder(nil)
@@ -727,10 +752,7 @@ struct DetailMarkingView: View {
                     .accessibilityHidden(true)
             }
             HStack(spacing: 6) {
-                Text(detailSubtitle)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("clove.detail.zoom")
-                    .reportHeaderControlFrame("clove.detail.zoom")
+                detailZoomReadout
                 InlineFolderPreparationBar(
                     browsing: browsing,
                     identifier: "clove.detail.preparation.progress")
@@ -1072,10 +1094,7 @@ struct DetailMarkingView: View {
                 ) {
                     if !emptyFromFilterSelection {
                         HStack(spacing: 6) {
-                            Text(detailSubtitle)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("clove.detail.zoom")
-                                .reportHeaderControlFrame("clove.detail.zoom")
+                            detailZoomReadout
                             InlineFolderPreparationBar(
                                 browsing: browsing,
                                 identifier: "clove.detail.preparation.progress")
@@ -1675,20 +1694,46 @@ struct DetailMarkingView: View {
         return nil
     }
 
-    private var detailSubtitle: String {
-        var parts: [String] = []
+    private var detailSubtitlePrefix: String? {
         if let expandedGroup,
             let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
         {
             let pos = AppLocalization.format(
                 "%lld / %lld", language: language, Int64(index + 1),
                 Int64(expandedGroup.visibleMembers.count))
-            parts.append(AppLocalization.format("Group · %@", language: language, pos))
-        } else if let index = timeline.slotIndex(containing: photo.id) {
-            parts.append(
-                AppLocalization.format(
-                    "%lld / %lld", language: language, Int64(index + 1),
-                    Int64(timeline.slots.count)))
+            return AppLocalization.format("Group · %@", language: language, pos)
+        }
+        if let index = timeline.slotIndex(containing: photo.id) {
+            return AppLocalization.format(
+                "%lld / %lld", language: language, Int64(index + 1),
+                Int64(timeline.slots.count))
+        }
+        return nil
+    }
+
+    private var isShowingProgressiveZoomState: Bool {
+        scale > DetailFitScale.tolerance && isScaleAtFullResolution
+    }
+
+    private var detailZoomReadout: some View {
+        DetailProgressiveDecodeReadout(
+            photoID: photo.id,
+            prefixText: detailSubtitlePrefix,
+            zoomText: scale > DetailFitScale.tolerance ? zoomName : nil,
+            showsProgressiveState: isShowingProgressiveZoomState,
+            phase: progressiveDecode.phase,
+            language: language,
+            tone: .header,
+            lineLimit: 1,
+            identifier: "clove.detail.zoom",
+            reportHeaderFrame: true
+        )
+    }
+
+    private var detailSubtitle: String {
+        var parts: [String] = []
+        if let detailSubtitlePrefix {
+            parts.append(detailSubtitlePrefix)
         }
         if scale > DetailFitScale.tolerance {
             parts.append(zoomName)
@@ -1898,6 +1943,9 @@ struct DetailMarkingView: View {
                                 ? zoomName : nil,
                             language: language,
                             browsing: browsing,
+                            photoID: photo.id,
+                            showsProgressiveState: isShowingProgressiveZoomState,
+                            progressiveDecodePhase: progressiveDecode.phase,
                             onInfoTap: { activeSheet = .information }
                         )
                         .layoutPriority(0)
@@ -2133,6 +2181,7 @@ struct DetailMarkingView: View {
             focusTracking.reset()
             setZoom(.fit)
         }
+        cancelUpgradeTask()
         limitation = nil
         previewOnly = false
 
@@ -2331,6 +2380,21 @@ struct DetailMarkingView: View {
         if image.limitation != nil {
             previewOnly = true
         }
+        if image.limitation == nil, image.quality == .nativeRAW || image.isBestAvailable {
+            progressiveDecode.completeIfTracking(photoID: photo.id)
+        } else if image.limitation != nil, scale > DetailFitScale.tolerance, isScaleAtFullResolution
+        {
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: progressiveDecode,
+                photoID: photo.id,
+                fileName: photo.fileName,
+                photoSet: browsing.scannedSet(for: photo.id)?.photoSet,
+                displayMode: currentWindow?.mode ?? displayMode,
+                shown: image,
+                isPreviewOnly: true,
+                isLocationLost: browsing.folderLocationLoss != nil,
+                startingUpgrade: false)
+        }
         if let keptScale {
             let previousNativeScale = keptNativeScale
             let fallbackAnchor = keptZoom?.anchor ?? .centre
@@ -2499,22 +2563,40 @@ struct DetailMarkingView: View {
         if value <= DetailFitScale.tolerance {
             inspectedFocusRegionID = nil
             focusTracking.reset()
+            cancelUpgradeTask()
+            return
         }
         if abs(value - commandedScale) > 0.01 {
             zoomMode = .manual
             focusTracking.reset()
         }
-        guard value > DetailFitScale.tolerance, !previewOnly, let shown, shownPhoto == photo.id
-        else {
+        if !isScaleAtFullResolution && progressiveDecode.phase != .idle {
+            progressiveDecode.reset()
+        }
+        if previewOnly || browsing.folderLocationLoss != nil {
+            if isScaleAtFullResolution {
+                DetailProgressiveDecodeSupport.syncAtFullResolution(
+                    controller: progressiveDecode,
+                    photoID: photo.id,
+                    fileName: photo.fileName,
+                    photoSet: browsing.scannedSet(for: photo.id)?.photoSet,
+                    displayMode: currentWindow?.mode ?? displayMode,
+                    shown: shown,
+                    isPreviewOnly: previewOnly,
+                    isLocationLost: browsing.folderLocationLoss != nil,
+                    startingUpgrade: false)
+            }
             return
         }
+        guard let shown, shownPhoto == photo.id else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
-        upgradeTask?.cancel()
-        upgradeTask = Task {
-            try? await Task.sleep(for: .milliseconds(220))
-            guard !Task.isCancelled else { return }
-            await upgrade(need: isAtFullResolution ? .fullResolution : .morePixels)
+        let need: DetailPixelRequest.Need = isScaleAtFullResolution ? .fullResolution : .morePixels
+        if upgradeTask != nil, activeUpgradePhotoID == photo.id,
+            activeUpgradeNeed == .fullResolution, need == .fullResolution
+        {
+            return
         }
+        startUpgradeTask(need: need, debounce: .milliseconds(220))
     }
 
     private func viewportChanged(_ snapshot: DetailZoomSnapshot?) {
@@ -2578,6 +2660,17 @@ struct DetailMarkingView: View {
         return false
     }
 
+    /// Whether either the explicit zoom mode or a pinch scale sits at native 100%.
+    private var isScaleAtFullResolution: Bool {
+        if isAtFullResolution { return true }
+        guard let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels else {
+            return false
+        }
+        return DetailZoom.isFullResolution(
+            scale: scale, nativePixels: pixels, viewSize: viewSize,
+            screenScale: displayScale)
+    }
+
     /// The double-tap action chosen in Settings, or back to fit (PRD P0-04, PRD Gesture-related
     /// settings).
     ///
@@ -2602,6 +2695,7 @@ struct DetailMarkingView: View {
         guard scale <= DetailFitScale.tolerance else {
             inspectedFocusRegionID = nil
             focusTracking.reset()
+            cancelUpgradeTask()
             zoomMode = .fit
             setZoom(.fit)
             return
@@ -2643,11 +2737,27 @@ struct DetailMarkingView: View {
         {
             setZoom(.scale(target, anchor: anchor))
         }
-        upgradeTask?.cancel()
-        // A photo whose render failed has no better pixels to ask for: the tap above already
-        // inspected the preview (PRD P0-04).
-        guard !previewOnly else { return }
-        upgradeTask = Task { await upgrade(need: .fullResolution) }
+        if previewOnly || browsing.folderLocationLoss != nil {
+            cancelUpgradeTask()
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: progressiveDecode,
+                photoID: photo.id,
+                fileName: photo.fileName,
+                photoSet: browsing.scannedSet(for: photo.id)?.photoSet,
+                displayMode: currentWindow?.mode ?? displayMode,
+                shown: shown,
+                isPreviewOnly: previewOnly,
+                isLocationLost: browsing.folderLocationLoss != nil,
+                startingUpgrade: false)
+            return
+        }
+        // Keep an already-running native decode intact when jumping between focus points on the same photo.
+        if upgradeTask != nil, activeUpgradePhotoID == photo.id,
+            activeUpgradeNeed == .fullResolution
+        {
+            return
+        }
+        startUpgradeTask(need: .fullResolution)
     }
 
     private func retargetFullResolution(for size: CGSize, force: Bool = false) {
@@ -2675,32 +2785,115 @@ struct DetailMarkingView: View {
     /// nothing better to give returns the preview with a limitation, which turns ``previewOnly``
     /// on, so the same request is never repeated for that photo (PRD P0-04).
     private func upgradeIfNeeded() {
-        guard scale > DetailFitScale.tolerance, !previewOnly, let shown, shownPhoto == photo.id
+        guard scale > DetailFitScale.tolerance else {
+            cancelUpgradeTask()
+            return
+        }
+        if !isScaleAtFullResolution && progressiveDecode.phase != .idle {
+            progressiveDecode.reset()
+        }
+        if (previewOnly || browsing.folderLocationLoss != nil), isScaleAtFullResolution {
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: progressiveDecode,
+                photoID: photo.id,
+                fileName: photo.fileName,
+                photoSet: browsing.scannedSet(for: photo.id)?.photoSet,
+                displayMode: currentWindow?.mode ?? displayMode,
+                shown: shown,
+                isPreviewOnly: previewOnly,
+                isLocationLost: browsing.folderLocationLoss != nil,
+                startingUpgrade: false)
+            return
+        }
+        guard !previewOnly, browsing.folderLocationLoss == nil, let shown, shownPhoto == photo.id
         else { return }
         guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
-        upgradeTask?.cancel()
-        upgradeTask = Task {
-            await upgrade(need: isAtFullResolution ? .fullResolution : .morePixels)
+        let need: DetailPixelRequest.Need = isScaleAtFullResolution ? .fullResolution : .morePixels
+        if upgradeTask != nil, activeUpgradePhotoID == photo.id,
+            activeUpgradeNeed == .fullResolution,
+            need == .fullResolution
+        {
+            return
         }
+        startUpgradeTask(need: need)
+    }
+
+    private func startUpgradeTask(need: DetailPixelRequest.Need, debounce: Duration? = nil) {
+        let targetPhotoID = photo.id
+        let taskToken = UUID()
+        upgradeTask?.cancel()
+        activeUpgradePhotoID = targetPhotoID
+        activeUpgradeNeed = need
+        activeUpgradeToken = taskToken
+        upgradeTask = Task {
+            defer {
+                if activeUpgradeToken == taskToken {
+                    upgradeTask = nil
+                    activeUpgradePhotoID = nil
+                    activeUpgradeNeed = nil
+                    activeUpgradeToken = nil
+                }
+            }
+            if let debounce {
+                try? await Task.sleep(for: debounce)
+                guard !Task.isCancelled else { return }
+            }
+            await upgrade(for: targetPhotoID, need: need)
+        }
+    }
+
+    private func cancelUpgradeTask() {
+        upgradeTask?.cancel()
+        upgradeTask = nil
+        activeUpgradePhotoID = nil
+        activeUpgradeNeed = nil
+        activeUpgradeToken = nil
+        progressiveDecode.reset()
     }
 
     /// Asks I2 for the pixels a pinch or a double tap needs, keeping the preview meanwhile.
     ///
     /// A failed RAW render returns the preview with a limitation, which turns ``previewOnly`` on
     /// so the same failing render is never requested again for this photo (PRD P0-04).
-    private func upgrade(need: DetailPixelRequest.Need) async {
-        guard !previewOnly else { return }
+    private func upgrade(for targetPhotoID: PhotoIdentity, need: DetailPixelRequest.Need) async {
+        guard !previewOnly, photo.id == targetPhotoID else { return }
         guard let window = currentWindow else { return }
+        let scannedSet = browsing.scannedSet(for: targetPhotoID)
+        let decodeToken: RawProgressiveDecodeToken? =
+            need == .fullResolution
+            ? DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: progressiveDecode,
+                photoID: targetPhotoID,
+                fileName: photo.fileName,
+                photoSet: scannedSet?.photoSet,
+                displayMode: window.mode,
+                shown: shown,
+                isPreviewOnly: previewOnly,
+                isLocationLost: browsing.folderLocationLoss != nil,
+                startingUpgrade: true)
+            : nil
+
         let request = DetailPixelRequest(
             displayPixels: requestPixels(scale: scale), need: need,
             mode: window.mode, screenPixels: window.screenPixels)
-        let outcome = await images.image(for: photo.id, request: request)
-        guard !Task.isCancelled else { return }
-        switch outcome {
-        case .image(let image):
+        let outcome = await images.image(for: targetPhotoID, request: request)
+        guard !Task.isCancelled else {
+            if let decodeToken { progressiveDecode.cancel(token: decodeToken) }
+            return
+        }
+        guard photo.id == targetPhotoID else { return }
+        if case .image(let image) = outcome {
             show(image)
-        case .unavailable, .deferred:
-            break
+        }
+        if need == .fullResolution {
+            DetailProgressiveDecodeSupport.settle(
+                controller: progressiveDecode,
+                token: decodeToken,
+                outcome: outcome,
+                photoID: targetPhotoID,
+                fileName: photo.fileName,
+                photoSet: scannedSet?.photoSet,
+                isLocationLost: browsing.folderLocationLoss != nil)
         }
     }
 
@@ -3158,6 +3351,9 @@ struct DetailPhotoCornerOverlay: View {
     let zoomText: String?
     let language: ResolvedAppLanguage
     var browsing: BrowsingModel? = nil
+    var photoID: PhotoIdentity? = nil
+    var showsProgressiveState: Bool = false
+    var progressiveDecodePhase: RawProgressiveDecodePhase = .idle
     var onInfoTap: (() -> Void)? = nil
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -3168,19 +3364,24 @@ struct DetailPhotoCornerOverlay: View {
         positionText: String?,
         isGroupFocus: Bool,
         zoomText: String?,
+        showsProgressiveState: Bool = false,
+        progressiveDecodePhase: RawProgressiveDecodePhase = .idle,
         language: ResolvedAppLanguage
     ) -> (visible: String?, accessible: String) {
-        let metadataParts = [positionText, zoomText].compactMap { $0 }
-        let visible = metadataParts.isEmpty ? nil : metadataParts.joined(separator: " · ")
         let accessiblePosition = positionText.map { pos in
             isGroupFocus
                 ? AppLocalization.format("Group · %@", language: language, pos)
                 : pos
         }
-        let accessible = [accessiblePosition, zoomText]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-        return (visible, accessible)
+        let presentation = DetailZoomReadoutPresentation(
+            prefixText: positionText,
+            accessiblePrefixText: accessiblePosition,
+            zoomText: zoomText,
+            showsProgressiveState: showsProgressiveState,
+            phase: progressiveDecodePhase,
+            language: language
+        )
+        return (presentation.combinedVisibleText, presentation.accessibilityLabel)
     }
 
     private var showsInlinePreparation: Bool {
@@ -3192,13 +3393,21 @@ struct DetailPhotoCornerOverlay: View {
 
     var body: some View {
         let parts = DetailHeaderFileNameParts(fileName)
-        let strings = Self.metadataStrings(
-            positionText: positionText,
-            isGroupFocus: isGroupFocus,
-            zoomText: zoomText,
-            language: language)
-        let metadataText = strings.visible
-        let accessibleMetadata = strings.accessible
+        let effectivePhase: RawProgressiveDecodePhase =
+            (zoomText != nil && showsProgressiveState) ? progressiveDecodePhase : .idle
+        let hasMetadataReadout = positionText != nil || zoomText != nil
+        let resolvedPhotoID =
+            photoID
+            ?? PhotoIdentity(
+                folderID: FolderIdentity(rawValue: "corner-overlay"),
+                relativeFolderPath: "",
+                stem: fileName
+            )
+        let accessiblePosition = positionText.map { pos in
+            isGroupFocus
+                ? AppLocalization.format("Group · %@", language: language, pos)
+                : pos
+        }
 
         let scrim = VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -3230,26 +3439,25 @@ struct DetailPhotoCornerOverlay: View {
                     .accessibilityHidden(true)
             }
 
-            if metadataText != nil || showsInlinePreparation {
+            if hasMetadataReadout || showsInlinePreparation {
                 HStack(alignment: .center, spacing: 6) {
-                    if let metadataText {
-                        HStack(alignment: .center, spacing: 4) {
-                            if isGroupFocus {
-                                Image(systemName: "square.stack")
-                                    .font(.system(size: metadataSize, weight: .medium))
-                                    .accessibilityHidden(true)
-                            }
-                            Text(metadataText)
-                                .font(.system(size: metadataSize).monospacedDigit())
-                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                                .truncationMode(.tail)
-                        }
-                        .foregroundStyle(Color.white.opacity(0.86))
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityAddTraits(.isStaticText)
-                        .accessibilityLabel(accessibleMetadata)
-                        .accessibilityIdentifier("clove.detail.zoom")
-                        .reportHeaderControlFrame("clove.detail.zoom")
+                    if hasMetadataReadout {
+                        DetailProgressiveDecodeReadout(
+                            photoID: resolvedPhotoID,
+                            prefixText: positionText,
+                            accessiblePrefixText: accessiblePosition,
+                            zoomText: zoomText,
+                            showsProgressiveState: showsProgressiveState,
+                            phase: effectivePhase,
+                            language: language,
+                            tone: .darkScrim,
+                            font: .system(size: metadataSize),
+                            leadingIcon: isGroupFocus ? "square.stack" : nil,
+                            iconSize: metadataSize,
+                            lineLimit: dynamicTypeSize.isAccessibilitySize ? 2 : 1,
+                            identifier: "clove.detail.zoom",
+                            reportHeaderFrame: true
+                        )
                     }
                     if let browsing {
                         InlineFolderPreparationBar(

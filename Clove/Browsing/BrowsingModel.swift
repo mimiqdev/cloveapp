@@ -352,6 +352,11 @@ final class BrowsingModel {
         return photoIndices[id].map { storedPhotos[$0] }
     }
 
+    /// Returns the scanned file set (primary RAW and camera companions) for `photo` when loaded.
+    func scannedSet(for photo: PhotoIdentity) -> ScannedPhotoSet? {
+        library.scannedSet(for: photo)
+    }
+
     /// The open group's photos with their marks, in the group's member order (PRD P0-12).
     var groupPhotos: [GridPhoto] {
         guard let group = currentGroup else { return [] }
