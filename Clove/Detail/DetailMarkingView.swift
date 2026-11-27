@@ -32,6 +32,8 @@ struct DetailMarkingActions {
     /// Submits the visible group's finishing action and starts its auto-advance.
     var finishGroup: (GroupFinishingPlan) -> Void = { _ in }
     var undo: (() -> Void)? = nil
+    var backToGrid: (() -> Void)? = nil
+    var photoTapped: () -> Void = {}
 }
 
 /// One photo's preview and marking controls: the HUD, the zoomable preview with its chrome taps,
@@ -92,6 +94,7 @@ struct DetailMarkingView: View {
     let actions: DetailMarkingActions
     var duo: DuoDetailLayout?
     var presentation: Binding<DetailPresentation>? = nil
+    var allReviewedToast: DetailAllReviewedToast? = nil
     var undoToast: DetailUndoToast? = nil
     var compareRotateToastID: UUID? = nil
 
@@ -226,6 +229,7 @@ struct DetailMarkingView: View {
         duo: DuoDetailLayout? = nil,
         presentation: Binding<DetailPresentation>? = nil,
         initialPresentation: DetailPresentation = .photoPreview,
+        allReviewedToast: DetailAllReviewedToast? = nil,
         undoToast: DetailUndoToast? = nil,
         compareRotateToastID: UUID? = nil
     ) {
@@ -244,6 +248,7 @@ struct DetailMarkingView: View {
         self.actions = actions
         self.duo = duo
         self.presentation = presentation
+        self.allReviewedToast = allReviewedToast
         self.undoToast = undoToast
         self.compareRotateToastID = compareRotateToastID
         _widePresentation = State(initialValue: initialPresentation)
@@ -375,21 +380,31 @@ struct DetailMarkingView: View {
             measuredBand: isOrdinaryPhoneLandscape ? 0 : controlsHeight)
     }
 
+    private var visibleAllReviewedToast: DetailAllReviewedToast? {
+        browsing.failureToastMessage == nil ? allReviewedToast : nil
+    }
+
     private var visibleUndoToast: DetailUndoToast? {
-        browsing.failureToastMessage == nil ? undoToast : nil
+        guard browsing.failureToastMessage == nil, allReviewedToast == nil else { return nil }
+        return undoToast
     }
 
     private var visibleCompareRotateToastID: UUID? {
-        guard browsing.failureToastMessage == nil, undoToast == nil else { return nil }
+        guard browsing.failureToastMessage == nil, allReviewedToast == nil, undoToast == nil else {
+            return nil
+        }
         return compareRotateToastID
     }
 
     private var hasTransientToast: Bool {
-        visibleUndoToast != nil || visibleCompareRotateToastID != nil
+        visibleAllReviewedToast != nil || visibleUndoToast != nil
+            || visibleCompareRotateToastID != nil
     }
 
     private var transientToastIdentity: String? {
-        visibleUndoToast?.id.uuidString ?? visibleCompareRotateToastID?.uuidString
+        visibleAllReviewedToast?.id.uuidString
+            ?? visibleUndoToast?.id.uuidString
+            ?? visibleCompareRotateToastID?.uuidString
     }
 
     /// The stage-bottom band a marking swipe's star bar must stay clear of (#305).
@@ -1464,17 +1479,20 @@ struct DetailMarkingView: View {
                             ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
                         value: transientToastIdentity ?? stagePill?.identifier
                     )
-                } else if hasTransientToast {
-                    activeTransientToastView
-                        .padding(.horizontal, 16)
-                        .transition(
-                            CloveMotion.slideTransition(
-                                edge: .bottom, offset: 12, reduceMotion: reduceMotion)
-                        )
-                        .animation(
-                            CloveMotion.chrome(reduceMotion: reduceMotion),
-                            value: transientToastIdentity
-                        )
+                } else {
+                    Group {
+                        if hasTransientToast {
+                            activeTransientToastView
+                                .padding(.horizontal, 16)
+                                .transition(
+                                    CloveMotion.slideTransition(
+                                        edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                        }
+                    }
+                    .animation(
+                        CloveMotion.chrome(reduceMotion: reduceMotion),
+                        value: transientToastIdentity
+                    )
                 }
             } else if showsFilmstrip && chromeIsVisible {
                 // The pill or transient toast rides the floating chrome band above the strip.
@@ -1578,21 +1596,16 @@ struct DetailMarkingView: View {
                     .padding(.horizontal, 16)
                 }
                 .padding(.bottom, 8)
-            } else if hasTransientToast {
-                activeTransientToastView
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .transition(
-                        CloveMotion.slideTransition(
-                            edge: .bottom, offset: 12, reduceMotion: reduceMotion)
-                    )
-                    .animation(
-                        CloveMotion.chrome(reduceMotion: reduceMotion),
-                        value: transientToastIdentity
-                    )
-            } else if !showsFilmstrip && chromeIsVisible {
+            } else {
                 Group {
-                    if let stagePill {
+                    if hasTransientToast {
+                        activeTransientToastView
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                            .transition(
+                                CloveMotion.slideTransition(
+                                    edge: .bottom, offset: 12, reduceMotion: reduceMotion))
+                    } else if !showsFilmstrip && chromeIsVisible, let stagePill {
                         stagePill
                             .padding(.bottom, 12)
                             .transition(
@@ -1604,9 +1617,10 @@ struct DetailMarkingView: View {
                     }
                 }
                 .animation(
-                    stagePill != nil
+                    hasTransientToast || (!showsFilmstrip && chromeIsVisible && stagePill != nil)
                         ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                    value: stagePill?.identifier
+                    value: transientToastIdentity
+                        ?? ((!showsFilmstrip && chromeIsVisible) ? stagePill?.identifier : nil)
                 )
             }
         }
@@ -1621,11 +1635,25 @@ struct DetailMarkingView: View {
 
     @ViewBuilder
     private var activeTransientToastView: some View {
-        if let visibleUndoToast {
+        if let visibleAllReviewedToast {
+            detailAllReviewedToastView(visibleAllReviewedToast)
+        } else if let visibleUndoToast {
             detailUndoToastView(visibleUndoToast)
         } else if visibleCompareRotateToastID != nil {
             compareRotateToastView
         }
+    }
+
+    private func detailAllReviewedToastView(_ toast: DetailAllReviewedToast) -> some View {
+        Toast(
+            message: toast.localizedMessage(language: language),
+            leadingSymbol: "checkmark",
+            actionTitle: toast.localizedActionTitle(language: language),
+            identifier: "clove.detail.allReviewedToast",
+            actionIdentifierSuffix: "backToGrid",
+            onAction: backToGrid
+        )
+        .reportTapPickerFrame("clove.detail.allReviewedToast")
     }
 
     private func detailUndoToastView(_ toast: DetailUndoToast) -> some View {
@@ -3017,7 +3045,18 @@ struct DetailMarkingView: View {
     /// zoomed scales (PRD P0-04, #252, #273).
     private func toggleChrome() {
         dismissGestureGuide()
+        actions.photoTapped()
         hidesChrome.toggle()
+    }
+
+    private func backToGrid() {
+        dismissGestureGuide()
+        actions.markingSwipeBegan()
+        if let customBackToGrid = actions.backToGrid {
+            customBackToGrid()
+        } else {
+            browsing.back()
+        }
     }
 
     // MARK: - Marking

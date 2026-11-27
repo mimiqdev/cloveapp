@@ -922,6 +922,22 @@ struct AppLocalizationTests {
         #expect(summary.localizedMoveRejectsTitle(language: .traditionalChinese) == "整理 5 張淘汰片")
     }
 
+    @Test func detailAllReviewedToastLocalizesAcrossLanguages() {
+        let single = DetailAllReviewedToast(totalCount: 1)
+        #expect(single.localizedMessage(language: .english) == "All 1 reviewed")
+        #expect(single.localizedMessage(language: .simplifiedChinese) == "全部 1 张已审阅")
+        #expect(single.localizedMessage(language: .traditionalChinese) == "全部 1 張已審閱")
+
+        let standard = DetailAllReviewedToast(totalCount: 36)
+        #expect(standard.localizedMessage(language: .english) == "All 36 reviewed")
+        #expect(standard.localizedMessage(language: .simplifiedChinese) == "全部 36 张已审阅")
+        #expect(standard.localizedMessage(language: .traditionalChinese) == "全部 36 張已審閱")
+
+        #expect(standard.localizedActionTitle(language: .english) == "Back to Grid")
+        #expect(standard.localizedActionTitle(language: .simplifiedChinese) == "返回网格")
+        #expect(standard.localizedActionTitle(language: .traditionalChinese) == "返回格狀檢視")
+    }
+
     @Test func gestureGuideItemsLocalizeAcrossLanguages() {
         let pairs: [(key: String, en: String, hans: String, hant: String)] = [
             ("Swipe up to rate", "Swipe up to rate", "上滑打星", "上滑打星"),

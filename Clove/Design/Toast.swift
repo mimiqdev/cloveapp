@@ -10,6 +10,10 @@ struct Toast: View {
     /// The first line, for example "Moved 42 to _Rejected" (copy.md `move.toast.done`).
     let message: String
 
+    /// Optional SF Symbol drawn leading the message (for example, a completion checkmark).
+    var leadingSymbol: String? = nil
+    var leadingSymbolColour: CloveColour = Color.clove.status.saved
+
     /// The optional second line, in `reject`, for example "2 couldn't be moved" (copy.md
     /// `move.toast.failed`).
     var detail: String?
@@ -25,11 +29,22 @@ struct Toast: View {
     /// The identifier the screen's UI test uses.
     var identifier = "clove.toast"
 
+    /// Suffix appended to `identifier` for the primary action's accessibility identifier.
+    var actionIdentifierSuffix = "action"
+
     /// What the action does.
     var onAction: (() -> Void)?
 
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
+
     var body: some View {
         HStack(spacing: 12) {
+            if let leadingSymbol {
+                Image(systemName: leadingSymbol)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(leadingSymbolColour)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(message)
                     .font(.subheadline)
@@ -46,7 +61,7 @@ struct Toast: View {
                     secondaryActionTitle, identifier: "secondaryAction", perform: onSecondaryAction)
             }
             if let actionTitle, let onAction {
-                action(actionTitle, identifier: "action", perform: onAction)
+                action(actionTitle, identifier: actionIdentifierSuffix, perform: onAction)
             }
         }
         .padding(.horizontal, 18)
@@ -55,6 +70,16 @@ struct Toast: View {
         .cloveGlass(in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            switch request?.id {
+            case "\(identifier).\(actionIdentifierSuffix)":
+                onAction?()
+            case "\(identifier).secondaryAction":
+                onSecondaryAction?()
+            default:
+                break
+            }
+        }
     }
 
     private func action(_ title: String, identifier suffix: String, perform: @escaping () -> Void)
@@ -69,6 +94,7 @@ struct Toast: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("\(identifier).\(suffix)")
+        .reportTapPickerFrame("\(identifier).\(suffix)")
     }
 }
 

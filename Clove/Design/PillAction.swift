@@ -47,6 +47,7 @@ struct PillAction: View {
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
     @State private var isNudged = false
 
     var body: some View {
@@ -73,6 +74,11 @@ struct PillAction: View {
         }
         .accessibilityIdentifier(identifier)
         .reportTapPickerFrame(identifier)
+        .onChange(of: tapPickerTriggerRequest) { _, request in
+            if request?.id == identifier {
+                action()
+            }
+        }
     }
 }
 
