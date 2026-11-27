@@ -692,7 +692,7 @@ struct DetailMarkingView: View {
             Button {
                 browsing.showsFocusRegions.toggle()
             } label: {
-                Image(systemName: "viewfinder")
+                Image(systemName: "dot.viewfinder")
                     .foregroundStyle(
                         browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
             }
@@ -705,7 +705,7 @@ struct DetailMarkingView: View {
         } else {
             GlassIconButton(
                 label: focusLabel,
-                symbol: "viewfinder",
+                symbol: "dot.viewfinder",
                 isActive: browsing.showsFocusRegions,
                 size: isWidePadLayout ? .pad : .phone,
                 identifier: "clove.detail.focusToggle"
