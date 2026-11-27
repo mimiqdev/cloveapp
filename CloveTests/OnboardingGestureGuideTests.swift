@@ -47,6 +47,18 @@ struct OnboardingGestureGuideTests {
     }
 
     @Test func onboardingAndGestureGuideStringsLocalizeInAllSupportedLanguages() {
+        let corePairs = DetailGestureGuideItem.coreItems.map {
+            "\($0.titleKey) -> \($0.subtitleKey)"
+        }
+        #expect(
+            corePairs == [
+                "Swipe up to rate -> Farther for higher stars · lifts a reject",
+                "Swipe down to clear or reject -> Clears a star first, then rejects",
+                "Swipe left or right -> Previous or next photo",
+                "Double-tap to check focus -> Zooms to 100% · two fingers to pan",
+                "Pull filmstrip down -> Expand similar group · push up to fold",
+            ])
+
         let expectedTranslations: [(key: String, hans: String, hant: String)] = [
             (
                 "Browse cards and folders in place",
@@ -64,19 +76,31 @@ struct OnboardingGestureGuideTests {
                 "RAW 寫入標準 XMP，直通 Lightroom 與 Capture One"
             ),
             ("Gesture guide", "手势指南", "手勢指南"),
-            ("Swipe up to rate", "上滑评星", "上滑評星"),
-            ("Distance sets 1–5 stars", "滑动距离决定星级", "滑動距離決定星級"),
-            ("Swipe down to reject", "下滑淘汰", "下滑淘汰"),
-            ("Swipe down again to clear", "再次下滑清除淘汰", "再次下滑清除淘汰"),
+            ("Swipe up to rate", "上滑打星", "上滑打星"),
+            (
+                "Farther for higher stars · lifts a reject",
+                "滑得越远星级越高；弃片上滑可恢复",
+                "滑得越遠星級越高；淘汰片上滑可恢復"
+            ),
+            ("Swipe down to clear or reject", "下滑清除或弃片", "下滑清除或淘汰"),
+            (
+                "Clears a star first, then rejects",
+                "有星先清除，继续下拉标为弃片",
+                "有星先清除，繼續下拉標為淘汰"
+            ),
             ("Swipe left or right", "左右滑动", "左右滑動"),
             ("Previous or next photo", "切换上一张或下一张", "切換上一張或下一張"),
-            ("Double-tap", "轻点两下", "點兩下"),
-            ("Zoom to 100% to check focus", "100% 放大检查对焦", "100% 放大檢查對焦"),
-            ("Pull filmstrip down", "下滑胶片条", "下滑膠片條"),
+            ("Double-tap to check focus", "双击 100% 检焦", "點兩下 100% 檢焦"),
             (
-                "Expand similar group; push up to fold",
-                "展开相似连拍组，上滑收起",
-                "展開相似連拍組，上滑收起"
+                "Zooms to 100% · two fingers to pan",
+                "放大至 100% · 双指拖动平移画面",
+                "放大至 100% · 雙指拖動平移畫面"
+            ),
+            ("Pull filmstrip down", "下拉胶片条", "下拉膠片條"),
+            (
+                "Expand similar group · push up to fold",
+                "展开相似连拍组 · 上推收起",
+                "展開相似連拍組 · 上推收起"
             ),
             ("Got it", "知道了", "知道了"),
             ("Dismiss gesture guide", "关闭手势指南", "關閉手勢指南"),
@@ -230,11 +254,31 @@ struct OnboardingGestureGuideTests {
             findCollectionView(in: settingsWindow) != nil
         }
 
-        // Gesture guide card and sheet render cleanly in compact and regular environments.
+        // Gesture guide card and sheet render cleanly in compact, regular, and accessibility Dynamic Type.
         let sheetHost = UIHostingController(
             rootView: DetailGestureGuideSheet().environment(store))
         let sheetSize = sheetHost.sizeThatFits(in: CGSize(width: 390, height: 600))
         #expect(sheetSize.width > 0 && sheetSize.height > 0)
+
+        for language in [
+            ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
+        ] {
+            let cardHost = UIHostingController(
+                rootView: DetailGestureGuideCard {}
+                    .environment(\.appLanguage, language)
+                    .environment(\.dynamicTypeSize, .accessibility3))
+            let cardSize = cardHost.sizeThatFits(in: CGSize(width: 390, height: 844))
+            #expect(cardSize.width > 0 && cardSize.width <= 390)
+            #expect(cardSize.height > 0 && cardSize.height <= 844)
+
+            let largeSheetHost = UIHostingController(
+                rootView: DetailGestureGuideSheet()
+                    .environment(store)
+                    .environment(\.appLanguage, language)
+                    .environment(\.dynamicTypeSize, .accessibility3))
+            let largeSheetSize = largeSheetHost.sizeThatFits(in: CGSize(width: 390, height: 844))
+            #expect(largeSheetSize.width > 0 && largeSheetSize.height > 0)
+        }
 
         // Direct DetailMarkingView construction without SettingsStore in environment never crashes
         // or overlays the preview with the gesture guide.

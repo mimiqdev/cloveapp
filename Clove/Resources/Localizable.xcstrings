@@ -2563,6 +2563,28 @@
         }
       }
     },
+    "Clears a star first, then rejects": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clears a star first, then rejects"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有星先清除，继续下拉标为弃片"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有星先清除，繼續下拉標為淘汰"
+          }
+        }
+      }
+    },
     "Clove": {
       "localizations": {
         "en": {
@@ -3223,28 +3245,6 @@
         }
       }
     },
-    "Distance sets 1–5 stars": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Distance sets 1–5 stars"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滑动距离决定星级"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "滑動距離決定星級"
-          }
-        }
-      }
-    },
     "Done": {
       "localizations": {
         "en": {
@@ -3285,6 +3285,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "點兩下"
+          }
+        }
+      }
+    },
+    "Double-tap to check focus": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double-tap to check focus"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "双击 100% 检焦"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點兩下 100% 檢焦"
           }
         }
       }
@@ -3511,24 +3533,24 @@
         }
       }
     },
-    "Expand similar group; push up to fold": {
+    "Expand similar group · push up to fold": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Expand similar group; push up to fold"
+            "value": "Expand similar group · push up to fold"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "展开相似连拍组，上滑收起"
+            "value": "展开相似连拍组 · 上推收起"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "展開相似連拍組，上滑收起"
+            "value": "展開相似連拍組 · 上推收起"
           }
         }
       }
@@ -3727,6 +3749,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "人臉區域"
+          }
+        }
+      }
+    },
+    "Farther for higher stars · lifts a reject": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Farther for higher stars · lifts a reject"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑得越远星级越高；弃片上滑可恢复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滑得越遠星級越高；淘汰片上滑可恢復"
           }
         }
       }
@@ -7290,13 +7334,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "下滑胶片条"
+            "value": "下拉胶片条"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "下滑膠片條"
+            "value": "下拉膠片條"
           }
         }
       }
@@ -9851,46 +9895,24 @@
         }
       }
     },
-    "Swipe down again to clear": {
+    "Swipe down to clear or reject": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Swipe down again to clear"
+            "value": "Swipe down to clear or reject"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "再次下滑清除淘汰"
+            "value": "下滑清除或弃片"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "再次下滑清除淘汰"
-          }
-        }
-      }
-    },
-    "Swipe down to reject": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Swipe down to reject"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下滑淘汰"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下滑淘汰"
+            "value": "下滑清除或淘汰"
           }
         }
       }
@@ -9928,13 +9950,13 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上滑评星"
+            "value": "上滑打星"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "上滑評星"
+            "value": "上滑打星"
           }
         }
       }
@@ -11699,28 +11721,6 @@
         }
       }
     },
-    "Zoom to 100% to check focus": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zoom to 100% to check focus"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "100% 放大检查对焦"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "100% 放大檢查對焦"
-          }
-        }
-      }
-    },
     "Zoom to focus": {
       "localizations": {
         "en": {
@@ -11783,6 +11783,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "已放大"
+          }
+        }
+      }
+    },
+    "Zooms to 100% · two fingers to pan": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zooms to 100% · two fingers to pan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "放大至 100% · 双指拖动平移画面"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "放大至 100% · 雙指拖動平移畫面"
           }
         }
       }
