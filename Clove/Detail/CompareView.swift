@@ -1739,7 +1739,8 @@ private struct ComparePaneView: View {
 
     private func handleDoubleTap(at tap: DetailDoubleTapLocation) {
         guard settings.doubleTap != .off else { return }
-        guard controller.scale <= DetailFitScale.tolerance else {
+        guard controller.scale <= DetailFitScale.tolerance && !controller.zoomMode.isFullResolution
+        else {
             controller.inspectedFocusRegionID = nil
             controller.keptZoom = nil
             controller.zoomMode = .fit

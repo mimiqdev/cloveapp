@@ -2722,7 +2722,7 @@ struct DetailMarkingView: View {
     private func doubleTap(at tap: DetailDoubleTapLocation) {
         dismissGestureGuide()
         guard settings.doubleTap != .off else { return }
-        guard scale <= DetailFitScale.tolerance else {
+        guard scale <= DetailFitScale.tolerance && !isAtFullResolution else {
             inspectedFocusRegionID = nil
             focusTracking.reset()
             cancelUpgradeTask()

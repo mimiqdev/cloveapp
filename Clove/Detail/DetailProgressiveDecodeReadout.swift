@@ -388,7 +388,10 @@ struct DetailProgressiveDecodeReadout: View {
     }
 
     private func baseHStack(_ model: DetailZoomReadoutPresentation) -> some View {
-        HStack(alignment: .center, spacing: 0) {
+        let hasTrailing = model.primaryZoomText != nil || model.trailingStatusText != nil
+        let trailingSuffix = trailingSuffixText(model)
+
+        return HStack(alignment: .center, spacing: 0) {
             if let leadingIcon {
                 Image(systemName: leadingIcon)
                     .font(.system(size: iconSize, weight: .medium))
@@ -397,12 +400,12 @@ struct DetailProgressiveDecodeReadout: View {
                     .accessibilityHidden(true)
             }
 
-            if model.showsSpinner {
-                if let prefix = model.visiblePrefix {
-                    Text("\(prefix) · ")
-                        .foregroundStyle(primaryColor)
-                }
+            if let prefix = model.visiblePrefix {
+                Text(hasTrailing ? "\(prefix) · " : prefix)
+                    .foregroundStyle(primaryColor)
+            }
 
+            if model.showsSpinner {
                 ProgressView()
                     .controlSize(.small)
                     .tint(primaryColor)
@@ -411,52 +414,29 @@ struct DetailProgressiveDecodeReadout: View {
                     .padding(.trailing, 4)
                     .accessibilityHidden(true)
                     .transition(.opacity)
+            }
 
-                zoomAndStatusText(model)
+            if let zoom = model.primaryZoomText {
+                Text(zoom)
+                    .foregroundStyle(primaryColor)
+            }
+
+            if let trailingSuffix {
+                Text(trailingSuffix)
+                    .foregroundStyle(mutedColor)
                     .transition(.opacity)
-            } else {
-                combinedStaticText(model)
             }
         }
     }
 
-    private func zoomAndStatusText(_ model: DetailZoomReadoutPresentation) -> Text {
-        if let zoom = model.primaryZoomText, let status = model.trailingStatusText {
-            let formatted = AppLocalization.format("%@ · %@", language: language, zoom, status)
-            if let range = formatted.range(of: zoom),
-                range.lowerBound == formatted.startIndex
-            {
-                let rest = String(formatted[range.upperBound...])
-                return Text(zoom).foregroundColor(primaryColor)
-                    + Text(rest).foregroundColor(mutedColor)
-            }
-            return Text(formatted).foregroundColor(mutedColor)
+    private func trailingSuffixText(_ model: DetailZoomReadoutPresentation) -> String? {
+        guard let status = model.trailingStatusText else { return nil }
+        guard let zoom = model.primaryZoomText else { return status }
+        let formatted = AppLocalization.format("%@ · %@", language: language, zoom, status)
+        if let range = formatted.range(of: zoom), range.lowerBound == formatted.startIndex {
+            return String(formatted[range.upperBound...])
         }
-        if let zoom = model.primaryZoomText {
-            return Text(zoom).foregroundColor(primaryColor)
-        }
-        if let status = model.trailingStatusText {
-            return Text(status).foregroundColor(mutedColor)
-        }
-        return Text("").foregroundColor(primaryColor)
-    }
-
-    private func combinedStaticText(_ model: DetailZoomReadoutPresentation) -> Text {
-        switch (model.visiblePrefix, model.primaryZoomText, model.trailingStatusText) {
-        case (.some(let prefix), .some(let zoom), .none):
-            return Text("\(prefix) · \(zoom)").foregroundColor(primaryColor)
-        case (.none, .some(let zoom), .none):
-            return Text(zoom).foregroundColor(primaryColor)
-        case (.some(let prefix), .none, .none):
-            return Text(prefix).foregroundColor(primaryColor)
-        case (.some(let prefix), .none, .some(let status)):
-            return Text("\(prefix) · ").foregroundColor(primaryColor)
-                + Text(status).foregroundColor(mutedColor)
-        case (.none, .none, .some(let status)):
-            return Text(status).foregroundColor(mutedColor)
-        default:
-            return zoomAndStatusText(model)
-        }
+        return " · \(status)"
     }
 }
 
