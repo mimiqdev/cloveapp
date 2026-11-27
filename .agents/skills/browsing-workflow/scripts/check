@@ -15,6 +15,8 @@ import sys
 import tempfile
 import urllib.request
 
+import source_drift
+
 TLA_VERSION = "1.7.4"
 TLA_URL = f"https://github.com/tlaplus/tlaplus/releases/download/v{TLA_VERSION}/tla2tools.jar"
 TLA_SHA256 = "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
@@ -305,31 +307,23 @@ MUTANTS.update(ACTION_EFFECT_MUTANTS)
 
 def check_source_drift() -> bool:
     """Require review when covered source differs from the manually reviewed revision."""
-    sync = json.loads(SOURCE_SYNC.read_text())
-    result = subprocess.run(
-        ["git", "diff", "--name-only", sync["commit"], "--", *sync["coveredFiles"]],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Source-drift detection failed: {result.stderr.strip()}")
-    changed = [line for line in result.stdout.splitlines() if line]
-    if changed:
+    report = source_drift.check_drift(ROOT, SOURCE_SYNC)
+    if not report.passed:
         print(
-            f"FAIL source-drift gate: covered source changed since reviewed sync "
-            f"{sync['commit']}"
+            f"FAIL source-drift gate: covered source changed or failed symbol resolution "
+            f"against reviewed sync {report.commit}"
         )
-        for path in changed:
-            print(f"  {path}")
+        for failure in report.failures:
+            print(failure.format_line())
         print(
             "This is drift detection, not semantic proof. Review the source and model, "
             "then rerun. Do not advance the sync commit merely to bypass review."
         )
         return False
     print(
-        f"PASS source-drift gate: covered source matches reviewed sync {sync['commit']} "
-        "(drift detection only)"
+        f"PASS source-drift gate: {len(report.whole_files)} whole files and "
+        f"{report.symbol_count} symbols across {report.symbol_file_count} files "
+        f"match reviewed sync {report.commit} (drift detection only)"
     )
     return True
 
