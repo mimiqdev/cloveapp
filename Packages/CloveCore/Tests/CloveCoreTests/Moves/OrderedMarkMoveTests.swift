@@ -86,7 +86,6 @@ struct OrderedMarkMoveTests {
         let result = try await move.value
         #expect(result.movedCount == 1)
         #expect(result.moved.first?.files.filter { $0.role == .sidecar }.count == 1)
-        #expect(result.planDifference?.actual.sidecars == 1)
         #expect(!fixture.folder.exists("fresh.xmp"))
         #expect(fixture.folder.exists("_Rejected/fresh.xmp"))
         let undo = try await fixture.mover.undo(

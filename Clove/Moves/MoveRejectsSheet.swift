@@ -123,10 +123,6 @@ struct MoveRejectsSheet: View {
                     .accessibilityLabel(
                         AppLocalization.string("Review rejected photos", language: language)
                     )
-                    .accessibilityHint(
-                        AppLocalization.string(
-                            "Opens the grid. Tap a photo to keep it.", language: language)
-                    )
                     .accessibilityIdentifier("clove.moves.expand")
                     Text(title)
                         .font(.title3.bold())

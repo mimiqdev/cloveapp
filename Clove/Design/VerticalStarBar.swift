@@ -111,8 +111,7 @@ struct VerticalStarBar: View {
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .modifier(
                     StarBarAccessibility(
-                        individualStars: true, value: accessibilityValue,
-                        adjust: adjustRating))
+                        individualStars: true, value: accessibilityValue))
             } else {
                 interactiveLadder(in: proxy.size)
             }
@@ -159,8 +158,7 @@ struct VerticalStarBar: View {
         }
         .modifier(
             StarBarAccessibility(
-                individualStars: size == .pad, value: accessibilityValue,
-                adjust: adjustRating))
+                individualStars: size == .pad, value: accessibilityValue))
     }
 
     /// The reject stage the swipe down lands on (components.md): `flag.slash` on its own native
@@ -229,23 +227,6 @@ struct VerticalStarBar: View {
         }
         guard let live = preview else { return }
         onCommit(live)
-    }
-
-    /// Steps the rating from VoiceOver, since the bar is one adjustable control.
-    ///
-    /// It offers no value below the lowest level: clearing is the toolbar's tap rule, and stepping
-    /// down from one star stays at one (PRD Marking rules).
-    private func adjustRating(_ direction: AccessibilityAdjustmentDirection) {
-        switch direction {
-        case .increment:
-            guard let level = enabledRatings.levels.first(where: { $0 > rating }) else { return }
-            onCommit(level)
-        case .decrement:
-            guard let level = enabledRatings.levels.last(where: { $0 < rating }) else { return }
-            onCommit(level)
-        @unknown default:
-            return
-        }
     }
 
     /// The rating the bar reports to VoiceOver (copy.md `a11y.rating`).
@@ -400,7 +381,6 @@ private struct VerticalStarBarStars: View {
 private struct StarBarAccessibility: ViewModifier {
     let individualStars: Bool
     let value: String
-    let adjust: (AccessibilityAdjustmentDirection) -> Void
 
     @Environment(\.appLanguage) private var language
 
@@ -412,7 +392,6 @@ private struct StarBarAccessibility: ViewModifier {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(AppLocalization.string("Rating", language: language))
                 .accessibilityValue(value)
-                .accessibilityAdjustableAction(adjust)
         }
     }
 }

@@ -1,7 +1,6 @@
 import CloveCore
 import Foundation
 import Observation
-import UIKit
 
 /// The browsing state every screen reads and changes (PRD P0-13, P0-14).
 ///
@@ -990,7 +989,6 @@ final class BrowsingModel {
         dismissPhotosSaveToast()
         renameToastAttempt += 1
         isRenameToastVisible = true
-        UIAccessibility.post(notification: .announcement, argument: completed.message)
     }
 
     // MARK: - Save to Photos
@@ -1016,10 +1014,7 @@ final class BrowsingModel {
     }
 
     @discardableResult
-    func saveToPhotos(
-        _ plan: PhotosSavePlan,
-        language: ResolvedAppLanguage = .english
-    ) async -> PhotosSaveResult {
+    func saveToPhotos(_ plan: PhotosSavePlan) async -> PhotosSaveResult {
         guard canSaveToPhotos, !plan.fileURLs.isEmpty else {
             let error: PhotosSaveError =
                 folderLocationLoss != nil || isChangingFolder || hasLeftFolder
@@ -1040,7 +1035,7 @@ final class BrowsingModel {
             }
             let message = PhotosSaveToastMessage.saved(
                 savedCount: plan.eligibleCount, skippedRawCount: plan.skippedRawCount)
-            showPhotosSaveToast(message, language: language)
+            showPhotosSaveToast(message)
             return .saved(eligibleCount: plan.eligibleCount, skippedRawCount: plan.skippedRawCount)
         } catch let error as PhotosSaveError {
             guard folder == state.folder, generation == openGeneration, !hasLeftFolder else {
@@ -1048,31 +1043,27 @@ final class BrowsingModel {
             }
             switch error {
             case .permissionDenied:
-                showPhotosSaveToast(.permissionDenied, language: language)
+                showPhotosSaveToast(.permissionDenied)
             case .folderUnavailable, .writeFailed:
-                showPhotosSaveToast(.failed, language: language)
+                showPhotosSaveToast(.failed)
             }
             return .failed(error)
         } catch {
             guard folder == state.folder, generation == openGeneration, !hasLeftFolder else {
                 return .failed(.folderUnavailable)
             }
-            showPhotosSaveToast(.failed, language: language)
+            showPhotosSaveToast(.failed)
             return .failed(.writeFailed)
         }
     }
 
-    private func showPhotosSaveToast(
-        _ message: PhotosSaveToastMessage, language: ResolvedAppLanguage
-    ) {
+    private func showPhotosSaveToast(_ message: PhotosSaveToastMessage) {
         dismissFailureToast()
         dismissRenameToast()
         dismissRejectMoveToast()
         photosSaveToastMessage = message
         photosSaveToastAttempt += 1
         isPhotosSaveToastVisible = true
-        UIAccessibility.post(
-            notification: .announcement, argument: message.localizedText(language: language))
     }
 
     // MARK: - Move rejects
@@ -1390,14 +1381,7 @@ final class BrowsingModel {
                             ?? []
                     ))
             }
-            let difference = RejectMovePlanDifference(
-                preview: preview.removing(kept: excluded), actual: plan)
-            let result = RejectMoveResult(
-                id: moved.id, outcomes: moved.outcomes + clearFailures,
-                planDifference: difference.hasChanges ? difference : moved.planDifference)
-            if let difference = result.planDifference {
-                UIAccessibility.post(notification: .announcement, argument: difference.announcement)
-            }
+            let result = RejectMoveResult(id: moved.id, outcomes: moved.outcomes + clearFailures)
             keptEditsByMove[result.id] = kept
             recordRejectMove(
                 result, keptIdentities: kept.map(\.photo),
@@ -1493,7 +1477,6 @@ final class BrowsingModel {
         failureToastMessage = message
         isRejectMoveToastVisible = false
         isPhotosSaveToastVisible = false
-        UIAccessibility.post(notification: .announcement, argument: message)
     }
 
     /// The situation the open folder's own loss explains, or nil while it is reachable

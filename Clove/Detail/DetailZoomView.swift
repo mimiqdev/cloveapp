@@ -1163,7 +1163,6 @@ extension DetailZoomContainerView {
     }
 
     @objc private func handleChromeTap() {
-        guard !UIAccessibility.isVoiceOverRunning else { return }
         onChromeToggle?()
     }
 

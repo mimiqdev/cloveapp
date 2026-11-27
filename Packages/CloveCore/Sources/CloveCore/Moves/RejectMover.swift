@@ -85,7 +85,6 @@ public actor RejectMover {
         let plan = try planner.plan(
             for: RejectMoveRequest(
                 rootURL: preview.rootURL, sets: preview.sets, configuration: preview.configuration))
-        let difference = RejectMovePlanDifference(preview: preview, actual: plan)
 
         let id = RejectMoveBatchID()
         var outcomes: [RejectMoveOutcome] = []
@@ -96,8 +95,7 @@ public actor RejectMover {
             outcomes.append(outcome)
             publish(.setFinished(outcome))
         }
-        let result = RejectMoveResult(
-            id: id, outcomes: outcomes, planDifference: difference.hasChanges ? difference : nil)
+        let result = RejectMoveResult(id: id, outcomes: outcomes)
         rememberUndo(result, plan: plan)
         publish(.finished(result))
         return result

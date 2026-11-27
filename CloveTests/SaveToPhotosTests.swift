@@ -124,7 +124,7 @@ struct SaveToPhotosTests {
         #expect(plan.skippedRawCount == 0)
         #expect(plan.fileURLs.map(\.lastPathComponent) == ["MMQ02680.JPG", "MMQ02714.JPG"])
 
-        let result = await browsing.saveToPhotos(plan, language: .english)
+        let result = await browsing.saveToPhotos(plan)
         #expect(result == .saved(eligibleCount: 2, skippedRawCount: 0))
         #expect(library.savedPhotoURLs.count == 1)
         #expect(
@@ -192,7 +192,7 @@ struct SaveToPhotosTests {
         let plan = fixture.browsing.planSaveToPhotos()
         #expect(plan.fileURLs.map(\.lastPathComponent) == ["companion.jpg", "heif_only.heif"])
 
-        let result = await fixture.browsing.saveToPhotos(plan, language: .english)
+        let result = await fixture.browsing.saveToPhotos(plan)
         #expect(result == .saved(eligibleCount: 2, skippedRawCount: 0))
         #expect(saver.requestAuthorizationCallCount == 1)
         #expect(
@@ -249,7 +249,7 @@ struct SaveToPhotosTests {
         let target = try #require(deniedFixture.browsing.photos.first { $0.id.stem == "heif_only" })
         deniedFixture.browsing.toggleSelection(target.id)
         let deniedPlan = deniedFixture.browsing.planSaveToPhotos()
-        let deniedResult = await deniedFixture.browsing.saveToPhotos(deniedPlan, language: .english)
+        let deniedResult = await deniedFixture.browsing.saveToPhotos(deniedPlan)
 
         #expect(deniedResult == .failed(.permissionDenied))
         #expect(deniedSaver.savedBatches.isEmpty)
@@ -270,7 +270,7 @@ struct SaveToPhotosTests {
         let fileURL = try #require(plan2.fileURLs.first)
         try FileManager.default.removeItem(at: fileURL)
 
-        let writeResult = await missingFileFixture.browsing.saveToPhotos(plan2, language: .english)
+        let writeResult = await missingFileFixture.browsing.saveToPhotos(plan2)
         #expect(writeResult == .failed(.writeFailed))
         #expect(writeSaver.savedBatches.isEmpty)
         #expect(missingFileFixture.browsing.state.selection == [target2.id])
@@ -321,7 +321,7 @@ struct SaveToPhotosTests {
             }
 
             try await waitForMountedSheet(host: host, window: window)
-            await browsing.saveToPhotos(mixedPlan, language: .english)
+            await browsing.saveToPhotos(mixedPlan)
             #expect(
                 browsing.photosSaveToastMessage?.localizedText(language: .english)
                     == "Saved 1 photo to Photos · 1 RAW skipped")

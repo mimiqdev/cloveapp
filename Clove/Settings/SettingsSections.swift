@@ -578,12 +578,6 @@ struct RatingScaleSettingsList: View {
                     }
                     .disabled(isLast)
                     .accessibilityLabel(ratingName(rating))
-                    .accessibilityHint(
-                        isLast
-                            ? AppLocalization.string(
-                                "At least one rating level must remain enabled.",
-                                language: language) : ""
-                    )
                     .accessibilityIdentifier("clove.settings.rating.\(rating.rawValue)")
                 }
             } header: {

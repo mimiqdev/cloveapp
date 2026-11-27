@@ -1639,28 +1639,6 @@
         }
       }
     },
-    "Adds this keyword to all selected photos.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Adds this keyword to all selected photos."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将此关键词添加到所有已选照片。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "將此關鍵字加入所有已選相片。"
-          }
-        }
-      }
-    },
     "After marking": {
       "localizations": {
         "en": {
@@ -1965,28 +1943,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "至少剩餘 %lld 張"
-          }
-        }
-      }
-    },
-    "At least one rating level must remain enabled.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "At least one rating level must remain enabled."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "至少须保留一个启用的评分等级。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "至少須保留一個啟用的評分等級。"
           }
         }
       }
@@ -5515,28 +5471,6 @@
         }
       }
     },
-    "Move updated: %lld photos, %lld companions, %lld XMP files.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move updated: %lld photos, %lld companions, %lld XMP files."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移动清单已更新：%1$lld 张照片，%2$lld 个伴随文件，%3$lld 个 XMP 文件。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移動清單已更新：%1$lld 張相片，%2$lld 個伴隨檔案，%3$lld 個 XMP 檔案。"
-          }
-        }
-      }
-    },
     "Moved %lld to %@": {
       "localizations": {
         "en": {
@@ -6419,28 +6353,6 @@
         }
       }
     },
-    "Opens the grid. Tap a photo to keep it.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Opens the grid. Tap a photo to keep it."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开网格视图，轻点照片可将其保留。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟格狀檢視，輕點相片可將其保留。"
-          }
-        }
-      }
-    },
     "Orange": {
       "localizations": {
         "en": {
@@ -7257,28 +7169,6 @@
         }
       }
     },
-    "Previous photo": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Previous photo"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上一张照片"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上一張相片"
-          }
-        }
-      }
-    },
     "Problem": {
       "localizations": {
         "en": {
@@ -8075,28 +7965,6 @@
         }
       }
     },
-    "Removes this keyword from all selected photos.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Removes this keyword from all selected photos."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "从所有已选照片中移除此关键词。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "從所有已選相片中移除此關鍵字。"
-          }
-        }
-      }
-    },
     "Rename %lld photos": {
       "localizations": {
         "en": {
@@ -8561,28 +8429,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "重設為預設值"
-          }
-        }
-      }
-    },
-    "Retries failed or deferred analysis and preview tasks.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retries failed or deferred analysis and preview tasks."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新运行失败或延迟的分析与预览任务。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "重新執行失敗或延遲的分析與預覽任務。"
           }
         }
       }
@@ -9387,50 +9233,6 @@
         }
       }
     },
-    "Shows 100% zoom centred on this region": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Shows 100% zoom centred on this region"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "以 100% 缩放居中显示此区域"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "以 100% 縮放居中顯示此區域"
-          }
-        }
-      }
-    },
-    "Shows folder analysis and preview preparation details.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Shows folder analysis and preview preparation details."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示文件夹分析与预览准备详情。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "顯示檔案夾分析與預覽準備詳情。"
-          }
-        }
-      }
-    },
     "Similar group": {
       "localizations": {
         "en": {
@@ -9693,28 +9495,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "排序方式"
-          }
-        }
-      }
-    },
-    "Stages this keyword to add to selected photos.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Stages this keyword to add to selected photos."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂存此关键词，确认后添加到所选照片。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫存此關鍵字，確認後加入到所選相片。"
           }
         }
       }
@@ -11145,28 +10925,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法進行 100% 檢視"
-          }
-        }
-      }
-    },
-    "Unavailable while folder preparation is paused.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unavailable while folder preparation is paused."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "文件夹准备已暂停时不可用。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "檔案夾準備已暫停時無法使用。"
           }
         }
       }

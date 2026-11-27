@@ -396,20 +396,8 @@ struct AppLocalizationTests {
         #expect(
             FolderPreparationAccessibility.retryButtonAccessibilityLabel(
                 language: .traditionalChinese) == "重試準備問題")
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(
-                for: status, language: .simplifiedChinese) == "重新运行失败或延迟的分析与预览任务。")
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(
-                for: status, language: .traditionalChinese) == "重新執行失敗或延遲的分析與預覽任務。")
         var pausedStatus = status
         pausedStatus.waitingReason = .memoryPressure
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(
-                for: pausedStatus, language: .simplifiedChinese) == "文件夹准备已暂停时不可用。")
-        #expect(
-            FolderPreparationAccessibility.retryButtonAccessibilityHint(
-                for: pausedStatus, language: .traditionalChinese) == "檔案夾準備已暫停時無法使用。")
 
         #expect(AppLocalization.string("Paused", language: .english) == "Paused")
         #expect(AppLocalization.string("Paused", language: .simplifiedChinese) == "已暂停")

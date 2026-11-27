@@ -186,16 +186,11 @@ public struct RejectMoveResult: Hashable, Sendable {
     public let id: RejectMoveBatchID
     /// One outcome per requested set, in the caller's order (PRD P0-10).
     public let outcomes: [RejectMoveOutcome]
-    public let planDifference: RejectMovePlanDifference?
 
-    /// Describes confirmed outcomes and any change from the confirmation preview.
-    public init(
-        id: RejectMoveBatchID, outcomes: [RejectMoveOutcome],
-        planDifference: RejectMovePlanDifference? = nil
-    ) {
+    /// Describes confirmed outcomes.
+    public init(id: RejectMoveBatchID, outcomes: [RejectMoveOutcome]) {
         self.id = id
         self.outcomes = outcomes
-        self.planDifference = planDifference
     }
 
     /// Sets whose every file is confirmed under the rejects folder (G1 decision 5).
