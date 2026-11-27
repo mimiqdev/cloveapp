@@ -3560,35 +3560,75 @@ struct BrowsingLayoutTests {
             #expect(capsuleFrame.maxX <= compareMaxX - 8 + 0.5)
         }
 
-        // 2. Duo Portrait (669x951): hides custom topBar, mounts native horizontal .toolbar
-        // (< leading, Compare centered, [Focus | Sync | Set as A] trailing) with zero overflow
-        // and fits cleanly left of the ~230 pt top-right Status + Live Activity zone, while keeping
-        // Set as A out of the bottom bar.
+        // 2. Duo Portrait (669x951): Compare is unsupported, rotating/mounting an active Compare
+        //    session exits back to Focus View on activePhoto (preserving marks and scope) with
+        //    the non-blocking "Rotate to landscape to compare" toast that auto-dismisses cleanly
+        //    (~2 s), while manual exit and Duo Cover fold do not show it, and Focus View & Grid
+        //    Compare entry points remain hidden/disabled.
+        #expect(
+            !CompareLayoutPolicy(
+                availableWidth: 669, availableHeight: 951, isRegularWidth: true,
+                isCompactHeight: false, isDuoExpanded: true, isDuoCover: false
+            ).supportsCompare)
+
         do {
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            // 2a. Rotating an active Duo Landscape Compare session (entered from Photo Preview and
+            //     carrying a live mark on active challenger) into Duo Portrait exits to Focus View
+            //     on activePhoto and shows the auto-dismissing non-blocking rotate toast.
+            let foldRange: ClosedRange<CGFloat> = 466...485
+            let duoBox = TestDuoEnvironmentBox()
+            duoBox.usesSystemToolbar = true
+            duoBox.usesVertical = true
+            duoBox.hasFoldRegion = true
+            duoBox.isDuoExpanded = true
+            duoBox.isDuoCover = false
+
+            let targetPhoto = try #require(model.compareSession?.activePhoto)
+            let fourStars = try #require(Rating(rawValue: 4))
+            model.apply(MarkChange(rating: fourStars), to: targetPhoto)
+
             let headerFrames = TestHeaderFramesBox()
             let tapFrames = TestTapPickerFramesBox()
+            struct DuoRotationCompareHost: View {
+                let model: BrowsingModel
+                let store: SettingsStore
+                let duoBox: TestDuoEnvironmentBox
+                let foldRange: ClosedRange<CGFloat>
+                let headerFrames: TestHeaderFramesBox
+                let tapFrames: TestTapPickerFramesBox
+
+                var body: some View {
+                    NavigationStack {
+                        GridScreen(
+                            browsing: model,
+                            thumbnails: model.thumbnails,
+                            initialPresentation: .photoPreview)
+                    }
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.isDuoExpanded, duoBox.isDuoExpanded)
+                    .environment(\.isDuoCover, duoBox.isDuoCover)
+                    .environment(\.usesSystemBrowsingToolbar, duoBox.usesSystemToolbar)
+                    .environment(\.usesVerticalBrowsingToolbar, duoBox.usesVertical)
+                    .environment(\.hasFoldRegion, duoBox.hasFoldRegion)
+                    .environment(
+                        \.duoVerticalDivisionRange, duoBox.usesVertical ? foldRange : nil
+                    )
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                        headerFrames.frames = frames
+                    }
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
+                        tapFrames.frames = frames
+                    }
+                }
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
             let host = UIHostingController(
-                rootView: NavigationStack {
-                    GridScreen(
-                        browsing: model,
-                        thumbnails: model.thumbnails,
-                        initialPresentation: .focus)
-                }
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.isDuoExpanded, true)
-                .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
-                .environment(\.usesVerticalBrowsingToolbar, false)
-                .environment(\.hasFoldRegion, true)
-                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                    headerFrames.frames = frames
-                }
-                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
-                    tapFrames.frames = frames
-                })
+                rootView: DuoRotationCompareHost(
+                    model: model, store: store, duoBox: duoBox, foldRange: foldRange,
+                    headerFrames: headerFrames, tapFrames: tapFrames))
             host.traitOverrides.horizontalSizeClass = .regular
             host.traitOverrides.verticalSizeClass = .regular
             window.rootViewController = host
@@ -3598,175 +3638,185 @@ struct BrowsingLayoutTests {
                 window.rootViewController = nil
             }
 
-            try await waitFor(
-                "Duo Portrait Compare (669) toolbar did not mount: \(self.describeToolbarState(in: host, window: window, isCompare: true))"
-            ) {
-                let state = self.inspectToolbarState(in: host, window: window, isCompare: true)
-                let hasHorizontalCenter =
-                    host.traitCollection.verticalBarEdge != .unspecified
-                    || self.findNavigationBar(in: window).flatMap {
-                        self.centerBarGroupFrame(in: $0, relativeTo: window)
-                    } != nil
-                return state.frame(for: "clove.compare.done") != nil
-                    && state.frame(for: "clove.compare.focusRegions") != nil
-                    && state.frame(for: "clove.compare.syncToggle") != nil
-                    && state.frame(for: "clove.compare.setAsA") != nil
-                    && hasHorizontalCenter
-                    && tapFrames.frames["clove.compare.filmstrip"] != nil
-                    && tapFrames.frames["clove.compare.prev"] != nil
-                    && tapFrames.frames["clove.compare.next"] != nil
+            try await waitFor("Duo Landscape Compare did not mount before rotation") {
+                self.findComparePanes(in: window).count == 2
                     && tapFrames.frames["clove.compare.capsule"] != nil
             }
 
-            let snapshot = inspectToolbarState(in: host, window: window, isCompare: true)
-            let navBar = try #require(findNavigationBar(in: window))
-            let doneFrame = try #require(snapshot.frame(for: "clove.compare.done"))
-            let focusFrame = try #require(snapshot.frame(for: "clove.compare.focusRegions"))
-            let syncFrame = try #require(snapshot.frame(for: "clove.compare.syncToggle"))
-            let setAsAFrame = try #require(snapshot.frame(for: "clove.compare.setAsA"))
+            // Rotate into unfolded Duo Portrait (669x951).
+            duoBox.usesVertical = false
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
 
-            #expect(model.compareSession != nil)
-            #expect(headerFrames.frames["clove.compare.topBar"] == nil)
-            #expect(!snapshot.contains("clove.compare.undo"))
-            #expect(tapFrames.frames["clove.compare.undo"] == nil)
-            #expect(!snapshot.contains("clove.compare.activeSideBadge"))
-            #expect(tapFrames.frames["clove.compare.activeSideBadge"] == nil)
-            #expect(tapFrames.frames["clove.compare.setAsA"] == nil)
-            #expect(snapshot.leadingIDs == ["clove.compare.done"])
-            #expect(
-                snapshot.trailingIDs == [
-                    "clove.compare.focusRegions",
-                    "clove.compare.syncToggle",
-                    "clove.compare.setAsA",
-                ])
-            #expect(snapshot.bottomToolbarIDs.isEmpty)
-
-            if host.traitCollection.verticalBarEdge == .unspecified {
-                let titleFrame = try #require(centerBarGroupFrame(in: navBar, relativeTo: window))
-                #expect(titleFrame.width > 0 && titleFrame.height > 0)
-                #expect(doneFrame.maxX <= titleFrame.minX + 2)
-                #expect(titleFrame.maxX <= focusFrame.minX + 2)
-                #expect(focusFrame.maxX <= syncFrame.minX + 2)
-                #expect(syncFrame.maxX <= setAsAFrame.minX + 2)
-                // Total width of `<`, `Compare`, and `[Focus | Sync | Set as A]` fits inside the
-                // ~439 pt horizontal budget left of Duo Portrait's ~230 pt Live Activity reserve.
-                let totalItemsWidth =
-                    doneFrame.width + titleFrame.width + focusFrame.width + syncFrame.width
-                    + setAsAFrame.width
-                #expect(totalItemsWidth <= 669 - 230)
+            try await waitFor("Duo Portrait rotate-exit did not return to Focus View with toast") {
+                model.compareSession == nil
+                    && self.findComparePanes(in: window).count == 1
+                    && tapFrames.frames["clove.compare.capsule"] == nil
+                    && tapFrames.frames["clove.duo.focus"] != nil
+                    && tapFrames.frames["clove.detail.compareRotateToast"] != nil
+                    && tapFrames.frames["clove.detail.inspectionPill"] != nil
+                    && tapFrames.frames["clove.detail.filmstrip"] != nil
             }
 
-            let leadingRawCount =
-                navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0
-            let trailingRawCount =
-                navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
-            #expect(leadingRawCount == 1)
-            #expect(trailingRawCount == 3)
-            #expect(
-                (navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems) ?? []).allSatisfy {
-                    $0.customView == nil
-                })
-            #expect(
-                (navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems) ?? []).allSatisfy {
-                    $0.customView == nil
-                })
-        }
+            #expect(model.state.route == .detail)
+            #expect(model.state.currentPhoto == targetPhoto)
+            #expect(model.placedPhoto(for: targetPhoto)?.marks.rating == fourStars)
+            #expect(tapFrames.frames["clove.duo.photoPreview"] == nil)
 
-        // 2b. Duo Portrait horizontal Live-Activity budget (439x951 = 669 - 230 pt reserve):
-        // Host NavigationStack inside a 439x951 window while sizing GridScreen at 669 pt so
-        // Compare stays open while UIKit lays out the real UINavigationBar inside 0...439.
-        do {
-            let liveActivityWindow = UIWindow(windowScene: scene)
-            liveActivityWindow.frame = CGRect(x: 0, y: 0, width: 439, height: 951)
-            let headerFrames = TestHeaderFramesBox()
-            let tapFrames = TestTapPickerFramesBox()
-            let liveActivityHost = UIHostingController(
-                rootView: NavigationStack {
-                    GridScreen(
-                        browsing: model,
-                        thumbnails: model.thumbnails,
-                        initialPresentation: .focus
-                    )
-                    .frame(width: 669)
-                }
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.isDuoExpanded, true)
-                .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
-                .environment(\.usesVerticalBrowsingToolbar, false)
-                .environment(\.hasFoldRegion, true)
-                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                    headerFrames.frames = frames
-                }
-                .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
-                    tapFrames.frames = frames
-                })
-            liveActivityHost.traitOverrides.horizontalSizeClass = .regular
-            liveActivityHost.traitOverrides.verticalSizeClass = .regular
-            liveActivityWindow.rootViewController = liveActivityHost
-            liveActivityWindow.makeKeyAndVisible()
-            defer {
-                liveActivityWindow.isHidden = true
-                liveActivityWindow.rootViewController = nil
+            let toastFrame = try #require(tapFrames.frames["clove.detail.compareRotateToast"])
+            let pillFrame = try #require(tapFrames.frames["clove.detail.inspectionPill"])
+            let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
+            let capsuleFrame = try #require(tapFrames.frames["clove.duo.capsule"])
+            #expect(!toastFrame.intersects(pillFrame))
+            #expect(!toastFrame.intersects(stripFrame))
+            #expect(!toastFrame.intersects(capsuleFrame))
+            #expect(toastFrame.minX >= pillFrame.maxX + 11.5)
+            #expect(toastFrame.width >= 150 && toastFrame.height >= 44)
+
+            // Toast is hit-test transparent (.allowsHitTesting(false)) so stage gestures pass through.
+            let preview = try #require(findDetailZoomPreview(in: window))
+            let hit = try #require(
+                window.hitTest(CGPoint(x: toastFrame.midX, y: toastFrame.midY), with: nil))
+            #expect(hit.isDescendant(of: preview))
+
+            // Focus View inspection pill hides Compare completely in Duo Portrait (44 x 44 pt Focus).
+            let focusSnapshot = inspectToolbarState(in: host, window: window)
+            #expect(!focusSnapshot.entries.contains { $0.identifier == "clove.detail.compare" })
+            #expect(tapFrames.frames["clove.detail.compare"] == nil)
+            #expect(headerFrames.frames["clove.detail.compare"] == nil)
+            let focusToggleFrame = try #require(tapFrames.frames["clove.detail.focusToggle"])
+            #expect(abs(pillFrame.width - 44) <= 1.5 && abs(pillFrame.height - 44) <= 1.5)
+            #expect(
+                abs(focusToggleFrame.width - 44) <= 1.5
+                    && abs(focusToggleFrame.height - 44) <= 1.5)
+            if let focusAlpha = effectiveRenderedOpacity(atCenterOf: focusToggleFrame, in: window) {
+                #expect(focusAlpha > 0.9)
             }
 
+            // Auto-dismisses cleanly after ~2 seconds.
             try await waitFor(
-                "Duo Portrait Compare (439) toolbar did not mount: \(self.describeToolbarState(in: liveActivityHost, window: liveActivityWindow, isCompare: true))"
+                "Duo Portrait compare rotate toast did not auto-dismiss",
+                timeout: .seconds(4)
             ) {
-                let state = self.inspectToolbarState(
-                    in: liveActivityHost, window: liveActivityWindow, isCompare: true)
-                let hasHorizontalCenter =
-                    liveActivityHost.traitCollection.verticalBarEdge != .unspecified
-                    || self.findNavigationBar(in: liveActivityWindow).flatMap {
-                        self.centerBarGroupFrame(in: $0, relativeTo: liveActivityWindow)
-                    } != nil
-                return state.frame(for: "clove.compare.done") != nil
-                    && state.frame(for: "clove.compare.focusRegions") != nil
-                    && state.frame(for: "clove.compare.syncToggle") != nil
-                    && state.frame(for: "clove.compare.setAsA") != nil
-                    && hasHorizontalCenter
+                tapFrames.frames["clove.detail.compareRotateToast"] == nil
             }
 
-            let snapshot = inspectToolbarState(
-                in: liveActivityHost, window: liveActivityWindow, isCompare: true)
-            let navBar = try #require(findNavigationBar(in: liveActivityWindow))
-            let navBarFrame = navBar.convert(navBar.bounds, to: liveActivityWindow)
-            #expect(navBarFrame.width <= 439 + 0.5)
-            #expect(model.compareSession != nil)
-            #expect(headerFrames.frames["clove.compare.topBar"] == nil)
-            #expect(snapshot.leadingIDs == ["clove.compare.done"])
-            #expect(
-                snapshot.trailingIDs == [
-                    "clove.compare.focusRegions",
-                    "clove.compare.syncToggle",
-                    "clove.compare.setAsA",
-                ])
-            let leadingRawCount =
-                navBar.topItem?.leadingItemGroups.flatMap(\.barButtonItems).count ?? 0
-            let trailingRawCount =
-                navBar.topItem?.trailingItemGroups.flatMap(\.barButtonItems).count ?? 0
-            #expect(leadingRawCount == 1)
-            #expect(trailingRawCount == 3)
+            // 2b. Mounting an active Compare session directly in Duo Portrait (669x951) exits to
+            //     Focus View with the rotate toast, and re-entering Compare / navigating clears it.
+            let directTimeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            #expect(model.enterCompareFromDetail(timeline: directTimeline))
+            let mountedTarget = try #require(model.compareSession?.activePhoto)
 
-            if liveActivityHost.traitCollection.verticalBarEdge == .unspecified {
-                let doneFrame = try #require(snapshot.frame(for: "clove.compare.done"))
-                let titleFrame = try #require(
-                    centerBarGroupFrame(in: navBar, relativeTo: liveActivityWindow))
-                let focusFrame = try #require(snapshot.frame(for: "clove.compare.focusRegions"))
-                let syncFrame = try #require(snapshot.frame(for: "clove.compare.syncToggle"))
-                let setAsAFrame = try #require(snapshot.frame(for: "clove.compare.setAsA"))
-                for frame in [doneFrame, titleFrame, focusFrame, syncFrame, setAsAFrame] {
-                    #expect(frame.width > 0 && frame.height > 0)
-                }
-                #expect(doneFrame.minX >= 0)
-                #expect(doneFrame.maxX <= titleFrame.minX + 2)
-                #expect(titleFrame.maxX <= focusFrame.minX + 2)
-                #expect(focusFrame.maxX <= syncFrame.minX + 2)
-                #expect(syncFrame.maxX <= setAsAFrame.minX + 2)
-                #expect(setAsAFrame.maxX <= 439 + 0.5)
+            try await waitFor("Direct Duo Portrait Compare mount did not exit with toast") {
+                model.compareSession == nil
+                    && model.state.currentPhoto == mountedTarget
+                    && tapFrames.frames["clove.detail.compareRotateToast"] != nil
             }
+
+            let otherPhoto = try #require(model.photos.first { $0.id != mountedTarget }?.id)
+            model.openPhoto(otherPhoto)
+            try await waitFor(
+                "Navigating to another photo did not clear rotate toast",
+                timeout: .milliseconds(800)
+            ) {
+                model.state.currentPhoto == otherPhoto
+                    && tapFrames.frames["clove.detail.compareRotateToast"] == nil
+            }
+
+            // 2c. Manual exit in Duo Landscape does NOT trigger the rotate toast.
+            duoBox.usesVertical = true
+            window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+
+            let manualTimeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            #expect(model.enterCompareFromDetail(timeline: manualTimeline))
+            try await waitFor("Duo Landscape Compare did not mount before manual exit") {
+                self.findComparePanes(in: window).count == 2
+            }
+            model.exitCompare()
+            try await waitFor("Manual exit did not return to Focus View") {
+                model.compareSession == nil && tapFrames.frames["clove.duo.focus"] != nil
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+
+            // 2d. Folding to Duo Cover does NOT trigger the rotate toast.
+            let coverTimeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            #expect(model.enterCompareFromDetail(timeline: coverTimeline))
+            try await waitFor("Duo Landscape Compare did not mount before cover fold") {
+                self.findComparePanes(in: window).count == 2
+            }
+            duoBox.isDuoExpanded = false
+            duoBox.isDuoCover = true
+            duoBox.hasFoldRegion = false
+            duoBox.usesVertical = true
+            window.frame = CGRect(x: 0, y: 0, width: 412, height: 915)
+            host.traitOverrides.horizontalSizeClass = .compact
+            host.traitOverrides.verticalSizeClass = .regular
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await waitFor("Cover fold did not exit Compare") {
+                model.compareSession == nil
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+
+            // 2e. Grid two-photo selection in unfolded Duo Portrait (669x951) hides Compare capsule.
+            model.back()
+            let second = try #require(model.photos.dropFirst().first)
+            model.toggleSelection(first)
+            model.toggleSelection(second.id)
+            defer { model.clearSelection() }
+            duoBox.isDuoExpanded = true
+            duoBox.isDuoCover = false
+            duoBox.hasFoldRegion = true
+            duoBox.usesVertical = false
+            window.frame = CGRect(x: 0, y: 0, width: 669, height: 951)
+            host.traitOverrides.horizontalSizeClass = .regular
+            host.traitOverrides.verticalSizeClass = .regular
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await waitFor("Duo Portrait Grid batch bar did not mount") {
+                tapFrames.frames["clove.grid.batch.bar"] != nil
+                    && tapFrames.frames["clove.grid.batch.actions"] != nil
+            }
+            #expect(tapFrames.frames["clove.grid.batch.compare"] == nil)
         }
+    }
+
+    private func findDetailZoomPreview(in view: UIView) -> DetailZoomContainerView? {
+        if let preview = view as? DetailZoomContainerView { return preview }
+        for child in view.subviews {
+            if let found = findDetailZoomPreview(in: child) { return found }
+        }
+        return nil
+    }
+
+    private func effectiveRenderedOpacity(atCenterOf rect: CGRect, in window: UIWindow) -> CGFloat?
+    {
+        let point = CGPoint(x: rect.midX, y: rect.midY)
+        func walk(_ view: UIView, inherited: CGFloat) -> [CGFloat] {
+            let viewInWindow = view.convert(view.bounds, to: window)
+            guard viewInWindow.contains(point) else { return [] }
+            let local = inherited * view.alpha
+            var matches = view.subviews.flatMap { walk($0, inherited: local) }
+            if abs(viewInWindow.width - rect.width) <= 4,
+                abs(viewInWindow.height - rect.height) <= 4
+            {
+                matches.append(local)
+            }
+            return matches
+        }
+        return walk(window, inherited: 1).min()
     }
 
     private func findComparePanes(in view: UIView) -> [DetailZoomContainerView] {

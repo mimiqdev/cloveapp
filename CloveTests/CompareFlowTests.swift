@@ -95,9 +95,12 @@ struct CompareFlowTests {
         #expect(model.shownMarks(for: library.identity("twoB")).isUnmarked)
     }
 
-    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-        for _ in 0..<200 {
-            if condition() { return }
+    private func waitUntil(
+        timeout: Duration = .seconds(1),
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition(), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(condition())
@@ -283,6 +286,7 @@ struct CompareFlowTests {
 
         let p1 = library.identity("p1")
         let p2 = library.identity("p2")
+        let p3 = library.identity("p3")
         model.openPhoto(p1)
         let timeline = DetailTimeline(
             photos: model.photos, groups: model.groups, groupsEnabled: true)
@@ -292,26 +296,147 @@ struct CompareFlowTests {
         model.apply(MarkChange(rating: Rating(rawValue: 5)!), to: p2)
         #expect(model.compareSession?.activePhoto == p2)
 
+        let env = PortraitHostEnv()
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let tapFrames = CompareFrameBox()
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        struct HostView: View {
+            let model: BrowsingModel
+            let store: SettingsStore
+            let env: PortraitHostEnv
+            let tapFrames: CompareFrameBox
+            var body: some View {
+                DetailScreen(browsing: model, images: SampleDetailImages())
+                    .environment(store)
+                    .environment(\.isDuoCover, env.isDuoCover)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    }
+            }
+        }
         let host = UIHostingController(
-            rootView: DetailScreen(browsing: model, images: SampleDetailImages())
-                .environment(SettingsStore.sample))
+            rootView: HostView(model: model, store: store, env: env, tapFrames: tapFrames))
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .compact
         window.rootViewController = host
-        window.isHidden = false
-        defer { window.isHidden = true }
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         host.view.frame = window.bounds
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { self.findPanes(in: window).count == 2 }
         #expect(model.compareSession != nil)
 
-        // Rotate to portrait phone -> auto-exits Compare to Detail on active side's photo (p2) with mark intact.
+        // Rotate to portrait phone -> auto-exits Compare to Detail on active side's photo (p2)
+        // with mark intact and shows the non-blocking rotate toast.
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitUntil {
+            model.compareSession == nil
+                && tapFrames.frames["clove.detail.compareRotateToast"] != nil
+        }
+
+        #expect(model.state.route == .detail)
+        #expect(model.state.currentPhoto == p2)
+        #expect(model.placedPhoto(for: p2)?.marks.rating == Rating(rawValue: 5))
+
+        // Toast never blocks gestures/marking on the underlying stage.
+        let toastFrame = try #require(tapFrames.frames["clove.detail.compareRotateToast"])
+        let preview = try #require(findPanes(in: window).first)
+        let hit = try #require(
+            window.hitTest(CGPoint(x: toastFrame.midX, y: toastFrame.midY), with: nil))
+        #expect(hit.isDescendant(of: preview))
+
+        // Navigating to another photo clears the rotate toast immediately.
+        model.openPhoto(p3)
+        try await waitUntil(timeout: .milliseconds(800)) {
+            model.state.currentPhoto == p3
+                && tapFrames.frames["clove.detail.compareRotateToast"] == nil
+        }
+
+        // Re-entering Compare in landscape and folding to Duo Cover exits WITHOUT showing the rotate toast.
+        window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
+        host.traitOverrides.verticalSizeClass = .compact
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        let landscapeTimeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: landscapeTimeline))
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+
+        env.isDuoCover = true
+        window.frame = CGRect(x: 0, y: 0, width: 412, height: 915)
+        host.traitOverrides.verticalSizeClass = .regular
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitUntil { model.compareSession == nil }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.state.route == .detail)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+    }
+
+    @Test("Rotating out of Compare preserves an active save-failure toast instead of replacing it")
+    func hostedCompareRotateExitPreservesActiveFailureToast() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let p1 = library.identity("p1")
+        let p2 = library.identity("p2")
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+        #expect(model.compareSession?.activePhoto == p2)
+
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let tapFrames = CompareFrameBox()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: DetailScreen(browsing: model, images: SampleDetailImages())
+                .environment(store)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    tapFrames.frames = $0
+                })
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+
+        // Trigger a mark-save failure so the failure toast is active before rotating.
+        library.failNext.insert(p2)
+        model.apply(MarkChange(rating: Rating(rawValue: 4)!), to: p2)
+        await model.drainActions()
+        try await waitUntil { model.failureToastMessage != nil }
+        let failureMessage = try #require(model.failureToastMessage)
+
+        // Rotate to portrait: Compare exits to Focus View on p2 while keeping the failure toast
+        // intact and suppressing the rotate toast.
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
@@ -319,10 +444,89 @@ struct CompareFlowTests {
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
         try await waitUntil { model.compareSession == nil }
+        try await Task.sleep(for: .milliseconds(100))
 
         #expect(model.state.route == .detail)
         #expect(model.state.currentPhoto == p2)
-        #expect(model.placedPhoto(for: p2)?.marks.rating == Rating(rawValue: 5))
+        #expect(model.failureToastMessage == failureMessage)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+        #expect(hasVisibleFailureToastGlass(in: window))
+
+        model.dismissFailureToast()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.failureToastMessage == nil)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+    }
+
+    @Test("Narrowing portrait iPad Compare window exits without rotate toast")
+    func hostedPadPortraitNarrowingExitsWithoutRotateToast() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let p1 = library.identity("p1")
+        let p2 = library.identity("p2")
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+        #expect(model.compareSession?.activePhoto == p2)
+
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let tapFrames = CompareFrameBox()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: DetailScreen(browsing: model, images: SampleDetailImages())
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.isDuoExpanded, false)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    tapFrames.frames = $0
+                })
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+
+        // Narrowing an iPad window (e.g., Slide Over / narrow Split View) exits Compare without
+        // showing the phone/Duo rotation toast.
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 1024)
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitUntil { model.compareSession == nil }
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(model.state.route == .detail)
+        #expect(model.state.currentPhoto == p2)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+    }
+
+    private func hasVisibleFailureToastGlass(in window: UIWindow) -> Bool {
+        func walk(_ view: UIView) -> Bool {
+            let frame = view.convert(view.bounds, to: window)
+            if String(describing: type(of: view)).contains("GlassInteractionView"),
+                !view.isHidden, view.alpha > 0.01, view.layer.opacity > 0.01,
+                frame.width > 120, frame.height >= 52
+            {
+                return true
+            }
+            return view.subviews.contains(where: walk)
+        }
+        return walk(window)
     }
 
     @Test(
@@ -2097,6 +2301,12 @@ private struct CompareFilmstripHarnessView: View {
 @MainActor
 private final class CompareFrameBox {
     var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+@Observable
+private final class PortraitHostEnv {
+    var isDuoCover = false
 }
 
 @MainActor
