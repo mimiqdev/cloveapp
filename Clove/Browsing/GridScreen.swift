@@ -128,6 +128,14 @@ struct GridScreen: View {
         store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
             && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
     }
+    private var emptyStateKind: GridEmptyStateKind {
+        GridEmptyStateKind.resolve(
+            browsing: browsing, moveRejectsEnabled: store.settings.moveRejectsEnabled)
+    }
+    private var isShowingAllReviewed: Bool {
+        if cells.isEmpty, case .allReviewed = emptyStateKind { return true }
+        return false
+    }
 
     private var activeToastKey: String? {
         if !(usesDock && browsing.state.route == .detail),
@@ -234,7 +242,7 @@ struct GridScreen: View {
                 filterHandoff.dismissFiltersAndCancelPending()
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isRegular, !usesVerticalGridDock, showsMoveRejects {
+                if !isRegular, !usesVerticalGridDock, showsMoveRejects, !isShowingAllReviewed {
                     MoveRejectsButton(identifier: "clove.grid.moveRejects") {
                         presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
@@ -248,9 +256,9 @@ struct GridScreen: View {
                 }
             }
             .animation(
-                (!isRegular && !usesVerticalGridDock && showsMoveRejects)
+                (!isRegular && !usesVerticalGridDock && showsMoveRejects && !isShowingAllReviewed)
                     ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil,
-                value: showsMoveRejects
+                value: showsMoveRejects && !isShowingAllReviewed
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isSelecting && !(usesDock && browsing.state.route == .detail) {
@@ -1046,10 +1054,21 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        if !browsing.hasFolderContents && !browsing.isFolderOpening {
+        switch emptyStateKind {
+        case .emptyFolder:
             EntryEmptyState(isEmptyFolder: true) { isPickingEmptyFolder = true }
                 .accessibilityIdentifier("clove.grid.empty")
-        } else {
+                .reportHeaderControlFrame("clove.grid.empty")
+        case .allReviewed(let summary):
+            GridAllReviewedView(
+                summary: summary,
+                onMoveRejects: {
+                    presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
+                },
+                onShowAll: {
+                    browsing.setFilter(.all)
+                })
+        case .filteredEmpty(let isOpening, let canClearFilters):
             ContentUnavailableView {
                 Label(
                     AppLocalization.string("No photos", language: language),
@@ -1057,21 +1076,22 @@ struct GridScreen: View {
             } description: {
                 Text(
                     AppLocalization.string(
-                        browsing.isFolderOpening
-                            ? "Reading photos…" : "No photos match this filter.",
+                        isOpening ? "Reading photos…" : "No photos match this filter.",
                         language: language))
             } actions: {
-                if !browsing.isFolderOpening && hasFilter {
+                if canClearFilters {
                     Button(AppLocalization.string("Clear filters", language: language)) {
                         browsing.clearAllFilters()
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.clove.accent)
                     .accessibilityIdentifier("clove.grid.empty.clearFilters")
+                    .reportHeaderControlFrame("clove.grid.empty.clearFilters")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("clove.grid.empty")
+            .reportHeaderControlFrame("clove.grid.empty")
         }
     }
 
