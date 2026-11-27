@@ -107,6 +107,7 @@ struct DetailFilmstrip: View {
 
     @Environment(\.cloveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.cloveReduceMotionOverride) private var reduceMotionOverride
     @Environment(\.appLanguage) private var language
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -605,6 +606,10 @@ struct DetailFilmstrip: View {
 
     // MARK: - Level Transition Choreography
 
+    private var effectiveReduceMotion: Bool {
+        reduceMotionOverride ?? reduceMotion
+    }
+
     private func handleLevelTransition(from oldID: GroupID?, to newID: GroupID?) {
         levelTransitionTask?.cancel()
         exitingGroupTask?.cancel()
@@ -623,7 +628,7 @@ struct DetailFilmstrip: View {
             let isOverflowing = expandedGroup.map(showsGridPicker(for:)) ?? false
             let compressedSpacing =
                 isOverflowing ? Self.groupRestingSpacing : Self.groupCompressedSpacing
-            if reduceMotion {
+            if effectiveReduceMotion {
                 timelineOffsetY = 0
                 timelineTilt = 0
                 timelinePulseScale = 1
@@ -673,7 +678,7 @@ struct DetailFilmstrip: View {
             let collapsedSpacing =
                 isOverflowing ? Self.groupRestingSpacing : Self.groupCompressedSpacing
             UISelectionFeedbackGenerator().selectionChanged()
-            if reduceMotion {
+            if effectiveReduceMotion {
                 groupOffsetY = 0
                 groupTilt = 0
                 groupMemberSpacing = Self.groupRestingSpacing
@@ -894,7 +899,8 @@ struct DetailFilmstrip: View {
         Task { @MainActor in
             await Task.yield()
             guard !Task.isCancelled else { return }
-            withAnimation(animated ? CloveMotion.chrome(reduceMotion: reduceMotion) : nil) {
+            withAnimation(animated ? CloveMotion.chrome(reduceMotion: effectiveReduceMotion) : nil)
+            {
                 proxy.scrollTo(target, anchor: .center)
             }
         }

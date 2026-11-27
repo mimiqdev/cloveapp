@@ -109,13 +109,17 @@ struct DetailMarkingView: View {
     @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cloveReduceMotionOverride) private var reduceMotionOverride
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var reduceMotion: Bool {
+        reduceMotionOverride ?? systemReduceMotion
+    }
     @Environment(\.appLanguage) private var language
     @Environment(SettingsStore.self) private var settingsStore: SettingsStore?
     @State private var hidesChrome = false
     @State private var widePresentation: DetailPresentation
-    @State private var expandPillNudgeCount = 0
     @State private var containerSize: CGSize = .zero
     @State private var pendingRestoredZoom: DetailZoomSnapshot?
     @State private var windowID = UUID()
@@ -426,14 +430,6 @@ struct DetailMarkingView: View {
 
     private var currentTimelineGroup: ActiveBrowsingGroup? {
         expandedGroup == nil ? timeline.activeGroup(containing: photo.id) : nil
-    }
-
-    private var isReadOnlyCollapsedGroup: Bool {
-        currentTimelineGroup != nil
-    }
-
-    private var allowsMarkingInput: Bool {
-        browsing.canMark && !isReadOnlyCollapsedGroup
     }
 
     private var userInterfaceIdiom: UIUserInterfaceIdiom {
@@ -1103,7 +1099,7 @@ struct DetailMarkingView: View {
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
                 onBegin: beginToolbarMarking
             )
-            .disabled(!allowsMarkingInput)
+            .disabled(!browsing.canMark)
             .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
             .transition(.opacity)
         }
@@ -1303,8 +1299,8 @@ struct DetailMarkingView: View {
             onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
             onBegin: beginToolbarMarking
         )
-        .disabled(!allowsMarkingInput)
-        .opacity(allowsMarkingInput ? 1 : 0.32)
+        .disabled(!browsing.canMark)
+        .opacity(browsing.canMark ? 1 : 0.32)
         .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
     }
 
@@ -1589,7 +1585,7 @@ struct DetailMarkingView: View {
                         },
                         onBegin: beginToolbarMarking
                     )
-                    .disabled(!allowsMarkingInput)
+                    .disabled(!browsing.canMark)
                     .accessibilityValue(
                         MarkSummary.text(for: displayMarks, language: language)
                     )
@@ -1715,7 +1711,7 @@ struct DetailMarkingView: View {
                 onLabel: { choose($0.map { ColourLabel(colour: $0) } ?? .clear) },
                 onBegin: beginToolbarMarking
             )
-            .disabled(!allowsMarkingInput)
+            .disabled(!browsing.canMark)
             .accessibilityValue(MarkSummary.text(for: displayMarks, language: language))
             .padding(.bottom, 2)
             .layoutPriority(1)
@@ -1758,7 +1754,6 @@ struct DetailMarkingView: View {
                     "Expand %lld photos", language: language, Int64(group.visibleMembers.count)),
                 identifier: "clove.detail.expandGroup",
                 tone: .neutral,
-                nudgeTrigger: expandPillNudgeCount,
                 compact: compact
             ) { expandFilmstripGroup(group.id) }
         }
@@ -1766,15 +1761,28 @@ struct DetailMarkingView: View {
     }
 
     private var detailSubtitlePrefix: String? {
+        Self.headerSubtitlePrefix(
+            photoID: photo.id,
+            timeline: timeline,
+            expandedGroup: expandedGroup,
+            language: language)
+    }
+
+    static func headerSubtitlePrefix(
+        photoID: PhotoIdentity,
+        timeline: DetailTimeline,
+        expandedGroup: ActiveBrowsingGroup?,
+        language: ResolvedAppLanguage
+    ) -> String? {
         if let expandedGroup,
-            let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photo.id })
+            let index = expandedGroup.visibleMembers.firstIndex(where: { $0.id == photoID })
         {
             let pos = AppLocalization.format(
                 "%lld / %lld", language: language, Int64(index + 1),
                 Int64(expandedGroup.visibleMembers.count))
             return AppLocalization.format("Group · %@", language: language, pos)
         }
-        if let index = timeline.slotIndex(containing: photo.id) {
+        if let index = timeline.slotIndex(containing: photoID) {
             return AppLocalization.format(
                 "%lld / %lld", language: language, Int64(index + 1),
                 Int64(timeline.slots.count))
@@ -1856,13 +1864,7 @@ struct DetailMarkingView: View {
             onMarkingSwipe: { applyMarkingSwipe($0, touchCount: 1) },
             onTwoFingerMarkingSwipe: { applyMarkingSwipe($0, touchCount: 2) },
             onSwipeBegin: { beginMarkingGesture() },
-            allowsMarking: allowsMarkingInput,
-            onReadOnlyMarkingDrag: isReadOnlyCollapsedGroup
-                ? {
-                    dismissGestureGuide()
-                    if hidesChrome { hidesChrome = false }
-                    expandPillNudgeCount += 1
-                } : nil,
+            allowsMarking: browsing.canMark,
             hasPrevious: navigationAvailability.previous,
             hasNext: navigationAvailability.next,
             probe: probe,
@@ -3065,12 +3067,12 @@ struct DetailMarkingView: View {
     ///
     /// The key reads the marks the capsule acts on, so a disabled level or a key that
     /// would change nothing is the same no-input the rules already report for them.
-    private func markKey(_ key: MarkingKey) {
+    func markKey(_ key: MarkingKey) {
         tapPickerDismissToken += 1
         apply(
             rules.result(
                 for: key, marks: browsing.shownMarks(for: photo.id),
-                allowsMarking: allowsMarkingInput))
+                allowsMarking: browsing.canMark))
     }
 
     private func beginToolbarMarking() {
@@ -3096,39 +3098,39 @@ struct DetailMarkingView: View {
     }
 
     /// One rating tap, resolved by C13's rating-bar rule (PRD Marking rules).
-    private func rate(_ rating: Rating) {
+    func rate(_ rating: Rating) {
         let marks = browsing.shownMarks(for: photo.id)
         apply(
             rules.result(
-                forRating: rating, marks: marks, allowsMarking: allowsMarkingInput))
+                forRating: rating, marks: marks, allowsMarking: browsing.canMark))
     }
 
     /// One label choice, resolved by C13's label rule (PRD Marking rules).
-    private func choose(_ label: ColourLabel) {
+    func choose(_ label: ColourLabel) {
         apply(
             rules.result(
                 forLabel: label, marks: browsing.shownMarks(for: photo.id),
-                allowsMarking: allowsMarkingInput))
+                allowsMarking: browsing.canMark))
     }
 
     /// Toggles Reject, which is the rating −1 (PRD Marking rules).
-    private func toggleReject() {
+    func toggleReject() {
         // The HUD's Reject is a toggle, while the `↓` key only turns Reject on. C13 owns both
         // directions and the mark kind auto-advance reads (PRD Marking rules, PRD Auto-advance).
         apply(
             rules.result(
                 forRejectToggle: browsing.shownMarks(for: photo.id),
-                allowsMarking: allowsMarkingInput))
+                allowsMarking: browsing.canMark))
     }
 
     /// Resolves one finished marking swipe through C13's gesture rules (PRD P0-06).
     func applyMarkingSwipe(_ rating: Rating, touchCount: Int = 1) {
-        guard allowsMarkingInput else { return }
+        guard browsing.canMark else { return }
         let isZoomed = (probe.container?.isZoomed ?? false) || scale > DetailFitScale.tolerance
         apply(
             rules.result(
                 forSwipeRating: rating, marks: browsing.shownMarks(for: photo.id),
-                isZoomed: isZoomed, touchCount: touchCount, allowsMarking: allowsMarkingInput))
+                isZoomed: isZoomed, touchCount: touchCount, allowsMarking: browsing.canMark))
     }
 
     /// Applies one resolved marking input and asks the screen to start the advance it asks for
@@ -3138,10 +3140,37 @@ struct DetailMarkingView: View {
     /// here, so the mark path is one function. A result that changes nothing writes nothing and
     /// advances nothing (PRD P0-06 acceptance).
     private func apply(_ result: MarkingResult) {
+        Self.apply(
+            result,
+            currentTimelineGroup: currentTimelineGroup,
+            expandedGroup: expandedGroup,
+            photo: photo,
+            canMark: browsing.canMark,
+            actions: actions,
+            undo: undo,
+            dismissGestureGuide: dismissGestureGuide)
+    }
+
+    /// Dispatches one resolved marking result using explicit dependencies so callers and tests can
+    /// exercise the exact expand-before-plan-and-apply ordering outside a mounted view hierarchy.
+    @MainActor
+    static func apply(
+        _ result: MarkingResult,
+        currentTimelineGroup: ActiveBrowsingGroup?,
+        expandedGroup: ActiveBrowsingGroup?,
+        photo: GridPhoto,
+        canMark: Bool,
+        actions: DetailMarkingActions,
+        undo: () -> Void,
+        dismissGestureGuide: () -> Void = {}
+    ) {
         dismissGestureGuide()
         switch result {
         case .mark(let change, let kind):
-            guard allowsMarkingInput else { return }
+            guard canMark else { return }
+            if let group = currentTimelineGroup {
+                actions.expandGroup(group.id)
+            }
             // Plan navigation from the current order before a mark removes this photo from
             // a live filter. Both calls are synchronous; the mark still shows in this input turn.
             actions.marked(kind, change, photo)
@@ -3252,7 +3281,7 @@ struct DetailMarkingView: View {
     private var tapPickerDismissTrigger: DetailTapPickerDismissTrigger {
         DetailTapPickerDismissTrigger(
             photoID: photo.id,
-            canMark: allowsMarkingInput,
+            canMark: browsing.canMark,
             chromeIsVisible: chromeIsVisible,
             showsInformation: showsInformation,
             showsPhotoGrid: showsPhotoGrid,

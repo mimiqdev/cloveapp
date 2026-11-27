@@ -3569,55 +3569,478 @@ struct DetailDisplayPresentationTests {
         return try #require(context.makeImage())
     }
 
-    @Test func collapsedStackIsReadOnlyAndVerticalDragNudgesWithoutMarking() async throws {
+    @Test func markingCollapsedGroupRepresentativeOrdersExpandBeforePlanAndApplyAcrossInputs()
+        async throws
+    {
+        let fourStars = try #require(Rating(rawValue: 4))
+        let red = ColourLabel(colour: .red)
+
+        func makeModel() async throws -> (
+            BrowsingModel, ControlledPhotoLibrary, BrowsingGroup, PhotoIdentity, PhotoIdentity,
+            PhotoIdentity, PhotoIdentity
+        ) {
+            let library = ControlledPhotoLibrary(
+                rejected: [], stems: ["rep", "g1", "g2", "standalone"])
+            let group = BrowsingGroup(
+                id: GroupID(rawValue: "burst"),
+                members: ["rep", "g1", "g2"].map { library.identity($0) })
+            library.groups = [group]
+            let model = BrowsingModel(library: library)
+            model.openFolder()
+            library.reportScanFinished()
+            try await waitFor { !model.isFolderOpening && !model.groups.isEmpty }
+            return (
+                model, library, group, library.identity("rep"), library.identity("g1"),
+                library.identity("g2"), library.identity("standalone")
+            )
+        }
+
+        let rules = MarkingInputRules(
+            settings: AppSettings(
+                autoAdvance: AutoAdvance(
+                    destination: .nextPhoto,
+                    triggers: AutoAdvanceTriggers(rating: true, reject: true, colourLabel: true))))
+
+        // Toolbar (rate, choose, toggleReject), swipe ladder, and keyboard all expand first,
+        // then plan auto-advance against the expanded group, then apply the mark.
+        let inputCases: [(String, (PhotoMarks) -> MarkingResult, PhotoMarks)] = [
+            (
+                "toolbarRating", { rules.result(forRating: fourStars, marks: $0) },
+                PhotoMarks(rating: fourStars)
+            ),
+            ("toolbarLabel", { rules.result(forLabel: red, marks: $0) }, PhotoMarks(label: red)),
+            ("toolbarReject", { rules.result(forRejectToggle: $0) }, PhotoMarks(rating: .rejected)),
+            (
+                "swipe",
+                {
+                    rules.result(
+                        forSwipeRating: fourStars, marks: $0, isZoomed: false, touchCount: 1)
+                },
+                PhotoMarks(rating: fourStars)
+            ),
+            (
+                "keyboardRating", { rules.result(for: .rating(fourStars), marks: $0) },
+                PhotoMarks(rating: fourStars)
+            ),
+            (
+                "keyboardLabel", { rules.result(for: .colourLabel(.red), marks: $0) },
+                PhotoMarks(label: red)
+            ),
+            (
+                "keyboardNextRating", { rules.result(for: .nextRating, marks: $0) },
+                PhotoMarks(rating: try #require(Rating(rawValue: 1)))
+            ),
+            (
+                "keyboardReject", { rules.result(for: .reject, marks: $0) },
+                PhotoMarks(rating: .rejected)
+            ),
+        ]
+
+        for (label, resolveResult, expectedMarks) in inputCases {
+            let (model, _, group, rep, g1, g2, _) = try await makeModel()
+            model.openPhoto(rep)
+            let repPhoto = try #require(model.currentPhoto)
+            let timeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            let activeGroup = timeline.activeGroup(containing: rep)
+
+            var events: [String] = []
+            var plannedTarget: AutoAdvanceTarget?
+            let actions = DetailMarkingActions(
+                apply: { change, photo in
+                    events.append("apply")
+                    #expect(model.expandedGroup == group.id)
+                    model.apply(change, to: photo.id)
+                },
+                marked: { kind, change, photo in
+                    events.append("marked")
+                    #expect(model.expandedGroup == group.id)
+                    let currentTimeline = DetailTimeline(
+                        photos: model.photos, groups: model.groups, groupsEnabled: true)
+                    plannedTarget =
+                        currentTimeline.autoAdvancePlan(
+                            after: kind, change: change, from: photo.id,
+                            expandedGroup: model.expandedGroup, rules: rules
+                        ).target
+                },
+                step: { _ in events.append("step") },
+                markingSwipeBegan: {},
+                expandGroup: { groupID in
+                    events.append("expand")
+                    model.openGroup(groupID, on: model.state.currentPhoto)
+                })
+
+            let result = resolveResult(model.shownMarks(for: rep))
+            DetailMarkingView.apply(
+                result,
+                currentTimelineGroup: activeGroup,
+                expandedGroup: nil,
+                photo: repPhoto,
+                canMark: model.canMark,
+                actions: actions,
+                undo: { model.undoLastMark(restoringNavigation: true) })
+
+            #expect(
+                events == ["expand", "marked", "apply"],
+                Comment(rawValue: "\(label) did not expand -> plan -> apply in order"))
+            #expect(plannedTarget == .groupUndecidedPhoto(g1))
+            #expect(model.expandedGroup == group.id)
+            #expect(model.shownMarks(for: rep) == expectedMarks)
+
+            let expandedTimeline = DetailTimeline(
+                photos: model.photos, groups: model.groups, groupsEnabled: true)
+            let expanded = try #require(expandedTimeline.activeGroup(with: group.id))
+            let finishing = GroupFinishingPlan(
+                group: expanded.group,
+                action: .rejectUnmarked,
+                currentPhoto: rep,
+                marks: Dictionary(
+                    uniqueKeysWithValues: expanded.visibleMembers.map { ($0.id, $0.marks) }))
+            if expectedMarks.rating > .unrated || !expectedMarks.label.isClear {
+                #expect(finishing.rejects.map(\.photo) == [g1, g2])
+            } else {
+                #expect(finishing.isEmpty)
+            }
+
+            // Undo reverts the mark and stays in Group Focus without collapsing.
+            model.undoLastMark(restoringNavigation: true)
+            #expect(model.expandedGroup == group.id)
+            #expect(model.state.currentPhoto == rep)
+            #expect(model.shownMarks(for: rep) == PhotoMarks())
+            await model.drainActions()
+        }
+
+        // Clearing an existing mark or marking in a 1-visible-member group / standalone photo /
+        // navigation or no-op key obeys the expected expansion and advance rules.
+        let (model, library, group, rep, g1, g2, standalone) = try await makeModel()
+        model.apply(.rating(fourStars), to: rep)
+        await model.drainActions()
+        model.openPhoto(rep)
+        let repPhoto = try #require(model.currentPhoto)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        var events: [String] = []
+        let noopActions = DetailMarkingActions(
+            apply: { _, _ in events.append("apply") },
+            marked: { _, _, _ in events.append("marked") },
+            step: { _ in events.append("step") },
+            markingSwipeBegan: {},
+            expandGroup: { _ in events.append("expand") })
+
+        DetailMarkingView.apply(
+            rules.result(for: .rating(fourStars), marks: model.shownMarks(for: rep)),
+            currentTimelineGroup: timeline.activeGroup(containing: rep),
+            expandedGroup: nil,
+            photo: repPhoto,
+            canMark: model.canMark,
+            actions: noopActions,
+            undo: {})
+        #expect(events.isEmpty)
+        #expect(model.expandedGroup == nil)
+
+        DetailMarkingView.apply(
+            rules.result(for: .nextPhoto, marks: model.shownMarks(for: rep)),
+            currentTimelineGroup: timeline.activeGroup(containing: rep),
+            expandedGroup: nil,
+            photo: repPhoto,
+            canMark: model.canMark,
+            actions: noopActions,
+            undo: {})
+        #expect(events == ["step"])
+        #expect(model.expandedGroup == nil)
+
+        // Standalone photos stay in Timeline when marked.
+        model.openPhoto(standalone)
+        let standalonePhoto = try #require(model.currentPhoto)
+        events.removeAll()
+        DetailMarkingView.apply(
+            rules.result(for: .rating(fourStars), marks: model.shownMarks(for: standalone)),
+            currentTimelineGroup: timeline.activeGroup(containing: standalone),
+            expandedGroup: nil,
+            photo: standalonePhoto,
+            canMark: model.canMark,
+            actions: DetailMarkingActions(
+                apply: { change, photo in
+                    events.append("apply")
+                    model.apply(change, to: photo.id)
+                },
+                marked: { _, _, _ in events.append("marked") },
+                step: { _ in },
+                markingSwipeBegan: {},
+                expandGroup: { _ in events.append("expand") }),
+            undo: {})
+        #expect(events == ["marked", "apply"])
+        #expect(model.expandedGroup == nil)
+        #expect(model.expandedGroup != group.id)
+
+        // Clearing an existing mark (e.g. toggling Reject back to unmarked) expands and plans .stay.
+        model.apply(.rating(.rejected), to: rep)
+        await model.drainActions()
+        model.openPhoto(rep)
+        events.removeAll()
+        var clearTarget: AutoAdvanceTarget?
+        DetailMarkingView.apply(
+            rules.result(forRejectToggle: model.shownMarks(for: rep)),
+            currentTimelineGroup: timeline.activeGroup(containing: rep),
+            expandedGroup: nil,
+            photo: try #require(model.currentPhoto),
+            canMark: model.canMark,
+            actions: DetailMarkingActions(
+                apply: { change, photo in
+                    events.append("apply")
+                    model.apply(change, to: photo.id)
+                },
+                marked: { kind, change, photo in
+                    events.append("marked")
+                    let currentTimeline = DetailTimeline(
+                        photos: model.photos, groups: model.groups, groupsEnabled: true)
+                    clearTarget =
+                        currentTimeline.autoAdvancePlan(
+                            after: kind, change: change, from: photo.id,
+                            expandedGroup: model.expandedGroup, rules: rules
+                        ).target
+                },
+                step: { _ in },
+                markingSwipeBegan: {},
+                expandGroup: { groupID in
+                    events.append("expand")
+                    model.openGroup(groupID, on: model.state.currentPhoto)
+                }),
+            undo: {})
+        #expect(events == ["expand", "marked", "apply"])
+        #expect(clearTarget == .stay)
+        #expect(model.expandedGroup == group.id)
+        model.collapseGroup()
+
+        // A group reduced to < 2 visible members has no active group on Timeline, so marking stays unexpanded.
+        model.apply(.rating(.rejected), to: g1)
+        model.apply(.rating(.rejected), to: g2)
+        model.setFilter(.unmarked)
+        await model.drainActions()
+        model.openPhoto(rep)
+        let singleVisibleTimeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(singleVisibleTimeline.activeGroup(containing: rep) == nil)
+        events.removeAll()
+        DetailMarkingView.apply(
+            rules.result(for: .rating(fourStars), marks: model.shownMarks(for: rep)),
+            currentTimelineGroup: singleVisibleTimeline.activeGroup(containing: rep),
+            expandedGroup: nil,
+            photo: try #require(model.currentPhoto),
+            canMark: model.canMark,
+            actions: DetailMarkingActions(
+                apply: { change, photo in
+                    events.append("apply")
+                    model.apply(change, to: photo.id)
+                },
+                marked: { _, _, _ in events.append("marked") },
+                step: { _ in },
+                markingSwipeBegan: {},
+                expandGroup: { _ in events.append("expand") }),
+            undo: {})
+        #expect(events == ["marked", "apply"])
+        #expect(model.expandedGroup == nil)
+        _ = library
+        await model.drainActions()
+    }
+
+    private func accessibilityLabel(forIdentifier identifier: String, in root: UIView) -> String? {
+        var visited = Set<ObjectIdentifier>()
+        func searchObject(_ object: AnyObject) -> String? {
+            guard visited.insert(ObjectIdentifier(object)).inserted else { return nil }
+            if let identification = object as? UIAccessibilityIdentification,
+                identification.accessibilityIdentifier == identifier
+            {
+                return (object as? NSObject)?.accessibilityLabel
+            }
+            if let elements = (object as? NSObject)?.accessibilityElements {
+                for element in elements {
+                    if let found = searchObject(element as AnyObject) {
+                        return found
+                    }
+                }
+            }
+            if let container = object as? NSObject {
+                let count = container.accessibilityElementCount()
+                if count != NSNotFound && count > 0 {
+                    for index in 0..<count {
+                        if let element = container.accessibilityElement(at: index),
+                            let found = searchObject(element as AnyObject)
+                        {
+                            return found
+                        }
+                    }
+                }
+            }
+            if let view = object as? UIView {
+                for child in view.subviews {
+                    if let found = searchObject(child) {
+                        return found
+                    }
+                }
+            }
+            return nil
+        }
+        return searchObject(root)
+    }
+
+    @Test func markingCollapsedGroupRepresentativeEntersGroupFocusAdvancesRejectsAndUndoStays()
+        async throws
+    {
         let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
-        let source = ObservedDetailImages()
-        let store = SettingsStore.sample
-        let browsing = BrowsingModel(library: TestLibrary.sample())
-        browsing.openFolder()
-        try await waitFor("folder did not open") { !browsing.isFolderOpening }
-        let group = try #require(browsing.groups.first)
-        let rep = try #require(
-            BrowsingGroup.representative(
-                of: browsing.photos.filter { group.members.contains($0.id) })?.id)
-        let marksBefore = browsing.shownMarks(for: rep)
-        browsing.openPhoto(rep)
+        let fiveStars = try #require(Rating(rawValue: 5))
 
-        let window = UIWindow(windowScene: scene)
-        window.frame = scene.coordinateSpace.bounds
-        window.rootViewController = UIHostingController(
-            rootView: DetailScreen(browsing: browsing, images: source).environment(store))
-        window.makeKeyAndVisible()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
+        for reduceMotion in [false, true] {
+            let source = ObservedDetailImages()
+            let storage = SampleSettingsStorage()
+            let store = SettingsStore(
+                persistence: SettingsPersistence(storage: storage),
+                rememberedAdvanceStorage: storage)
+            store.markGestureGuideSeen()
+            store.update {
+                $0.autoAdvance = AutoAdvance(destination: .nextPhoto)
+            }
+
+            let library = ControlledPhotoLibrary(
+                rejected: [], stems: ["burst_1_rep", "burst_2_g1", "burst_3_g2", "standalone"])
+            let group = BrowsingGroup(
+                id: GroupID(rawValue: "burst"),
+                members: ["burst_1_rep", "burst_2_g1", "burst_3_g2"].map { library.identity($0) })
+            library.groups = [group]
+            let browsing = BrowsingModel(library: library)
+            browsing.openFolder()
+            library.reportScanFinished()
+            try await waitFor { !browsing.isFolderOpening && !browsing.groups.isEmpty }
+
+            let rep = library.identity("burst_1_rep")
+            let g1 = library.identity("burst_2_g1")
+            browsing.openPhoto(rep)
+
+            let tapFrames = DetailFrameBox()
+            let headerFrames = DetailFrameBox()
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            let host = UIHostingController(
+                rootView: DetailScreen(browsing: browsing, images: source)
+                    .environment(store)
+                    .environment(\.cloveUserInterfaceIdiom, .phone)
+                    .environment(\.usesSystemBrowsingToolbar, false)
+                    .environment(\.cloveReduceMotionOverride, reduceMotion)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    }
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        headerFrames.frames = $0
+                    })
+            host.traitOverrides.horizontalSizeClass = .compact
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitFor(
+                "collapsed group Detail did not settle (reduceMotion=\(reduceMotion))"
+            ) {
+                source.prefetched.last?.current.photo == rep
+                    && tapFrames.frames["clove.detail.expandGroup"] != nil
+                    && tapFrames.frames["clove.detail.filmstrip.timeline"] != nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+            }
+            let preview = try #require(findPreview(in: window))
+            #expect(browsing.expandedGroup == nil)
+            #expect(preview.allowsMarking)
+            let timeline = DetailTimeline(
+                photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+            #expect(
+                DetailMarkingView.headerSubtitlePrefix(
+                    photoID: rep,
+                    timeline: timeline,
+                    expandedGroup: nil,
+                    language: store.resolvedLanguage
+                ) == "1 / 2")
+            if let timelineZoomLabel = accessibilityLabel(
+                forIdentifier: "clove.detail.zoom", in: window)
+            {
+                #expect(!timelineZoomLabel.hasPrefix("Group"))
+            }
+
+            // Swipe-rating the collapsed representative immediately enters Group Focus on rep,
+            // marks rep, switches header and filmstrip, surfaces Reject N unmarked, and auto-advances to g1.
+            let swipeGeometry = MarkingSwipeRules.geometry(
+                containerHeight: Double(preview.bounds.height))
+            try sendSwipe(
+                to: preview,
+                start: .zero,
+                travel: CGPoint(x: 0, y: -(swipeGeometry.upSpan + 4)))
+            #expect(browsing.expandedGroup == group.id)
+            #expect(browsing.shownMarks(for: rep).rating == fiveStars)
+
+            try await waitFor("Group Focus strip, header, Reject pill, and advance did not settle")
+            {
+                browsing.expandedGroup == group.id
+                    && browsing.state.currentPhoto == g1
+                    && tapFrames.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                    && tapFrames.frames["clove.detail.rejectUnmarked"] != nil
+                    && tapFrames.frames["clove.detail.expandGroup"] == nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+            }
+            let groupTimeline = DetailTimeline(
+                photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+            let activeGroup = try #require(groupTimeline.activeGroup(with: group.id))
+            #expect(
+                DetailMarkingView.headerSubtitlePrefix(
+                    photoID: g1,
+                    timeline: groupTimeline,
+                    expandedGroup: activeGroup,
+                    language: store.resolvedLanguage
+                ) == "Group · 2 / 3")
+            let finishing = GroupFinishingPlan(
+                group: activeGroup, action: .rejectUnmarked, currentPhoto: g1)
+            #expect(finishing.availability == .available)
+            #expect(
+                AppLocalization.format(
+                    "Reject %lld unmarked", language: store.resolvedLanguage,
+                    Int64(finishing.rejects.count)) == "Reject 2 unmarked")
+            if let groupZoomLabel = accessibilityLabel(
+                forIdentifier: "clove.detail.zoom", in: window)
+            {
+                #expect(groupZoomLabel.hasPrefix("Group · 2 / 3"))
+            }
+            if let rejectLabel = accessibilityLabel(
+                forIdentifier: "clove.detail.rejectUnmarked", in: window)
+            {
+                #expect(rejectLabel == "Reject 2 unmarked")
+            }
+
+            // Undo reverts rep's mark and stays in Group Focus without collapsing.
+            browsing.undoLastMark(restoringNavigation: true)
+            try await waitFor("Undo did not stay in Group Focus on rep") {
+                browsing.expandedGroup == group.id
+                    && browsing.state.currentPhoto == rep
+                    && browsing.shownMarks(for: rep).isUnmarked
+                    && tapFrames.frames["clove.detail.filmstrip.expandedGroup"] != nil
+                    && tapFrames.frames["clove.detail.rejectUnmarked"] == nil
+                    && headerFrames.frames["clove.detail.zoom"] != nil
+            }
+            let undoneTimeline = DetailTimeline(
+                photos: browsing.photos, groups: browsing.groups, groupsEnabled: true)
+            let undoneGroup = try #require(undoneTimeline.activeGroup(with: group.id))
+            #expect(
+                DetailMarkingView.headerSubtitlePrefix(
+                    photoID: rep,
+                    timeline: undoneTimeline,
+                    expandedGroup: undoneGroup,
+                    language: store.resolvedLanguage
+                ) == "Group · 1 / 3")
+            if let undoneZoomLabel = accessibilityLabel(
+                forIdentifier: "clove.detail.zoom", in: window)
+            {
+                #expect(undoneZoomLabel.hasPrefix("Group · 1 / 3"))
+            }
+            await browsing.drainActions()
         }
-
-        try await waitFor { source.prefetched.last?.current.photo == rep }
-        let preview = try #require(findPreview(in: window))
-        #expect(browsing.expandedGroup == nil)
-        #expect(!preview.allowsMarking)
-        #expect(preview.onReadOnlyMarkingDrag != nil)
-
-        var nudged = 0
-        let originalNudge = preview.onReadOnlyMarkingDrag
-        preview.onReadOnlyMarkingDrag = {
-            nudged += 1
-            originalNudge?()
-        }
-        try sendSwipe(to: preview, travel: CGPoint(x: 0, y: -120))
-        #expect(nudged == 1)
-        #expect(browsing.shownMarks(for: rep) == marksBefore)
-        #expect(preview.feedback?.rating == nil)
-
-        browsing.openGroup(group.id, on: rep)
-        try await waitFor { preview.allowsMarking }
-        #expect(browsing.expandedGroup == group.id)
-
-        browsing.collapseGroup()
-        try await waitFor { !preview.allowsMarking }
-        #expect(browsing.expandedGroup == nil)
-        #expect(browsing.state.currentPhoto == rep)
     }
 
     @Test func splitPhotoPreviewAndFocusViewSyncExpandedGroupMarksAndZoom() async throws {
@@ -6922,24 +7345,23 @@ struct DetailDisplayPresentationTests {
         #expect(photoPreviewInspection.maxX + 12 <= photoPreviewExpand.minX + 1)
         #expect(photoPreviewExpand.maxX <= photoPreviewCapsule.minX - 12 + 1)
 
-        // Collapsed Timeline stack applies 0.32 read-only opacity and keeps marking disabled.
+        // Collapsed Timeline stack keeps full MarkingToolbar opacity and enables marking directly.
         let collapsedToolbarAlpha = effectiveRenderedOpacity(
             atCenterOf: photoPreviewCapsule, in: window)
         if let collapsedToolbarAlpha {
-            #expect(abs(collapsedToolbarAlpha - 0.32) < 0.05)
+            #expect(collapsedToolbarAlpha > 0.9)
         }
-        #expect(!preview.allowsMarking)
-        #expect(preview.onReadOnlyMarkingDrag != nil)
+        #expect(preview.allowsMarking)
 
-        // Vertical drag on collapsed stack restores hidden chrome to surface Expand pill.
+        // Chrome toggle hides and restores bottom band and Expand pill cleanly on collapsed stack.
         preview.onChromeToggle?()
         try await waitFor("iPad Photo Preview chrome hidden") {
             tapFrames.frames["clove.detail.bottomBand"] == nil
                 && tapFrames.frames["clove.detail.inspectionPill"] == nil
                 && tapFrames.frames["clove.detail.expandGroup"] == nil
         }
-        preview.onReadOnlyMarkingDrag?()
-        try await waitFor("collapsed drag surfaced Expand pill") {
+        preview.onChromeToggle?()
+        try await waitFor("iPad Photo Preview chrome restored") {
             tapFrames.frames["clove.detail.bottomBand"] != nil
                 && tapFrames.frames["clove.detail.inspectionPill"] != nil
                 && tapFrames.frames["clove.detail.expandGroup"] != nil

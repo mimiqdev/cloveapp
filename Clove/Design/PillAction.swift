@@ -37,18 +37,13 @@ struct PillAction: View {
         Identity(identifier: identifier, title: title, tone: tone)
     }
 
-    /// Incrementing this counter pulses a subtle scale bounce (used for read-only nudges).
-    var nudgeTrigger: Int = 0
-
     /// Compact header presentation trims padding slightly while preserving capsule tap ergonomics.
     var compact = false
 
     /// What the tap does.
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
-    @State private var isNudged = false
 
     var body: some View {
         Button(action: action) {
@@ -63,15 +58,6 @@ struct PillAction: View {
         }
         .frame(minHeight: compact ? 44 : nil)
         .buttonStyle(.cloveGlassPress)
-        .scaleEffect(isNudged && !reduceMotion ? 1.08 : 1)
-        .animation(CloveMotion.nudge(reduceMotion: reduceMotion), value: isNudged)
-        .task(id: nudgeTrigger) {
-            guard nudgeTrigger > 0 else { return }
-            isNudged = true
-            try? await Task.sleep(for: .milliseconds(160))
-            guard !Task.isCancelled else { return }
-            isNudged = false
-        }
         .accessibilityIdentifier(identifier)
         .reportTapPickerFrame(identifier)
         .onChange(of: tapPickerTriggerRequest) { _, request in

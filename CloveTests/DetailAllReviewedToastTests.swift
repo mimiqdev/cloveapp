@@ -411,6 +411,108 @@ struct DetailAllReviewedToastTests {
         }
     }
 
+    @Test
+    func
+        markingLastUnmarkedPhotoViaCollapsedGroupRepresentativeEntersGroupFocusAndShowsAllReviewedToast()
+        async throws
+    {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = ControlledPhotoLibrary(rejected: ["g2"], stems: ["p1", "g1", "g2"])
+        let group = BrowsingGroup(
+            id: GroupID(rawValue: "g1"),
+            members: [library.identity("g1"), library.identity("g2")])
+        library.groups = [group]
+
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        library.reportScanFinished()
+        try await waitFor("folder with group did not open") {
+            !browsing.isFolderOpening && !browsing.groups.isEmpty
+        }
+
+        let p1 = library.identity("p1")
+        let g1 = library.identity("g1")
+        let fourStars = try #require(Rating(rawValue: 4))
+        browsing.apply(.rating(fourStars), to: p1)
+        await browsing.drainActions()
+        #expect(browsing.sidebarCounts.unmarked == 1)
+
+        let store = makeSettingsStore(destination: .stay)
+        let presentation = AllReviewedPresentationBox(value: .focus)
+        let framesBox = AllReviewedFrameBox()
+        let triggerBox = AllReviewedTriggerBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        let host = UIHostingController(
+            rootView: AllReviewedDetailHost(
+                browsing: browsing,
+                images: SampleDetailImages(),
+                store: store,
+                presentation: presentation,
+                triggerBox: triggerBox
+            )
+            .environment(\.cloveTheme, .dark)
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                framesBox.frames = $0
+            })
+        host.traitOverrides.horizontalSizeClass = .compact
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        browsing.openPhoto(g1)
+        try await waitFor("collapsed group representative mounted", host: host) {
+            self.findPreview(in: window)?.allowsMarking == true
+                && framesBox.frames["clove.detail.expandGroup"] != nil
+                && browsing.expandedGroup == nil
+        }
+
+        // Marking under .stay enters Group Focus on g1, shows All reviewed toast, and is NOT
+        // dismissed by the nil -> group.id expansion change.
+        let preview = try #require(findPreview(in: window))
+        preview.onMarkingSwipe?(fourStars)
+        try await waitFor("All reviewed toast appeared in newly expanded Group Focus", host: host) {
+            browsing.expandedGroup == group.id
+                && browsing.shownMarks(for: g1).rating == fourStars
+                && framesBox.frames["clove.detail.allReviewedToast"] != nil
+                && framesBox.frames["clove.detail.filmstrip.expandedGroup"] != nil
+        }
+        try await Task.sleep(for: .milliseconds(150))
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        #expect(framesBox.frames["clove.detail.allReviewedToast"] != nil)
+
+        // Undo hides All reviewed toast, restores g1 unmarked, and stays in Group Focus.
+        browsing.undoLastMark(restoringNavigation: true)
+        try await waitFor("Undo hid All reviewed toast while staying in Group Focus", host: host) {
+            framesBox.frames["clove.detail.allReviewedToast"] == nil
+                && browsing.expandedGroup == group.id
+                && browsing.shownMarks(for: g1).isUnmarked
+                && browsing.sidebarCounts.unmarked == 1
+        }
+
+        // Collapse back to Timeline and re-mark with auto-advance = .nextPhoto: expands into
+        // Group Focus, shows All reviewed toast, and keeps it across Group Focus auto-advance exit.
+        browsing.collapseGroup()
+        try await waitFor("collapsed back to Timeline", host: host) {
+            browsing.expandedGroup == nil
+                && framesBox.frames["clove.detail.expandGroup"] != nil
+        }
+        store.update { $0.autoAdvance = AutoAdvance(destination: .nextPhoto) }
+        preview.onMarkingSwipe?(fourStars)
+        try await waitFor(
+            "All reviewed toast survived expand-then-mark and Group Focus exit", host: host
+        ) {
+            framesBox.frames["clove.detail.allReviewedToast"] != nil
+                && browsing.sidebarCounts.unmarked == 0
+                && browsing.expandedGroup == nil
+                && browsing.state.currentPhoto == p1
+        }
+    }
+
     @Test func dismissalCoversNavigationPhotoTapMarkingCompareAndFailureToastPrecedence()
         async throws
     {
