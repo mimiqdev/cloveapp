@@ -4,7 +4,7 @@
 
 Status: pending review. This document defines product scope and acceptance criteria. It is neither implementation authorization nor an architecture proposal.
 
-Visual source: the MVP design handoff in [`design/handoff/`](../design/handoff/README.md), adopted by the product owner on 2026-11-10. For screens, interactions, and copy, the handoff takes precedence over this document: where they differ, follow the handoff. The 2026-11-10 revision below lists the scope changes it brought. The earlier Uxie designs remain not adopted.
+Visual source: the live Figma file (*Clove — Native concept*, `xJcgQ7FziNyPM7UToZvkmq`) and GitHub issues, replacing the retired 2026-11-10 static MVP design handoff snapshot. For screens, interactions, and copy, the live Figma design and issues take precedence over this document: where they differ, follow them. The 2026-11-10 revision below lists the scope changes that design direction brought. The earlier Uxie designs remain not adopted.
 
 Sources: [2026-11-08 siftapp product positioning: pure culling, benchmarked against PhotoPicker App](https://app.notion.com/p/41237873fb5481bc9a28c2681f42a322), [2026-11-08 siftapp culling main-flow UI](https://app.notion.com/p/41237873fb5481c9bd5afcf26ae0a296), [engineering research conclusions](https://app.notion.com/p/41237873fb548107bd96d0f6838b1200), and the 2026-11-08 launch-scope discussion with the product owner. Existing Notion pages still use siftapp. This document uses Clove as its replacement name.
 
@@ -19,12 +19,12 @@ Sources: [2026-11-08 siftapp product positioning: pure culling, benchmarked agai
 
 2026-11-10 design revision, with the product owner:
 
-- The MVP design handoff in `design/handoff/` is adopted and takes precedence over this document for screens, interactions, and copy. Items it tags (proposed) still need the owner's confirmation.
+- The 2026-11-10 MVP design (originally delivered as a static handoff snapshot, now maintained in the live Figma file *Clove — Native concept* and GitHub issues) is adopted and takes precedence over this document for screens, interactions, and copy. Items tagged (proposed) still need the owner's confirmation.
 - Move rejects can be undone in the app. Undo moves the files back and restores Reject on them, as one undo step. This replaces the earlier rule that the user restores moved files by hand.
 - The Move rejects confirmation lets the user keep individual rejects before moving. A keep is only staged until Move.
 - In-group culling has one finishing action, Reject N unmarked, in place of Keep this, reject the rest and Keep rated, reject the rest. To keep one photo and reject the rest, the user rates it and then uses Reject N unmarked.
 - Synchronized zoom is always on in groups, with no toggle.
-- The proposed copy in this document is superseded by `design/handoff/copy.md`.
+- The proposed copy in this document is superseded by the UI copy in the live Figma design and app implementation.
 
 2026-11-08 scope revision, aligned with the [approved G1 decision](decisions/G1-technical-approach.md) on 2026-11-09:
 
@@ -110,7 +110,7 @@ Open a folder or reopen it from Recents → browse, filter, and sort the grid �
 
 ## Screens and states
 
-The behavior below follows the product and UI conclusions and the revisions above. Where it differs from the design handoff in `design/handoff/`, follow the handoff.
+The behavior below follows the product and UI conclusions and the revisions above. Where it differs from the live Figma file (*Clove — Native concept*) and GitHub issues, follow those.
 
 ### Entry: Open and Recents
 

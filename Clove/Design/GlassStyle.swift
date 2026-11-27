@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// The one glass material every floating control uses (`design/handoff/components.md`, Shared glass
-/// style).
+/// The one glass material every floating control uses.
 ///
 /// From iOS 26 the system's Liquid Glass draws the material. Older versions, and iOS 18 is the
-/// minimum, fall back to the handoff's recipe: the theme's `surface/glass` token over the system's
+/// minimum, fall back to the recipe: the theme's `surface/glass` token over the system's
 /// background blur, with a soft drop shadow of about 16. Glass goes over the content, never on the
 /// photo itself.
 private struct CloveGlass<S: Shape>: ViewModifier {

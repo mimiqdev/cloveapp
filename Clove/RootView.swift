@@ -3,8 +3,7 @@ import SwiftUI
 import UIKit
 
 /// The scene's root: it owns this scene's browsing model and stores that model's state
-/// (PRD P0-14), and it puts the theme in effect into the environment
-/// (`design/handoff/tokens/tokens.md`).
+/// (PRD P0-14), and it puts the theme in effect into the environment.
 ///
 /// The state itself lives in ``BrowsingModel``, never in a view's `@State`, so changing the layout
 /// never resets it (G1 fold-state row). It is stored per scene through `@SceneStorage`, and

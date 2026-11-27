@@ -2,7 +2,7 @@ import CloveCore
 import SwiftUI
 
 /// The shared three-action marking family: Reject, Rating and Label in one compact native glass
-/// group (`design/handoff/components.md`, Marking toolbar; owner decision, 2026-11-13, #227).
+/// group (owner decision, 2026-11-13, #227).
 ///
 /// The frame is 168 × 48 with a hairline between the actions. Reject draws `flag.slash` off and
 /// `flag.slash.fill` in `reject` when on, so it never reads as a Close button. The rating action

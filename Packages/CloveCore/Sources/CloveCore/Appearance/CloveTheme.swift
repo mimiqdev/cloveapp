@@ -1,12 +1,12 @@
 /// Whether a resolved palette is a light or a dark appearance.
 ///
 /// It decides the status bar and the keyboard, and the palette selected within a family when
-/// ``AppearanceMode/system`` follows the device appearance (`design/handoff/tokens/tokens.md`).
+/// ``AppearanceMode/system`` follows the device appearance.
 public enum ThemeAppearance: String, CaseIterable, Hashable, Sendable {
-    /// A light appearance (tokens.md).
+    /// A light appearance.
     case light
 
-    /// A dark appearance (tokens.md).
+    /// A dark appearance.
     case dark
 }
 
@@ -104,12 +104,12 @@ public enum ThemeFamily: String, CaseIterable, Hashable, Identifiable, Sendable 
     }
 }
 
-/// One of the twelve resolved chrome palettes (`design/handoff/tokens/clove-themes.json`).
+/// One of the twelve resolved chrome palettes.
 ///
 /// Six paired ``ThemeFamily`` choices resolve to twelve palettes (light and dark for each family).
-/// Photos are never tinted by a palette; only the chrome around them changes (tokens.md).
+/// Photos are never tinted by a palette; only the chrome around them changes.
 public enum CloveTheme: String, CaseIterable, Hashable, Identifiable, Sendable {
-    /// Default light palette (tokens.md).
+    /// Default light palette.
     case light
 
     /// Default dark palette.
@@ -145,10 +145,10 @@ public enum CloveTheme: String, CaseIterable, Hashable, Identifiable, Sendable {
     /// The Gruvbox palette (decisions-log, Themes).
     case gruvbox
 
-    /// The stable identity used in `clove-themes.json` and legacy settings migration.
+    /// The stable identity used for persistence and settings migration.
     public var id: String { rawValue }
 
-    /// The palette's display name (`clove-themes.json` `name`).
+    /// The palette's display name.
     public var name: String {
         switch self {
         case .light: "Light"
@@ -178,7 +178,7 @@ public enum CloveTheme: String, CaseIterable, Hashable, Identifiable, Sendable {
         }
     }
 
-    /// Whether the palette sets a light or a dark color scheme (tokens.md).
+    /// Whether the palette sets a light or a dark color scheme.
     public var appearance: ThemeAppearance {
         switch self {
         case .light, .catppuccinLatte, .darkroomLight, .nightLight, .nordLight, .gruvboxLight:
@@ -188,7 +188,7 @@ public enum CloveTheme: String, CaseIterable, Hashable, Identifiable, Sendable {
         }
     }
 
-    /// The palette's 23 tokens (`clove-themes.json`).
+    /// The palette's 23 tokens.
     public var tokens: ThemeTokens {
         switch self {
         case .light: .light

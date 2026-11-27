@@ -2,7 +2,7 @@ import CloveCore
 import SwiftUI
 
 /// The shared visual tap-rating picker: an explicit Clear action (`star.slash`) plus five SF stars
-/// (`star` / `star.fill`) in a glass capsule (`design/handoff/components.md`, Tap rating picker).
+/// (`star` / `star.fill`) in a glass capsule.
 ///
 /// Horizontal order is Clear, 1, 2, 3, 4, 5 left to right (`288 × 52` pt reference). Vertical
 /// order is 5, 4, 3, 2, 1, Clear top to bottom (`52 × 288` pt reference), so stars fill from the

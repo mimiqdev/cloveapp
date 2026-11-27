@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// Reports the device's light or dark style, which a `.preferredColorScheme` override cannot change
-/// (`design/handoff/tokens/tokens.md`).
+/// Reports the device's light or dark style, which a `.preferredColorScheme` override cannot change.
 ///
 /// `RootView` sets the hosting view's color scheme from the theme in effect, so it must not read
 /// the color scheme of the tree it overrides. This reader reads and observes the `UIWindowScene`'s

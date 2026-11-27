@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// Whether this launch shows the design gallery instead of the app
-/// (`design/handoff/README.md`, suggested build order).
+/// Whether this launch shows the design gallery instead of the app.
 ///
 /// The gallery exists for previews, screenshots and the UI test, never for normal use: nothing in
 /// the app's navigation reaches it, and it appears only when the launch environment asks for it.
@@ -18,8 +17,7 @@ enum DesignGalleryLaunch {
     }
 }
 
-/// Every shared control in every state, with a theme switcher, for previews and screenshots
-/// (`design/handoff/components.md`, `README.md` build order steps 1 and 2).
+/// Every shared control in every state, with a theme switcher, for previews and screenshots.
 ///
 /// The gallery keeps the controls checkable before the screens adopt them: it draws each control
 /// with plain sample values and empty closures, and switching a theme shows all of them in that

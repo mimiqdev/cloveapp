@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The 2 pt progress line under the toolbar (`design/handoff/components.md`, Progress line).
+/// The 2 pt progress line under the toolbar.
 ///
 /// It fills in `accent` while the folder is read and in `group` while similar shots are found, and
 /// it is hidden when the work is done, which `nil` progress does. The line reports reading and

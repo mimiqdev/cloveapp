@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The glass toast that reports a finished batch (`design/handoff/components.md`, Toast).
+/// The glass toast that reports a finished batch.
 ///
 /// It is 358 × 55, radius 26, with a padding of 18/8 and a gap of 12. The text sits on the left and
 /// the action on the right, as accent text in a 72 × 38 target; a second line in `reject` says how

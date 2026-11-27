@@ -5,7 +5,7 @@ import Testing
 @testable import Clove
 
 /// The ladder the swipe indicator mirrors is 48 × 204 with a 44 pt chip and a 10 pt gap
-/// (`design/handoff/components.md`, owner decision, 2026-11-13, #227).
+/// (owner decision, 2026-11-13, #227).
 @MainActor
 struct DetailSwipeIndicatorTests {
     @Test func rightSideTouchPlacesTheWholeBarToItsLeftAndCentresOnTheStart() {

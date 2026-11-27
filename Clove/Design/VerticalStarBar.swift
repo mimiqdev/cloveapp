@@ -2,13 +2,13 @@ import CloveCore
 import SwiftUI
 
 /// The shared quick-rating ladder: a narrow native glass column of five stars that fill from the
-/// bottom (`design/handoff/components.md`, Quick-rating ladder; owner decision, 2026-11-13, #227).
+/// bottom (owner decision, 2026-11-13, #227).
 ///
 /// It opens on a swipe up in iPhone detail, from the marking toolbar's rating action, and on the
 /// Duo cover's rating button. Dragging fills the stars from the bottom to the top and only the
 /// release commits, so the mark is written once: ``onPreview`` reports the live value while the
 /// drag runs, for the toolbar's rating action to mirror it, and ``onCommit`` reports the value
-/// the gesture ends on (`design/handoff/interactions.md`, iPhone Detail). A tap picks the star it
+/// the gesture ends on. A tap picks the star it
 /// lands on, and tapping the photo's current value clears it, the same rule as the toolbar
 /// (PRD Marking rules). The optional chip below the ladder is the swipe-down reject stage:
 /// `flag.slash` in the theme's secondary text, distinct from the `star.slash` clear stage.

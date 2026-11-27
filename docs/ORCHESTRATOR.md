@@ -171,9 +171,8 @@ check. Clove-specific practice:
 Decisions the orchestrator makes on its own (scope calls, deviations
 accepted, ordering) are recorded as comments on issue
 [#150](https://github.com/mimiqdev/cloveapp/issues/150) for the owner to
-check later. Owner decisions stay in issues and
-`design/handoff/decisions-log.md`. Use that issue; do not start a new
-ledger.
+check later. Owner decisions stay in GitHub issues (the earlier design decisions log
+has been retired). Use that issue; do not start a new ledger.
 
 ## On this Linux machine
 

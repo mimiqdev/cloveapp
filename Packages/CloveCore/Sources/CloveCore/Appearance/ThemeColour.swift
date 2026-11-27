@@ -1,9 +1,7 @@
 /// One theme colour, as sRGB components from 0 to 1.
 ///
-/// `design/handoff/tokens/clove-themes.json` writes each token as `#RRGGBB` or `#RRGGBBAA`,
-/// with alpha last, and `design/handoff/tokens/tokens.md` names the same values. ``init(hex:)``
-/// keeps the palette declarations readable next to that file, and `alpha` stays separate so a
-/// token's own transparency is never confused with a layer's opacity.
+/// Palettes define each colour using a `#RRGGBB` hex value and optional `alpha`, keeping `alpha`
+/// separate so a token's own transparency is never confused with a layer's opacity.
 public struct ThemeColour: Hashable, Sendable {
     /// The red component, 0 to 1.
     public var red: Double
@@ -27,8 +25,7 @@ public struct ThemeColour: Hashable, Sendable {
 
     /// Creates a colour from its `0xRRGGBB` form and a separate alpha.
     ///
-    /// The hex spelling matches `clove-themes.json`, which puts alpha in a fourth byte; pass
-    /// that byte as `alpha / 255`, or leave it out for an opaque token.
+    /// Pass any translucent alpha byte as `alpha / 255`, or leave it out for an opaque token.
     public init(hex: UInt32, alpha: Double = 1) {
         self.red = Double((hex >> 16) & 0xFF) / 255
         self.green = Double((hex >> 8) & 0xFF) / 255

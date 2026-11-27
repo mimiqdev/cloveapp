@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The pill action in its own row above detail's filmstrip
-/// (`design/handoff/components.md`, Pill action).
+/// The pill action in its own row above detail's filmstrip.
 ///
 /// It is a glass capsule with one line of semibold text: `"Reject N unmarked"` in `reject`
 /// (`copy.md` `group.rejectRest`) or `"Expand N photos"` in `text.primary`. The detail view decides
@@ -25,7 +24,7 @@ struct PillAction: View {
         let tone: Tone
     }
 
-    /// What the button says (`design/handoff/copy.md`).
+    /// What the button says.
     let title: String
 
     /// The identifier the screen's UI test uses.

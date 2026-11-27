@@ -1,8 +1,7 @@
 import CloveCore
 import SwiftUI
 
-/// The filter menu's rating floor: five compact stars that fill to the chosen minimum
-/// (`design/handoff/screens.md` §02, Filter menu).
+/// The filter menu's rating floor: five compact stars that fill to the chosen minimum.
 ///
 /// This is a filter control, not a marking input: every level is tappable regardless of the
 /// enabled-ratings setting, and tapping the current minimum clears it back to All.
