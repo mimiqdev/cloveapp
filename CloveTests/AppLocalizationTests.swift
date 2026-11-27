@@ -634,8 +634,6 @@ struct AppLocalizationTests {
             ("Set as A", "Set as A", "设为 A", "設為 A"),
             ("Previous candidate", "Previous candidate", "上一张候选", "上一張候選"),
             ("Next candidate", "Next candidate", "下一张候选", "下一張候選"),
-            ("Reference photo A", "Reference photo A", "参考照片 A", "參考相片 A"),
-            ("Challenger photo B", "Challenger photo B", "对比照片 B", "對比相片 B"),
         ]
         for pair in pairs {
             #expect(AppLocalization.string(pair.key, language: .english) == pair.en)

@@ -3866,10 +3866,14 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertFalse(tileA.isSelected)
         XCTAssertTrue(tileB.isSelected)
 
-        // Switching active side to A leaves .isSelected strictly on challenger B.
+        // Switching active side to A marks pane A's badge selected while keeping .isSelected on
+        // challenger B in the filmstrip and omitting any bottom activeSideBadge.
         element(app, "clove.compare.paneA.header").tap()
-        let activeBadge = element(app, "clove.compare.activeSideBadge")
-        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "A"), activeBadge))
+        let paneABadge = element(app, "clove.compare.paneA.badge")
+        let paneBBadge = element(app, "clove.compare.paneB.badge")
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), paneABadge))
+        XCTAssertFalse(paneBBadge.isSelected)
+        XCTAssertFalse(element(app, "clove.compare.activeSideBadge").exists)
         XCTAssertFalse(tileA.isSelected)
         XCTAssertTrue(tileB.isSelected)
 
@@ -3912,6 +3916,21 @@ final class CloveFlowTests: XCTestCase {
 
         XCTAssertTrue(element(app, "clove.compare").waitForExistence(timeout: 5))
         XCTAssertFalse(element(app, "clove.compare.undo").exists)
+        XCTAssertFalse(element(app, "clove.compare.activeSideBadge").exists)
+        XCTAssertTrue(element(app, "clove.compare.setAsA").waitForExistence(timeout: 5))
+
+        let paneABadge = element(app, "clove.compare.paneA.badge")
+        let paneBBadge = element(app, "clove.compare.paneB.badge")
+        XCTAssertTrue(paneABadge.waitForExistence(timeout: 5))
+        XCTAssertTrue(paneBBadge.waitForExistence(timeout: 5))
+        XCTAssertFalse(paneABadge.isSelected)
+        XCTAssertTrue(paneBBadge.isSelected)
+        element(app, "clove.compare.paneA.header").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), paneABadge))
+        XCTAssertFalse(paneBBadge.isSelected)
+        element(app, "clove.compare.paneB.header").tap()
+        XCTAssertTrue(wait(NSPredicate(format: "isSelected == true"), paneBBadge))
+        XCTAssertFalse(paneABadge.isSelected)
 
         let focusToggle = element(app, "clove.compare.focusRegions")
         let syncToggle = element(app, "clove.compare.syncToggle")

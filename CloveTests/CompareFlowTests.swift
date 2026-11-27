@@ -1351,8 +1351,10 @@ struct CompareFlowTests {
                         || (headerFrames.frames["clove.compare.focusRegions"] != nil
                             && headerFrames.frames["clove.compare.syncToggle"] != nil))
                     && tapFrames.frames["clove.compare.capsule"] != nil
-                    && tapFrames.frames["clove.compare.activeSideBadge"] != nil
+                    && tapFrames.frames["clove.compare.setAsA"] != nil
             }
+            #expect(tapFrames.frames["clove.compare.activeSideBadge"] == nil)
+            #expect(!hasAccessibilityIdentifier("clove.compare.activeSideBadge", in: window))
             let (paneA, paneB) = try requirePanes(in: window)
             try await waitUntil {
                 !self.findFocusControls(in: paneA).isEmpty
@@ -1418,7 +1420,7 @@ struct CompareFlowTests {
     }
 
     @Test(
-        "Compare removes permanent Undo button across surfaces, tightens A/B badge to 6 pt, and preserves Cmd+Z undo"
+        "Compare removes permanent Undo button and bottom A/B badge while preserving Cmd+Z undo"
     )
     func compareRemovesPermanentUndoButtonAndPreservesCommandZUndo() async throws {
         let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
@@ -1467,16 +1469,18 @@ struct CompareFlowTests {
         try await waitUntil {
             self.findPanes(in: window).count == 2
                 && tapFrames.frames["clove.compare.capsule"] != nil
-                && tapFrames.frames["clove.compare.activeSideBadge"] != nil
+                && tapFrames.frames["clove.compare.setAsA"] != nil
                 && tapFrames.frames["clove.compare.filmstrip"] != nil
         }
 
         #expect(tapFrames.frames["clove.compare.undo"] == nil)
         #expect(!hasAccessibilityIdentifier("clove.compare.undo", in: window))
+        #expect(tapFrames.frames["clove.compare.activeSideBadge"] == nil)
+        #expect(!hasAccessibilityIdentifier("clove.compare.activeSideBadge", in: window))
 
-        let badgeFrame = try #require(tapFrames.frames["clove.compare.activeSideBadge"])
+        let setAsAFrame = try #require(tapFrames.frames["clove.compare.setAsA"])
         let capsuleFrame = try #require(tapFrames.frames["clove.compare.capsule"])
-        #expect(abs((capsuleFrame.minX - badgeFrame.maxX) - 6) <= 1.5)
+        #expect(setAsAFrame.maxX <= capsuleFrame.minX)
 
         // Hardware keyboard Cmd+Z (.undo) still undoes the active pane's mark without exiting Compare.
         let session = try #require(model.compareSession)
@@ -1488,6 +1492,204 @@ struct CompareFlowTests {
         #expect(keyResult == .handled)
         #expect(model.placedPhoto(for: p2)?.marks.isUnmarked == true)
         #expect(model.compareSession?.activePhoto == p2)
+    }
+
+    @Test(
+        "Active pane border and header badge reflect active side in light and dark mode without bottom A/B badge"
+    )
+    func paneHeaderBadgeAndBorderReflectActiveSideInLightAndDarkMode() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 2 }
+
+        let p1 = library.identity("p1")
+        _ = library.identity("p2")
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+
+        let images = CompareTestDetailImages()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let store = SettingsStore.sample
+
+        for theme in [CloveTheme.light, CloveTheme.dark] {
+            store.update {
+                $0.appearance = AppearanceChoice(
+                    mode: theme == .light ? .light : .dark, family: .default)
+            }
+            model.showsFocusRegions = false
+            model.selectCompareSide(.challenger)
+
+            let headerFrames = CompareFrameBox()
+            let tapFrames = CompareFrameBox()
+            let host = UIHostingController(
+                rootView: AnyView(
+                    DetailScreen(browsing: model, images: images)
+                        .environment(store)
+                        .environment(\.cloveTheme, theme)
+                        .environment(
+                            \.colorScheme, theme.appearance == .light ? .light : .dark
+                        )
+                        .environment(\.cloveUserInterfaceIdiom, .pad)
+                        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                            headerFrames.frames = $0
+                        }
+                        .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                            tapFrames.frames = $0
+                        }))
+            host.overrideUserInterfaceStyle = theme.appearance == .light ? .light : .dark
+            host.traitOverrides.horizontalSizeClass = .regular
+            host.traitOverrides.verticalSizeClass = .regular
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.frame = window.bounds
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitUntil {
+                self.findPanes(in: window).count == 2
+                    && tapFrames.frames["clove.compare.capsule"] != nil
+                    && headerFrames.frames["clove.compare.paneA"] != nil
+                    && headerFrames.frames["clove.compare.paneB"] != nil
+                    && headerFrames.frames["clove.compare.paneA.badge"] != nil
+                    && headerFrames.frames["clove.compare.paneB.badge"] != nil
+            }
+            #expect(!hasAccessibilityIdentifier("clove.compare.activeSideBadge", in: window))
+            #expect(tapFrames.frames["clove.compare.activeSideBadge"] == nil)
+
+            let paneAFrame = try #require(headerFrames.frames["clove.compare.paneA"])
+            let paneBFrame = try #require(headerFrames.frames["clove.compare.paneB"])
+            let badgeAFrame = try #require(headerFrames.frames["clove.compare.paneA.badge"])
+            let badgeBFrame = try #require(headerFrames.frames["clove.compare.paneB.badge"])
+            let expectedAccent = try renderThemeColor(theme.tokens.accent.color, theme: theme)
+
+            let bActiveBuffer = try renderWindowImage(window)
+            #expect(
+                countMatchingPixels(in: bActiveBuffer, rect: badgeAFrame, matching: expectedAccent)
+                    == 0,
+                "\(theme.rawValue) inactive badge A had accent pixels")
+            #expect(
+                countMatchingPixels(in: bActiveBuffer, rect: badgeBFrame, matching: expectedAccent)
+                    > 40,
+                "\(theme.rawValue) active badge B lacked accent pixels")
+            #expect(
+                countMatchingPixels(
+                    in: bActiveBuffer,
+                    rect: CGRect(
+                        x: paneAFrame.minX + 20, y: paneAFrame.minY - 0.5,
+                        width: paneAFrame.width - 40, height: 3),
+                    matching: expectedAccent) == 0,
+                "\(theme.rawValue) inactive pane A border had accent pixels")
+            #expect(
+                countMatchingPixels(
+                    in: bActiveBuffer,
+                    rect: CGRect(
+                        x: paneBFrame.minX + 20, y: paneBFrame.minY - 0.5,
+                        width: paneBFrame.width - 40, height: 3),
+                    matching: expectedAccent) > 100,
+                "\(theme.rawValue) active pane B border lacked accent pixels")
+
+            // Switch active side to Reference A -> accent border and badge flip cleanly to Pane A.
+            model.selectCompareSide(.reference)
+            try await Task.sleep(for: .milliseconds(80))
+            await flushMainRunLoop()
+
+            let aActiveBuffer = try renderWindowImage(window)
+            #expect(
+                countMatchingPixels(in: aActiveBuffer, rect: badgeAFrame, matching: expectedAccent)
+                    > 40,
+                "\(theme.rawValue) active badge A lacked accent pixels")
+            #expect(
+                countMatchingPixels(in: aActiveBuffer, rect: badgeBFrame, matching: expectedAccent)
+                    == 0,
+                "\(theme.rawValue) inactive badge B had accent pixels")
+            #expect(
+                countMatchingPixels(
+                    in: aActiveBuffer,
+                    rect: CGRect(
+                        x: paneAFrame.minX + 20, y: paneAFrame.minY - 0.5,
+                        width: paneAFrame.width - 40, height: 3),
+                    matching: expectedAccent) > 100,
+                "\(theme.rawValue) active pane A border had accent pixels")
+            #expect(
+                countMatchingPixels(
+                    in: aActiveBuffer,
+                    rect: CGRect(
+                        x: paneBFrame.minX + 20, y: paneBFrame.minY - 0.5,
+                        width: paneBFrame.width - 40, height: 3),
+                    matching: expectedAccent) == 0,
+                "\(theme.rawValue) inactive pane B border had accent pixels")
+        }
+    }
+
+    private func renderThemeColor(_ style: Color, theme: CloveTheme) throws -> (UInt8, UInt8, UInt8)
+    {
+        let renderer = ImageRenderer(
+            content: Rectangle().fill(style).frame(width: 8, height: 8)
+                .environment(\.cloveTheme, theme))
+        renderer.scale = 1
+        let cg = try #require(renderer.cgImage)
+        let (r, g, b, _) = try pixelAt(x: 4, y: 4, in: cg)
+        return (r, g, b)
+    }
+
+    private func renderWindowImage(_ window: UIWindow) throws -> CGImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(size: window.bounds.size, format: format).image {
+            _ in
+            _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return try #require(rendered.cgImage)
+    }
+
+    private func countMatchingPixels(
+        in image: CGImage,
+        rect: CGRect,
+        matching expected: (UInt8, UInt8, UInt8),
+        tolerance: Int = 12
+    ) -> Int {
+        let width = image.width
+        let height = image.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let context = CGContext(
+                data: &bytes, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width * 4, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue)
+        else { return 0 }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let minX = max(0, Int(floor(rect.minX)))
+        let maxX = min(width, Int(ceil(rect.maxX)))
+        let minY = max(0, Int(floor(rect.minY)))
+        let maxY = min(height, Int(ceil(rect.maxY)))
+        guard minX < maxX, minY < maxY else { return 0 }
+
+        var count = 0
+        for y in minY..<maxY {
+            for x in minX..<maxX {
+                let offset = (y * width + x) * 4
+                if abs(Int(bytes[offset]) - Int(expected.0)) <= tolerance
+                    && abs(Int(bytes[offset + 1]) - Int(expected.1)) <= tolerance
+                    && abs(Int(bytes[offset + 2]) - Int(expected.2)) <= tolerance
+                {
+                    count += 1
+                }
+            }
+        }
+        return count
     }
 
     private func hasAccessibilityIdentifier(_ identifier: String, in view: UIView) -> Bool {
