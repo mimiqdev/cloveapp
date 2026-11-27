@@ -231,7 +231,7 @@ struct CompareView: View {
         let focusLabel = AppLocalization.string("Focus regions", language: language)
         let focusValue = AppLocalization.string(
             browsing.showsFocusRegions ? "On" : "Off", language: language)
-        return Button(focusLabel, systemImage: "viewfinder") {
+        return Button(focusLabel, systemImage: "dot.viewfinder") {
             tapPickerDismissToken += 1
             browsing.showsFocusRegions.toggle()
         }
@@ -343,7 +343,7 @@ struct CompareView: View {
                 HStack(spacing: 8) {
                     GlassIconButton(
                         label: AppLocalization.string("Focus regions", language: language),
-                        symbol: "viewfinder",
+                        symbol: "dot.viewfinder",
                         isActive: browsing.showsFocusRegions,
                         size: .phone,
                         identifier: "clove.compare.focusRegions"

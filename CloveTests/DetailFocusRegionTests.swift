@@ -560,6 +560,7 @@ struct DetailFocusRegionTests {
         #expect(
             UIImage(systemName: DetailFocusFaceIndicator.noFacesDetected.systemImageName) != nil)
         #expect(UIImage(systemName: "viewfinder") != nil)
+        #expect(UIImage(systemName: "dot.viewfinder") != nil)
 
         let glyphRenderer = ImageRenderer(
             content: SlashedViewfinderGlyph().foregroundStyle(Color.white).padding(4))

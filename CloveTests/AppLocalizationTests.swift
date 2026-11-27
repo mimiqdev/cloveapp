@@ -926,4 +926,49 @@ struct AppLocalizationTests {
         #expect(summary.localizedMoveRejectsTitle(language: .simplifiedChinese) == "整理 5 张淘汰片")
         #expect(summary.localizedMoveRejectsTitle(language: .traditionalChinese) == "整理 5 張淘汰片")
     }
+
+    @Test func gestureGuideItemsLocalizeAcrossLanguages() {
+        let pairs: [(key: String, en: String, hans: String, hant: String)] = [
+            ("Swipe up to rate", "Swipe up to rate", "上滑打星", "上滑打星"),
+            (
+                "Farther for higher stars · lifts a reject",
+                "Farther for higher stars · lifts a reject",
+                "滑得越远星级越高；弃片上滑可恢复",
+                "滑得越遠星級越高；淘汰片上滑可恢復"
+            ),
+            (
+                "Swipe down to clear or reject",
+                "Swipe down to clear or reject",
+                "下滑清除或弃片",
+                "下滑清除或淘汰"
+            ),
+            (
+                "Clears a star first, then rejects",
+                "Clears a star first, then rejects",
+                "有星先清除，继续下拉标为弃片",
+                "有星先清除，繼續下拉標為淘汰"
+            ),
+            ("Swipe left or right", "Swipe left or right", "左右滑动", "左右滑動"),
+            ("Previous or next photo", "Previous or next photo", "切换上一张或下一张", "切換上一張或下一張"),
+            ("Double-tap to check focus", "Double-tap to check focus", "双击 100% 检焦", "點兩下 100% 檢焦"),
+            (
+                "Zooms to 100% · two fingers to pan",
+                "Zooms to 100% · two fingers to pan",
+                "放大至 100% · 双指拖动平移画面",
+                "放大至 100% · 雙指拖動平移畫面"
+            ),
+            ("Pull filmstrip down", "Pull filmstrip down", "下拉胶片条", "下拉膠片條"),
+            (
+                "Expand similar group · push up to fold",
+                "Expand similar group · push up to fold",
+                "展开相似连拍组 · 上推收起",
+                "展開相似連拍組 · 上推收起"
+            ),
+        ]
+        for pair in pairs {
+            #expect(AppLocalization.string(pair.key, language: .english) == pair.en)
+            #expect(AppLocalization.string(pair.key, language: .simplifiedChinese) == pair.hans)
+            #expect(AppLocalization.string(pair.key, language: .traditionalChinese) == pair.hant)
+        }
+    }
 }

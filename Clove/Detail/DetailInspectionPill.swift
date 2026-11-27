@@ -28,7 +28,7 @@ struct DetailInspectionPill: View {
 
         HStack(spacing: 0) {
             Button(action: onToggleFocus) {
-                Image(systemName: "viewfinder")
+                Image(systemName: "dot.viewfinder")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(
                         isFocusRegionsOn

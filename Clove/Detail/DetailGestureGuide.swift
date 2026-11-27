@@ -12,23 +12,23 @@ struct DetailGestureGuideItem: Identifiable {
         DetailGestureGuideItem(
             symbol: "arrow.up",
             titleKey: "Swipe up to rate",
-            subtitleKey: "Distance sets 1–5 stars"),
+            subtitleKey: "Farther for higher stars · lifts a reject"),
         DetailGestureGuideItem(
             symbol: "arrow.down",
-            titleKey: "Swipe down to reject",
-            subtitleKey: "Swipe down again to clear"),
+            titleKey: "Swipe down to clear or reject",
+            subtitleKey: "Clears a star first, then rejects"),
         DetailGestureGuideItem(
             symbol: "arrow.left.arrow.right",
             titleKey: "Swipe left or right",
             subtitleKey: "Previous or next photo"),
         DetailGestureGuideItem(
             symbol: "plus.magnifyingglass",
-            titleKey: "Double-tap",
-            subtitleKey: "Zoom to 100% to check focus"),
+            titleKey: "Double-tap to check focus",
+            subtitleKey: "Zooms to 100% · two fingers to pan"),
         DetailGestureGuideItem(
             symbol: "rectangle.stack",
             titleKey: "Pull filmstrip down",
-            subtitleKey: "Expand similar group; push up to fold"),
+            subtitleKey: "Expand similar group · push up to fold"),
     ]
 }
 
@@ -49,6 +49,7 @@ struct DetailGestureGuideCard: View {
             Text(AppLocalization.string("Gesture guide", language: language))
                 .font(.headline)
                 .foregroundStyle(Color.clove.text.primary)
+                .fixedSize(horizontal: false, vertical: true)
 
             ViewThatFits(in: .vertical) {
                 rows
@@ -61,7 +62,7 @@ struct DetailGestureGuideCard: View {
                 Text(AppLocalization.string("Got it", language: language))
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .frame(height: isCompactHeight ? 38 : 44)
+                    .frame(minHeight: isCompactHeight ? 38 : 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderedProminent)
