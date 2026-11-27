@@ -1,5 +1,6 @@
 import CloveCore
 import Foundation
+import Observation
 import Testing
 
 @Suite("RawProgressiveDecode")
@@ -14,6 +15,8 @@ struct RawProgressiveDecodeTests {
         private var waiters:
             [(id: UUID, duration: Duration, continuation: CheckedContinuation<Void, any Error>)] =
                 []
+        private var countObservers:
+            [(id: UUID, targetCount: Int, continuation: CheckedContinuation<Void, Never>)] = []
 
         var pendingCount: Int { waiters.count }
         var lastRequestedDuration: Duration? { waiters.last?.duration }
@@ -23,15 +26,26 @@ struct RawProgressiveDecodeTests {
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     waiters.append((id: waiterID, duration: duration, continuation: continuation))
+                    notifyCountObservers()
                 }
             } onCancel: {
                 Task { await self.cancel(id: waiterID) }
             }
         }
 
+        func waitUntilPendingCount(equals targetCount: Int) async {
+            if waiters.count == targetCount { return }
+            let observerID = UUID()
+            await withCheckedContinuation { continuation in
+                countObservers.append(
+                    (id: observerID, targetCount: targetCount, continuation: continuation))
+            }
+        }
+
         func advanceNext() -> Bool {
             guard !waiters.isEmpty else { return false }
             let next = waiters.removeFirst()
+            notifyCountObservers()
             next.continuation.resume(returning: ())
             return true
         }
@@ -39,7 +53,39 @@ struct RawProgressiveDecodeTests {
         private func cancel(id: UUID) {
             guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
             let removed = waiters.remove(at: index)
+            notifyCountObservers()
             removed.continuation.resume(throwing: CancellationError())
+        }
+
+        private func notifyCountObservers() {
+            var remaining:
+                [(id: UUID, targetCount: Int, continuation: CheckedContinuation<Void, Never>)] = []
+            for observer in countObservers {
+                if waiters.count == observer.targetCount {
+                    observer.continuation.resume()
+                } else {
+                    remaining.append(observer)
+                }
+            }
+            countObservers = remaining
+        }
+    }
+
+    @MainActor
+    private func waitForPhase(
+        _ expected: RawProgressiveDecodePhase,
+        on controller: RawProgressiveDecodeController
+    ) async {
+        while controller.phase != expected {
+            await withCheckedContinuation { continuation in
+                withObservationTracking {
+                    _ = controller.phase
+                } onChange: {
+                    Task { @MainActor in
+                        continuation.resume()
+                    }
+                }
+            }
         }
     }
 
@@ -62,7 +108,7 @@ struct RawProgressiveDecodeTests {
         #expect(!controller.phase.showsSpinner)
         #expect(!controller.phase.isPreviewOnly)
 
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         #expect(await clock.lastRequestedDuration == .milliseconds(250))
         #expect(await clock.pendingCount == 1)
 
@@ -70,8 +116,8 @@ struct RawProgressiveDecodeTests {
         #expect(controller.phase == .idle)
         #expect(!controller.phase.showsSpinner)
 
-        // Even after yielding, the cancelled delay task must not surface `.decodingPreview`.
-        await Task.yield()
+        // Cancelled delay task drains cleanly without ever surfacing `.decodingPreview`.
+        await clock.waitUntilPendingCount(equals: 0)
         #expect(await clock.pendingCount == 0)
         #expect(controller.phase == .idle)
     }
@@ -85,11 +131,11 @@ struct RawProgressiveDecodeTests {
         )
 
         let token = controller.beginUpgrade(for: Self.rawPhotoA)
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         #expect(controller.phase == .gating)
 
         #expect(await clock.advanceNext())
-        await Task.yield()
+        await waitForPhase(.decodingPreview, on: controller)
         #expect(controller.phase == .decodingPreview)
         #expect(controller.phase.showsSpinner)
         #expect(!controller.phase.isPreviewOnly)
@@ -109,9 +155,9 @@ struct RawProgressiveDecodeTests {
         )
 
         let token = controller.beginUpgrade(for: Self.rawPhotoA)
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         #expect(await clock.advanceNext())
-        await Task.yield()
+        await waitForPhase(.decodingPreview, on: controller)
         #expect(controller.phase == .decodingPreview)
 
         controller.fail(token: token)
@@ -124,9 +170,9 @@ struct RawProgressiveDecodeTests {
         #expect(controller.phase == .idle)
 
         _ = controller.beginUpgrade(for: Self.rawPhotoB)
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         controller.enterPreviewOnly()
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 0)
         #expect(await clock.pendingCount == 0)
         #expect(controller.phase == .previewOnly)
         #expect(!controller.phase.showsSpinner)
@@ -141,15 +187,15 @@ struct RawProgressiveDecodeTests {
         )
 
         let staleToken = controller.beginUpgrade(for: Self.rawPhotoA)
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         controller.reset()
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 0)
 
         #expect(controller.phase == .idle)
         #expect(await clock.pendingCount == 0)
 
         let freshToken = controller.beginUpgrade(for: Self.rawPhotoB)
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
 
         // Stale completion or failure from photo A must not affect photo B's active gate.
         controller.fail(token: staleToken)
@@ -158,11 +204,12 @@ struct RawProgressiveDecodeTests {
         #expect(controller.phase == .gating)
 
         #expect(await clock.advanceNext())
-        await Task.yield()
+        await waitForPhase(.decodingPreview, on: controller)
         #expect(controller.phase == .decodingPreview)
 
         // Switching away again resets immediately (no linger).
         controller.reset()
+        await clock.waitUntilPendingCount(equals: 0)
         #expect(controller.phase == .idle)
         #expect(controller.activeToken == nil)
         controller.complete(token: freshToken)
@@ -181,7 +228,7 @@ struct RawProgressiveDecodeTests {
         let second = controller.beginUpgrade(for: Self.rawPhotoA)
         #expect(first == second)
 
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         #expect(await clock.pendingCount == 1)
     }
 
@@ -194,9 +241,9 @@ struct RawProgressiveDecodeTests {
         )
 
         let token = controller.beginUpgrade(for: Self.rawPhotoA)
-        await Task.yield()
-        _ = await clock.advanceNext()
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
+        #expect(await clock.advanceNext())
+        await waitForPhase(.decodingPreview, on: controller)
         #expect(controller.phase == .decodingPreview)
 
         controller.cancel(token: token)

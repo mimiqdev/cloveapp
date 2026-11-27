@@ -266,7 +266,7 @@ struct DetailMarkingView: View {
                 focusTracking.cancelPendingRecenter()
             }
             .onChange(of: browsing.folderLocationLoss != nil) { _, isLost in
-                guard scale > DetailFitScale.tolerance, isScaleAtFullResolution else { return }
+                guard isShowingProgressiveZoomState else { return }
                 if isLost {
                     DetailProgressiveDecodeSupport.syncAtFullResolution(
                         controller: progressiveDecode,
@@ -1711,15 +1711,38 @@ struct DetailMarkingView: View {
         return nil
     }
 
+    private var isFullResolutionUpgradeInFlight: Bool {
+        upgradeTask != nil && activeUpgradePhotoID == photo.id
+            && activeUpgradeNeed == .fullResolution
+    }
+
     private var isShowingProgressiveZoomState: Bool {
-        scale > DetailFitScale.tolerance && isScaleAtFullResolution
+        DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: scale,
+            zoomModeIsFullResolution: isAtFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase)
+    }
+
+    private var effectiveDetailZoomText: String? {
+        DetailProgressiveDecodeSupport.zoomLabelText(
+            scale: scale,
+            scaledZoomText: zoomName,
+            fitText: nil,
+            zoomModeIsFullResolution: isAtFullResolution,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase,
+            language: language)
     }
 
     private var detailZoomReadout: some View {
         DetailProgressiveDecodeReadout(
             photoID: photo.id,
             prefixText: detailSubtitlePrefix,
-            zoomText: scale > DetailFitScale.tolerance ? zoomName : nil,
+            zoomText: effectiveDetailZoomText,
             showsProgressiveState: isShowingProgressiveZoomState,
             phase: progressiveDecode.phase,
             language: language,
@@ -1939,8 +1962,7 @@ struct DetailMarkingView: View {
                             fileName: photo.fileName,
                             positionText: cornerPositionText,
                             isGroupFocus: isCornerGroupFocus,
-                            zoomText: scale > DetailFitScale.tolerance
-                                ? zoomName : nil,
+                            zoomText: effectiveDetailZoomText,
                             language: language,
                             browsing: browsing,
                             photoID: photo.id,
@@ -2382,8 +2404,7 @@ struct DetailMarkingView: View {
         }
         if image.limitation == nil, image.quality == .nativeRAW || image.isBestAvailable {
             progressiveDecode.completeIfTracking(photoID: photo.id)
-        } else if image.limitation != nil, scale > DetailFitScale.tolerance, isScaleAtFullResolution
-        {
+        } else if image.limitation != nil, isShowingProgressiveZoomState {
             DetailProgressiveDecodeSupport.syncAtFullResolution(
                 controller: progressiveDecode,
                 photoID: photo.id,
@@ -2560,17 +2581,27 @@ struct DetailMarkingView: View {
             dismissGestureGuide()
         }
         scale = value
-        if value <= DetailFitScale.tolerance {
-            inspectedFocusRegionID = nil
-            focusTracking.reset()
-            cancelUpgradeTask()
-            return
-        }
         if abs(value - commandedScale) > 0.01 {
             zoomMode = .manual
             focusTracking.reset()
         }
-        if !isScaleAtFullResolution && progressiveDecode.phase != .idle {
+        if value <= DetailFitScale.tolerance {
+            inspectedFocusRegionID = nil
+            focusTracking.reset()
+            if !isAtFullResolution {
+                cancelUpgradeTask()
+            }
+            return
+        }
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: value,
+            zoomModeIsFullResolution: isAtFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight)
+            && progressiveDecode.phase != .idle
+        {
             progressiveDecode.reset()
         }
         if previewOnly || browsing.folderLocationLoss != nil {
@@ -2660,14 +2691,13 @@ struct DetailMarkingView: View {
         return false
     }
 
-    /// Whether either the explicit zoom mode or a pinch scale sits at native 100%.
+    /// Whether either the explicit zoom mode or a pinch scale is at or above native 100%.
     private var isScaleAtFullResolution: Bool {
-        if isAtFullResolution { return true }
-        guard let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels else {
-            return false
-        }
-        return DetailZoom.isFullResolution(
-            scale: scale, nativePixels: pixels, viewSize: viewSize,
+        DetailProgressiveDecodeSupport.isAtOrAboveFullResolution(
+            scale: scale,
+            zoomModeIsFullResolution: isAtFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
             screenScale: displayScale)
     }
 
@@ -2785,11 +2815,19 @@ struct DetailMarkingView: View {
     /// nothing better to give returns the preview with a limitation, which turns ``previewOnly``
     /// on, so the same request is never repeated for that photo (PRD P0-04).
     private func upgradeIfNeeded() {
-        guard scale > DetailFitScale.tolerance else {
+        guard isAtFullResolution || scale > DetailFitScale.tolerance else {
             cancelUpgradeTask()
             return
         }
-        if !isScaleAtFullResolution && progressiveDecode.phase != .idle {
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: scale,
+            zoomModeIsFullResolution: isAtFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight)
+            && progressiveDecode.phase != .idle
+        {
             progressiveDecode.reset()
         }
         if (previewOnly || browsing.folderLocationLoss != nil), isScaleAtFullResolution {
@@ -2807,7 +2845,11 @@ struct DetailMarkingView: View {
         }
         guard !previewOnly, browsing.folderLocationLoss == nil, let shown, shownPhoto == photo.id
         else { return }
-        guard requestPixels(scale: scale) > max(shown.width, shown.height) else { return }
+        let needsUpgrade =
+            (isAtFullResolution && shown.fullResolutionPixels == nil)
+            ? !shown.isBestAvailable
+            : (requestPixels(scale: scale) > max(shown.width, shown.height))
+        guard needsUpgrade else { return }
         let need: DetailPixelRequest.Need = isScaleAtFullResolution ? .fullResolution : .morePixels
         if upgradeTask != nil, activeUpgradePhotoID == photo.id,
             activeUpgradeNeed == .fullResolution,

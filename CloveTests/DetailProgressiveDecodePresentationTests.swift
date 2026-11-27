@@ -2,6 +2,7 @@ import CloveCore
 import CloveImaging
 import CoreGraphics
 import Foundation
+import Observation
 import SwiftUI
 import Testing
 
@@ -15,21 +16,34 @@ struct DetailProgressiveDecodePresentationTests {
 
     private actor GateClock {
         private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
+        private var countObservers:
+            [(id: UUID, targetCount: Int, continuation: CheckedContinuation<Void, Never>)] = []
 
         func sleep(for _: Duration) async throws {
             let waiterID = UUID()
             try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
                     waiters.append((id: waiterID, continuation: continuation))
+                    notifyCountObservers()
                 }
             } onCancel: {
                 Task { await self.cancel(id: waiterID) }
             }
         }
 
+        func waitUntilPendingCount(equals targetCount: Int) async {
+            if waiters.count == targetCount { return }
+            let observerID = UUID()
+            await withCheckedContinuation { continuation in
+                countObservers.append(
+                    (id: observerID, targetCount: targetCount, continuation: continuation))
+            }
+        }
+
         func advance() -> Bool {
             guard !waiters.isEmpty else { return false }
             let next = waiters.removeFirst()
+            notifyCountObservers()
             next.continuation.resume(returning: ())
             return true
         }
@@ -37,7 +51,38 @@ struct DetailProgressiveDecodePresentationTests {
         private func cancel(id: UUID) {
             guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
             let removed = waiters.remove(at: index)
+            notifyCountObservers()
             removed.continuation.resume(throwing: CancellationError())
+        }
+
+        private func notifyCountObservers() {
+            var remaining:
+                [(id: UUID, targetCount: Int, continuation: CheckedContinuation<Void, Never>)] = []
+            for observer in countObservers {
+                if waiters.count == observer.targetCount {
+                    observer.continuation.resume()
+                } else {
+                    remaining.append(observer)
+                }
+            }
+            countObservers = remaining
+        }
+    }
+
+    private func waitForPhase(
+        _ expected: RawProgressiveDecodePhase,
+        on controller: RawProgressiveDecodeController
+    ) async {
+        while controller.phase != expected {
+            await withCheckedContinuation { continuation in
+                withObservationTracking {
+                    _ = controller.phase
+                } onChange: {
+                    Task { @MainActor in
+                        continuation.resume()
+                    }
+                }
+            }
         }
     }
 
@@ -288,10 +333,10 @@ struct DetailProgressiveDecodePresentationTests {
                 startingUpgrade: true
             )
         )
-        await Task.yield()
+        await clock.waitUntilPendingCount(equals: 1)
         #expect(controller.phase == .gating)
         #expect(await clock.advance())
-        await Task.yield()
+        await waitForPhase(.decodingPreview, on: controller)
         #expect(controller.phase == .decodingPreview)
 
         DetailProgressiveDecodeSupport.settle(
@@ -330,5 +375,296 @@ struct DetailProgressiveDecodePresentationTests {
         )
         #expect(controller.phase == .previewOnly)
         #expect(!controller.phase.showsSpinner)
+    }
+
+    @Test func unknownNativeDimensionsSurfacesDecodeAndPreviewOnlyAtFitScale() async throws {
+        let clock = GateClock()
+        let controller = RawProgressiveDecodeController(sleep: { try await clock.sleep(for: $0) })
+
+        let url = URL(fileURLWithPath: "/tmp/DSC0002.ARW")
+        let source = DetailSource(
+            url: url, revision: ThumbnailRevision(size: 1_024, modificationTime: .distantPast))
+        let unknownSizePreview = DetailImage(
+            image: Self.dummyCGImage,
+            source: source,
+            quality: .preview,
+            hasRAW: true,
+            fullResolutionSize: nil
+        )
+        let photoSet = try PhotoSet(folderID: Self.folderID, relativeFolderPath: "", rawURL: url)
+        let viewSize = CGSize(width: 400, height: 600)
+
+        let token = try #require(
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: controller,
+                photoID: Self.photoID,
+                fileName: "DSC0002.ARW",
+                photoSet: photoSet,
+                displayMode: .rawFirst,
+                shown: unknownSizePreview,
+                isPreviewOnly: false,
+                isLocationLost: false,
+                startingUpgrade: true
+            )
+        )
+        await clock.waitUntilPendingCount(equals: 1)
+
+        // While waiting at scale 1.0 with unknown native size, explicit zoomMode = .fullResolution
+        // keeps progressive state eligible and resolves label `"100%"` in both Detail and Compare.
+        let showsGating = DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: 1.0,
+            zoomModeIsFullResolution: true,
+            fullResolutionPixels: nil,
+            viewSize: viewSize,
+            screenScale: 3,
+            isFullResolutionUpgradeInFlight: true,
+            phase: controller.phase
+        )
+        #expect(showsGating)
+        let gatingDetailZoom = DetailProgressiveDecodeSupport.zoomLabelText(
+            scale: 1.0,
+            scaledZoomText: "Fit",
+            fitText: nil,
+            zoomModeIsFullResolution: true,
+            isFullResolutionUpgradeInFlight: true,
+            phase: controller.phase,
+            language: .english
+        )
+        #expect(gatingDetailZoom == "100%")
+
+        // Crossing 250 ms surfaces `100% · Preview` even while scale remains at 1.0.
+        #expect(await clock.advance())
+        await waitForPhase(.decodingPreview, on: controller)
+
+        let showsDecoding = DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: 1.0,
+            zoomModeIsFullResolution: true,
+            fullResolutionPixels: nil,
+            viewSize: viewSize,
+            screenScale: 3,
+            isFullResolutionUpgradeInFlight: true,
+            phase: controller.phase
+        )
+        #expect(showsDecoding)
+        let decodingDetailZoom = try #require(
+            DetailProgressiveDecodeSupport.zoomLabelText(
+                scale: 1.0,
+                scaledZoomText: "Fit",
+                fitText: nil,
+                zoomModeIsFullResolution: true,
+                isFullResolutionUpgradeInFlight: true,
+                phase: controller.phase,
+                language: .english
+            )
+        )
+        let decodingCompareZoom = try #require(
+            DetailProgressiveDecodeSupport.zoomLabelText(
+                scale: 1.0,
+                scaledZoomText: "Fit",
+                fitText: "Fit",
+                zoomModeIsFullResolution: true,
+                isFullResolutionUpgradeInFlight: true,
+                phase: controller.phase,
+                language: .english
+            )
+        )
+        let detailPreviewReadout = DetailZoomReadoutPresentation(
+            prefixText: "1 / 11",
+            zoomText: decodingDetailZoom,
+            showsProgressiveState: showsDecoding,
+            phase: controller.phase,
+            language: .english
+        )
+        let comparePreviewReadout = DetailZoomReadoutPresentation(
+            prefixText: nil,
+            zoomText: decodingCompareZoom,
+            showsProgressiveState: showsDecoding,
+            phase: controller.phase,
+            language: .english
+        )
+        #expect(detailPreviewReadout.combinedVisibleText == "1 / 11 · 100% · Preview")
+        #expect(detailPreviewReadout.showsSpinner)
+        #expect(comparePreviewReadout.combinedVisibleText == "100% · Preview")
+        #expect(comparePreviewReadout.showsSpinner)
+
+        // Failing / unavailable decode at scale 1.0 still surfaces `Preview only`.
+        DetailProgressiveDecodeSupport.settle(
+            controller: controller,
+            token: token,
+            outcome: .unavailable(.cannotOpen),
+            photoID: Self.photoID,
+            fileName: "DSC0002.ARW",
+            photoSet: photoSet,
+            isLocationLost: false
+        )
+        #expect(controller.phase == .previewOnly)
+
+        let showsPreviewOnly = DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: 1.0,
+            zoomModeIsFullResolution: true,
+            fullResolutionPixels: nil,
+            viewSize: viewSize,
+            screenScale: 3,
+            isFullResolutionUpgradeInFlight: false,
+            phase: controller.phase
+        )
+        #expect(showsPreviewOnly)
+        let failedDetailZoom = try #require(
+            DetailProgressiveDecodeSupport.zoomLabelText(
+                scale: 1.0,
+                scaledZoomText: "Fit",
+                fitText: nil,
+                zoomModeIsFullResolution: true,
+                isFullResolutionUpgradeInFlight: false,
+                phase: controller.phase,
+                language: .english
+            )
+        )
+        let detailFailedReadout = DetailZoomReadoutPresentation(
+            prefixText: "1 / 11",
+            zoomText: failedDetailZoom,
+            showsProgressiveState: showsPreviewOnly,
+            phase: controller.phase,
+            language: .english
+        )
+        let compareFailedReadout = DetailZoomReadoutPresentation(
+            prefixText: nil,
+            zoomText: DetailProgressiveDecodeSupport.zoomLabelText(
+                scale: 1.0,
+                scaledZoomText: "Fit",
+                fitText: "Fit",
+                zoomModeIsFullResolution: true,
+                isFullResolutionUpgradeInFlight: false,
+                phase: controller.phase,
+                language: .english
+            ),
+            showsProgressiveState: showsPreviewOnly,
+            phase: controller.phase,
+            language: .english
+        )
+        #expect(detailFailedReadout.combinedVisibleText == "1 / 11 · Preview only")
+        #expect(!detailFailedReadout.showsSpinner)
+        #expect(compareFailedReadout.combinedVisibleText == "Preview only")
+        #expect(!compareFailedReadout.showsSpinner)
+    }
+
+    @Test func pinchingAboveFullResolutionAndBackRetainsInFlightDecodeCue() async throws {
+        let clock = GateClock()
+        let controller = RawProgressiveDecodeController(sleep: { try await clock.sleep(for: $0) })
+
+        let url = URL(fileURLWithPath: "/tmp/DSC0003.ARW")
+        let photoSet = try PhotoSet(folderID: Self.folderID, relativeFolderPath: "", rawURL: url)
+        let nativePixels = CGSize(width: 6_000, height: 4_000)
+        let viewSize = CGSize(width: 393, height: 852)
+        let screenScale: CGFloat = 3
+        let fullResScale = DetailZoom.fullResolutionScale(
+            nativePixels: nativePixels,
+            shownPixels: nativePixels,
+            viewSize: viewSize,
+            screenScale: screenScale
+        )
+        let embeddedPreview = makeDetailImage(
+            fileName: "DSC0003.ARW", quality: .preview, hasRAW: true)
+
+        let token = try #require(
+            DetailProgressiveDecodeSupport.syncAtFullResolution(
+                controller: controller,
+                photoID: Self.photoID,
+                fileName: "DSC0003.ARW",
+                photoSet: photoSet,
+                displayMode: .rawFirst,
+                shown: embeddedPreview,
+                isPreviewOnly: false,
+                isLocationLost: false,
+                startingUpgrade: true
+            )
+        )
+        await clock.waitUntilPendingCount(equals: 1)
+        #expect(await clock.advance())
+        await waitForPhase(.decodingPreview, on: controller)
+
+        // Manual pinch slightly past 100% stays eligible and retains the active decode gate.
+        let scaleAbove100 = fullResScale * 1.35
+        #expect(
+            DetailProgressiveDecodeSupport.isAtOrAboveFullResolution(
+                scale: scaleAbove100,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale
+            ))
+        #expect(
+            DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+                scale: scaleAbove100,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: true
+            ))
+        #expect(
+            DetailProgressiveDecodeSupport.showsProgressiveState(
+                scale: scaleAbove100,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: true,
+                phase: controller.phase
+            ))
+
+        // Even dipping momentarily below 100% above Fit retains an active `.fullResolution` decode.
+        let scaleBelow100 = fullResScale * 0.8
+        #expect(
+            DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+                scale: scaleBelow100,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: true
+            ))
+        #expect(controller.phase == .decodingPreview)
+
+        // Returning to 100% still displays `100% · Preview` until the in-flight decode completes.
+        let returnedReadout = DetailZoomReadoutPresentation(
+            prefixText: "1 / 11",
+            zoomText: "100%",
+            showsProgressiveState: DetailProgressiveDecodeSupport.showsProgressiveState(
+                scale: fullResScale,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: true,
+                phase: controller.phase
+            ),
+            phase: controller.phase,
+            language: .english
+        )
+        #expect(returnedReadout.combinedVisibleText == "1 / 11 · 100% · Preview")
+        #expect(returnedReadout.showsSpinner)
+
+        // Once no `.fullResolution` upgrade runs, zooming below 100% or to Fit clears retention.
+        controller.complete(token: token)
+        #expect(controller.phase == .idle)
+        #expect(
+            !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+                scale: scaleBelow100,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: false
+            ))
+        #expect(
+            !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+                scale: 1.0,
+                zoomModeIsFullResolution: false,
+                fullResolutionPixels: nativePixels,
+                viewSize: viewSize,
+                screenScale: screenScale,
+                isFullResolutionUpgradeInFlight: false
+            ))
     }
 }

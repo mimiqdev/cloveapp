@@ -17,6 +17,91 @@ enum DetailProgressiveDecodeSupport {
         return .raw
     }
 
+    /// True when the viewport is explicitly inspecting 100% (including unknown-size RAWs waiting
+    /// at Fit scale) or manually zoomed to or past native 100%.
+    static func isAtOrAboveFullResolution(
+        scale: CGFloat,
+        zoomModeIsFullResolution: Bool,
+        fullResolutionPixels: CGSize?,
+        viewSize: CGSize,
+        screenScale: CGFloat
+    ) -> Bool {
+        if zoomModeIsFullResolution { return true }
+        guard scale > DetailFitScale.tolerance,
+            viewSize.width > 0,
+            let pixels = fullResolutionPixels
+        else { return false }
+        let target = DetailZoom.fullResolutionScale(
+            nativePixels: pixels, shownPixels: pixels, viewSize: viewSize,
+            screenScale: screenScale)
+        return scale >= target * 0.995
+    }
+
+    /// True while progressive decode feedback or static `Preview only` applies: at/above 100%,
+    /// on an explicit 100% request even before native pixels are known, or while a
+    /// `.fullResolution` decode remains in flight above Fit.
+    static func showsProgressiveState(
+        scale: CGFloat,
+        zoomModeIsFullResolution: Bool,
+        fullResolutionPixels: CGSize?,
+        viewSize: CGSize,
+        screenScale: CGFloat,
+        isFullResolutionUpgradeInFlight: Bool,
+        phase: RawProgressiveDecodePhase
+    ) -> Bool {
+        if isAtOrAboveFullResolution(
+            scale: scale,
+            zoomModeIsFullResolution: zoomModeIsFullResolution,
+            fullResolutionPixels: fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: screenScale)
+        {
+            return true
+        }
+        return scale > DetailFitScale.tolerance
+            && (isFullResolutionUpgradeInFlight || phase.isInFlight)
+    }
+
+    /// True when zoom adjustments above Fit should keep existing progressive decode state intact
+    /// rather than clearing it (resets only below 100% once no `.fullResolution` upgrade runs).
+    static func shouldRetainProgressiveDecodeAboveFit(
+        scale: CGFloat,
+        zoomModeIsFullResolution: Bool,
+        fullResolutionPixels: CGSize?,
+        viewSize: CGSize,
+        screenScale: CGFloat,
+        isFullResolutionUpgradeInFlight: Bool
+    ) -> Bool {
+        guard zoomModeIsFullResolution || scale > DetailFitScale.tolerance else { return false }
+        if isFullResolutionUpgradeInFlight { return true }
+        return isAtOrAboveFullResolution(
+            scale: scale,
+            zoomModeIsFullResolution: zoomModeIsFullResolution,
+            fullResolutionPixels: fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: screenScale)
+    }
+
+    /// Resolves the zoom readout text, displaying `"100%"` while an explicit full-resolution
+    /// decode or fallback state is active even before native dimensions allow zooming past Fit.
+    static func zoomLabelText(
+        scale: CGFloat,
+        scaledZoomText: String,
+        fitText: String?,
+        zoomModeIsFullResolution: Bool,
+        isFullResolutionUpgradeInFlight: Bool,
+        phase: RawProgressiveDecodePhase,
+        language: ResolvedAppLanguage
+    ) -> String? {
+        if scale > DetailFitScale.tolerance {
+            return scaledZoomText
+        }
+        if zoomModeIsFullResolution && (isFullResolutionUpgradeInFlight || phase != .idle) {
+            return AppLocalization.format("%lld%%", language: language, Int64(100))
+        }
+        return fitText
+    }
+
     static func eligibility(
         fileName: String?,
         photoSet: PhotoSet?,

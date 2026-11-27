@@ -989,13 +989,38 @@ private final class ComparePaneController {
     }
 
     var isScaleAtFullResolution: Bool {
-        if zoomMode.isFullResolution { return true }
-        guard let shown, viewSize.width > 0, let pixels = shown.fullResolutionPixels else {
-            return false
-        }
-        return DetailZoom.isFullResolution(
-            scale: scale, nativePixels: pixels, viewSize: viewSize,
+        DetailProgressiveDecodeSupport.isAtOrAboveFullResolution(
+            scale: scale,
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
             screenScale: displayScale)
+    }
+
+    var isFullResolutionUpgradeInFlight: Bool {
+        upgradeTask != nil && upgradeRequest?.need == .fullResolution
+    }
+
+    var isShowingProgressiveZoomState: Bool {
+        DetailProgressiveDecodeSupport.showsProgressiveState(
+            scale: scale,
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            fullResolutionPixels: shown?.fullResolutionPixels,
+            viewSize: viewSize,
+            screenScale: displayScale,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase)
+    }
+
+    func progressiveZoomText(language: ResolvedAppLanguage) -> String {
+        DetailProgressiveDecodeSupport.zoomLabelText(
+            scale: scale,
+            scaledZoomText: zoomLabel(language: language),
+            fitText: AppLocalization.string("Fit", language: language),
+            zoomModeIsFullResolution: zoomMode.isFullResolution,
+            isFullResolutionUpgradeInFlight: isFullResolutionUpgradeInFlight,
+            phase: progressiveDecode.phase,
+            language: language) ?? zoomLabel(language: language)
     }
 
     var pixelSizeOfShown: CGSize {
@@ -1144,8 +1169,7 @@ private struct ComparePaneView: View {
             controller.focusRegionState = DetailFocusRegionState()
         }
         .onChange(of: hasFolderLocationLoss) { _, isLost in
-            guard controller.scale > DetailFitScale.tolerance, controller.isScaleAtFullResolution
-            else { return }
+            guard controller.isShowingProgressiveZoomState else { return }
             if isLost {
                 DetailProgressiveDecodeSupport.syncAtFullResolution(
                     controller: controller.progressiveDecode,
@@ -1210,9 +1234,8 @@ private struct ComparePaneView: View {
             DetailProgressiveDecodeReadout(
                 photoID: photoID,
                 prefixText: nil,
-                zoomText: controller.zoomLabel(language: language),
-                showsProgressiveState: controller.scale > DetailFitScale.tolerance
-                    && controller.isScaleAtFullResolution,
+                zoomText: controller.progressiveZoomText(language: language),
+                showsProgressiveState: controller.isShowingProgressiveZoomState,
                 phase: controller.progressiveDecode.phase,
                 language: language,
                 tone: .header,
@@ -1475,10 +1498,7 @@ private struct ComparePaneView: View {
         if targetID == photoID {
             if image.limitation == nil, image.quality == .nativeRAW || image.isBestAvailable {
                 controller.progressiveDecode.completeIfTracking(photoID: targetID)
-            } else if image.limitation != nil,
-                controller.scale > DetailFitScale.tolerance,
-                controller.isScaleAtFullResolution
-            {
+            } else if image.limitation != nil, controller.isShowingProgressiveZoomState {
                 DetailProgressiveDecodeSupport.syncAtFullResolution(
                     controller: controller.progressiveDecode,
                     photoID: targetID,
@@ -1577,36 +1597,55 @@ private struct ComparePaneView: View {
 
     private func handleZoomScaleChange(_ newScale: CGFloat, fromUserGesture: Bool) {
         controller.scale = newScale
-        guard newScale > DetailFitScale.tolerance else {
-            controller.inspectedFocusRegionID = nil
-            controller.zoomMode = .fit
-            controller.commandedScale = 1
-            controller.anchor = .centre
-            if fromUserGesture && controller.loadedPhotoID != photoID {
-                controller.keptZoom = nil
-            }
-            controller.upgradeTask?.cancel()
-            controller.upgradeTask = nil
-            controller.upgradeRequest = nil
-            controller.upgradeToken = nil
-            controller.progressiveDecode.reset()
-            return
-        }
         if abs(newScale - controller.commandedScale) > 0.01 {
             controller.zoomMode = .manual
         }
-        if !controller.isScaleAtFullResolution && controller.progressiveDecode.phase != .idle {
+        guard newScale > DetailFitScale.tolerance else {
+            controller.inspectedFocusRegionID = nil
+            if !controller.zoomMode.isFullResolution {
+                controller.zoomMode = .fit
+                controller.commandedScale = 1
+                controller.anchor = .centre
+                if fromUserGesture && controller.loadedPhotoID != photoID {
+                    controller.keptZoom = nil
+                }
+                controller.upgradeTask?.cancel()
+                controller.upgradeTask = nil
+                controller.upgradeRequest = nil
+                controller.upgradeToken = nil
+                controller.progressiveDecode.reset()
+            }
+            return
+        }
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: newScale,
+            zoomModeIsFullResolution: controller.zoomMode.isFullResolution,
+            fullResolutionPixels: controller.shown?.fullResolutionPixels,
+            viewSize: controller.viewSize,
+            screenScale: controller.displayScale,
+            isFullResolutionUpgradeInFlight: controller.isFullResolutionUpgradeInFlight)
+            && controller.progressiveDecode.phase != .idle
+        {
             controller.progressiveDecode.reset()
         }
         upgradeIfNeeded(for: photoID)
     }
 
     private func upgradeIfNeeded(for targetID: PhotoIdentity) {
-        guard controller.scale > DetailFitScale.tolerance else {
+        guard controller.zoomMode.isFullResolution || controller.scale > DetailFitScale.tolerance
+        else {
             controller.progressiveDecode.reset()
             return
         }
-        if !controller.isScaleAtFullResolution && controller.progressiveDecode.phase != .idle {
+        if !DetailProgressiveDecodeSupport.shouldRetainProgressiveDecodeAboveFit(
+            scale: controller.scale,
+            zoomModeIsFullResolution: controller.zoomMode.isFullResolution,
+            fullResolutionPixels: controller.shown?.fullResolutionPixels,
+            viewSize: controller.viewSize,
+            screenScale: controller.displayScale,
+            isFullResolutionUpgradeInFlight: controller.isFullResolutionUpgradeInFlight)
+            && controller.progressiveDecode.phase != .idle
+        {
             controller.progressiveDecode.reset()
         }
         if (controller.previewOnly || hasFolderLocationLoss), controller.isScaleAtFullResolution {
@@ -1624,9 +1663,13 @@ private struct ComparePaneView: View {
         }
         guard !controller.previewOnly,
             !hasFolderLocationLoss,
-            let shown = controller.shown,
-            controller.requestPixels(scale: controller.scale) > max(shown.width, shown.height)
+            let shown = controller.shown
         else { return }
+        let needsUpgrade =
+            (controller.zoomMode.isFullResolution && shown.fullResolutionPixels == nil)
+            ? !shown.isBestAvailable
+            : (controller.requestPixels(scale: controller.scale) > max(shown.width, shown.height))
+        guard needsUpgrade else { return }
         let need: DetailPixelRequest.Need =
             controller.isAtFullResolution ? .fullResolution : .morePixels
         let request = DetailPixelRequest(
