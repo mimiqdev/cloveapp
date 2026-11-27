@@ -2343,28 +2343,6 @@
         }
       }
     },
-    "Challenger photo B": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Challenger photo B"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "对比照片 B"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "對比相片 B"
-          }
-        }
-      }
-    },
     "Choose a folder other than the rejects folder.": {
       "localizations": {
         "en": {
@@ -7871,28 +7849,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "參考相片 %@"
-          }
-        }
-      }
-    },
-    "Reference photo A": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reference photo A"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "参考照片 A"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "參考相片 A"
           }
         }
       }

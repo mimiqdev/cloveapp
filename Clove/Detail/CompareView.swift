@@ -19,6 +19,7 @@ struct CompareView: View {
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
+    @Environment(\.duoVerticalDivisionRange) private var overrideVerticalDivisionRange
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
@@ -195,6 +196,13 @@ struct CompareView: View {
                 duoCompareSyncButton
             }
             .axisBehavior(.verticalPreferred)
+
+            ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+            ToolbarItem(placement: .topBarTrailing) {
+                duoCompareSetAsAButton
+            }
+            .axisBehavior(.verticalPreferred)
         } else {
             ToolbarItem(placement: .topBarLeading) {
                 duoCompareDoneButton
@@ -212,6 +220,7 @@ struct CompareView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 duoCompareFocusButton
                 duoCompareSyncButton
+                duoCompareSetAsAButton
             }
         }
     }
@@ -274,6 +283,22 @@ struct CompareView: View {
         }
     }
 
+    private var duoCompareSetAsAButton: some View {
+        let setAsALabel = AppLocalization.string("Set as A", language: language)
+        return Button(
+            setAsALabel,
+            systemImage: "inset.filled.leadinghalf.arrow.leading.rectangle"
+        ) {
+            tapPickerDismissToken += 1
+            promoteChallengerToReference()
+        }
+        .tint(Color.clove.text.primary)
+        .help(setAsALabel)
+        .accessibilityLabel(setAsALabel)
+        .disabled(!session.canPromoteChallenger)
+        .accessibilityIdentifier("clove.compare.setAsA")
+    }
+
     private var compareBody: some View {
         VStack(spacing: 8) {
             if !usesDuoSystemToolbar {
@@ -299,8 +324,10 @@ struct CompareView: View {
         .padding(.bottom, verticalSizeClass == .compact ? 6 : 10)
         .onGeometryChange(for: CompareGeometrySnapshot.self) { proxy in
             let size = proxy.size
-            let verticalFold = Self.verticalDivisionRange(
-                in: proxy, containerWidth: size.width)
+            let verticalFold = Self.resolvedVerticalDivisionRange(
+                override: overrideVerticalDivisionRange,
+                in: proxy,
+                containerWidth: size.width)
             return CompareGeometrySnapshot(size: size, verticalFold: verticalFold)
         } action: { snapshot in
             containerSize = snapshot.size
@@ -406,27 +433,26 @@ struct CompareView: View {
 
     private var splitPanes: some View {
         GeometryReader { proxy in
-            let horizontalInset: CGFloat = verticalFoldRange == nil ? 12 : 8
-            let innerWidth = max(0, proxy.size.width - horizontalInset * 2)
-            let localFoldMinX = verticalFoldRange.map { $0.lowerBound - horizontalInset }
-            let localFoldMaxX = verticalFoldRange.map { $0.upperBound - horizontalInset }
-            let split = CompareSplitGeometry.layout(
-                containerWidth: Double(innerWidth),
-                verticalFoldMinX: localFoldMinX.map(Double.init),
-                verticalFoldMaxX: localFoldMaxX.map(Double.init))
+            let layout = Self.splitLayout(
+                containerWidth: proxy.size.width,
+                verticalFoldRange: activeVerticalFoldRange(for: proxy.size.width))
 
-            HStack(spacing: CGFloat(split.dividerWidth)) {
+            HStack(spacing: CGFloat(layout.split.dividerWidth)) {
                 paneView(
                     side: .reference, photoID: session.reference, controller: paneA, peer: paneB
                 )
-                .frame(width: max(0, CGFloat(split.referenceWidth)), height: proxy.size.height)
+                .frame(
+                    width: max(0, CGFloat(layout.split.referenceWidth)),
+                    height: proxy.size.height)
 
                 paneView(
                     side: .challenger, photoID: session.challenger, controller: paneB, peer: paneA
                 )
-                .frame(width: max(0, CGFloat(split.challengerWidth)), height: proxy.size.height)
+                .frame(
+                    width: max(0, CGFloat(layout.split.challengerWidth)),
+                    height: proxy.size.height)
             }
-            .padding(.horizontal, horizontalInset)
+            .padding(.horizontal, layout.horizontalInset)
         }
     }
 
@@ -486,36 +512,75 @@ struct CompareView: View {
     // MARK: - Bottom Review Bar
 
     private var bottomReviewBar: some View {
-        HStack(spacing: 10) {
-            if session.mode == .stepping {
-                if layoutPolicy.showsFilmstrip {
-                    CompareFilmstrip(
-                        photos: scopePhotos,
-                        reference: session.reference,
-                        challenger: session.challenger,
-                        activeSide: session.activeSide,
-                        thumbnails: browsing.thumbnails,
-                        onSelectCandidate: { candidate in
-                            tapPickerDismissToken += 1
-                            browsing.selectCompareChallenger(candidate)
-                        }
-                    )
-                    .frame(maxWidth: .infinity)
-                    steppingControls
-                        .layoutPriority(1)
-                } else {
-                    steppingControls
-                    Spacer(minLength: 8)
-                }
-            } else {
-                Spacer(minLength: 8)
-            }
+        GeometryReader { proxy in
+            if let foldRange = activeVerticalFoldRange(for: proxy.size.width) {
+                let foldLayout = Self.splitLayout(
+                    containerWidth: proxy.size.width,
+                    verticalFoldRange: foldRange)
 
-            reviewActionCluster
-                .layoutPriority(2)
+                HStack(spacing: CGFloat(foldLayout.split.dividerWidth)) {
+                    Group {
+                        if session.mode == .stepping && layoutPolicy.showsFilmstrip {
+                            compareFilmstrip
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Color.clear.frame(height: 1)
+                        }
+                    }
+                    .frame(width: max(0, CGFloat(foldLayout.split.referenceWidth)))
+
+                    HStack(spacing: 8) {
+                        if session.mode == .stepping {
+                            steppingControls
+                                .layoutPriority(1)
+                        }
+                        reviewActionCluster
+                            .layoutPriority(2)
+                    }
+                    .frame(
+                        width: max(0, CGFloat(foldLayout.split.challengerWidth)),
+                        alignment: .trailing)
+                }
+                .padding(.horizontal, foldLayout.horizontalInset)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            } else {
+                HStack(spacing: 10) {
+                    if session.mode == .stepping {
+                        if layoutPolicy.showsFilmstrip {
+                            compareFilmstrip
+                                .frame(maxWidth: .infinity)
+                            steppingControls
+                                .layoutPriority(1)
+                        } else {
+                            steppingControls
+                            Spacer(minLength: 8)
+                        }
+                    } else {
+                        Spacer(minLength: 8)
+                    }
+
+                    reviewActionCluster
+                        .layoutPriority(2)
+                }
+                .padding(.horizontal, 12)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
         }
-        .padding(.horizontal, 12)
         .frame(height: layoutPolicy.showsFilmstrip ? 58 : 50)
+    }
+
+    private var compareFilmstrip: some View {
+        CompareFilmstrip(
+            photos: scopePhotos,
+            reference: session.reference,
+            challenger: session.challenger,
+            activeSide: session.activeSide,
+            thumbnails: browsing.thumbnails,
+            onSelectCandidate: { candidate in
+                tapPickerDismissToken += 1
+                browsing.selectCompareChallenger(candidate)
+            }
+        )
     }
 
     private var steppingControls: some View {
@@ -531,6 +596,7 @@ struct CompareView: View {
             }
             .disabled(!session.canStepPreviousChallenger)
             .opacity(session.canStepPreviousChallenger ? 1 : 0.45)
+            .reportTapPickerFrame("clove.compare.prev")
 
             GlassIconButton(
                 label: AppLocalization.string("Next candidate", language: language),
@@ -543,24 +609,28 @@ struct CompareView: View {
             }
             .disabled(!session.canStepNextChallenger)
             .opacity(session.canStepNextChallenger ? 1 : 0.45)
+            .reportTapPickerFrame("clove.compare.next")
 
-            Button {
-                tapPickerDismissToken += 1
-                promoteChallengerToReference()
-            } label: {
-                Text(AppLocalization.string("Set as A", language: language))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.clove.text.primary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .contentShape(Capsule())
-                    .cloveGlass(in: Capsule())
+            if !usesDuoSystemToolbar {
+                Button {
+                    tapPickerDismissToken += 1
+                    promoteChallengerToReference()
+                } label: {
+                    Text(AppLocalization.string("Set as A", language: language))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.clove.text.primary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .contentShape(Capsule())
+                        .cloveGlass(in: Capsule())
+                }
+                .frame(minHeight: 40)
+                .buttonStyle(.cloveGlassPress)
+                .disabled(!session.canPromoteChallenger)
+                .accessibilityIdentifier("clove.compare.setAsA")
+                .reportTapPickerFrame("clove.compare.setAsA")
             }
-            .frame(minHeight: 40)
-            .buttonStyle(.cloveGlassPress)
-            .disabled(!session.canPromoteChallenger)
-            .accessibilityIdentifier("clove.compare.setAsA")
         }
     }
 
@@ -568,45 +638,22 @@ struct CompareView: View {
         let targetPhoto = session.activePhoto
         let marks = browsing.shownMarks(for: targetPhoto)
 
-        return HStack(spacing: 6) {
-            activeSideBadge
-                .reportTapPickerFrame("clove.compare.activeSideBadge")
-
-            MarkingToolbar(
-                rating: marks.isRejected ? .unrated : marks.rating,
-                label: marks.label.colour,
-                isRejected: marks.isRejected,
-                enabledRatings: settings.enabledRatings,
-                labels: [nil] + settings.availableLabels.map { Optional($0) },
-                identifier: "clove.compare.capsule",
-                photoID: targetPhoto,
-                onRate: { rateActive($0) },
-                onReject: { toggleRejectActive() },
-                onLabel: { chooseActiveLabel($0) },
-                onBegin: {}
-            )
-            .disabled(!browsing.canMark)
-            .opacity(browsing.canMark ? 1 : 0.45)
-            .accessibilityValue(MarkSummary.text(for: marks, language: language))
-        }
-    }
-
-    private var activeSideBadge: some View {
-        let sideLetter = session.activeSide == .reference ? "A" : "B"
-        let accessibleSide = AppLocalization.string(
-            session.activeSide == .reference ? "Reference photo A" : "Challenger photo B",
-            language: language)
-
-        return Text(sideLetter)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(Color.white)
-            .frame(minWidth: 26, minHeight: 26)
-            .padding(.horizontal, 4)
-            .background(Color.clove.accent, in: Capsule())
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibleSide)
-            .accessibilityValue(sideLetter)
-            .accessibilityIdentifier("clove.compare.activeSideBadge")
+        return MarkingToolbar(
+            rating: marks.isRejected ? .unrated : marks.rating,
+            label: marks.label.colour,
+            isRejected: marks.isRejected,
+            enabledRatings: settings.enabledRatings,
+            labels: [nil] + settings.availableLabels.map { Optional($0) },
+            identifier: "clove.compare.capsule",
+            photoID: targetPhoto,
+            onRate: { rateActive($0) },
+            onReject: { toggleRejectActive() },
+            onLabel: { chooseActiveLabel($0) },
+            onBegin: {}
+        )
+        .disabled(!browsing.canMark)
+        .opacity(browsing.canMark ? 1 : 0.45)
+        .accessibilityValue(MarkSummary.text(for: marks, language: language))
     }
 
     // MARK: - Marking & Keyboard Handling
@@ -878,6 +925,50 @@ struct CompareView: View {
             pendingExitForUnsupportedLayout = true
             browsing.exitCompare()
         }
+    }
+
+    private func activeVerticalFoldRange(for containerWidth: CGFloat) -> ClosedRange<CGFloat>? {
+        Self.validatedVerticalDivisionRange(
+            verticalFoldRange ?? overrideVerticalDivisionRange,
+            containerWidth: containerWidth)
+    }
+
+    private static func splitLayout(
+        containerWidth: CGFloat,
+        verticalFoldRange: ClosedRange<CGFloat>?
+    ) -> (horizontalInset: CGFloat, split: CompareSplitGeometry) {
+        let horizontalInset: CGFloat = verticalFoldRange == nil ? 12 : 8
+        let innerWidth = max(0, containerWidth - horizontalInset * 2)
+        let localFoldMinX = verticalFoldRange.map { $0.lowerBound - horizontalInset }
+        let localFoldMaxX = verticalFoldRange.map { $0.upperBound - horizontalInset }
+        let split = CompareSplitGeometry.layout(
+            containerWidth: Double(innerWidth),
+            verticalFoldMinX: localFoldMinX.map(Double.init),
+            verticalFoldMaxX: localFoldMaxX.map(Double.init))
+        return (horizontalInset, split)
+    }
+
+    private nonisolated static func resolvedVerticalDivisionRange(
+        override: ClosedRange<CGFloat>?,
+        in proxy: GeometryProxy,
+        containerWidth: CGFloat
+    ) -> ClosedRange<CGFloat>? {
+        verticalDivisionRange(in: proxy, containerWidth: containerWidth)
+            ?? validatedVerticalDivisionRange(override, containerWidth: containerWidth)
+    }
+
+    private nonisolated static func validatedVerticalDivisionRange(
+        _ range: ClosedRange<CGFloat>?,
+        containerWidth: CGFloat
+    ) -> ClosedRange<CGFloat>? {
+        guard let range,
+            range.lowerBound > 0,
+            range.upperBound > range.lowerBound,
+            range.upperBound < containerWidth
+        else {
+            return nil
+        }
+        return range
     }
 
     private nonisolated static func verticalDivisionRange(
@@ -1161,6 +1252,7 @@ private struct ComparePaneView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifierPrefix)
+        .reportHeaderControlFrame(identifierPrefix)
         .onChange(of: photoID) { _, _ in
             onPrepareTransition()
             controller.cancelTasks()
@@ -1208,7 +1300,9 @@ private struct ComparePaneView: View {
                         : theme.tokens.separator.color.opacity(0.45),
                     in: Capsule()
                 )
+                .accessibilityAddTraits(isActive ? .isSelected : [])
                 .accessibilityIdentifier("\(identifierPrefix).badge")
+                .reportHeaderControlFrame("\(identifierPrefix).badge")
 
             HStack(spacing: 0) {
                 Text(parts.stem)
@@ -1257,6 +1351,7 @@ private struct ComparePaneView: View {
         .onTapGesture {
             onSelectPane()
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("\(identifierPrefix).header")
     }
 

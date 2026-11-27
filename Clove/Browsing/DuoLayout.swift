@@ -42,6 +42,7 @@ extension EnvironmentValues {
     @Entry var hasFoldRegion = false
     @Entry var isDuoExpanded = false
     @Entry var isDuoCover = false
+    @Entry var duoVerticalDivisionRange: ClosedRange<CGFloat>? = nil
 }
 
 struct DuoDetailLayout {
