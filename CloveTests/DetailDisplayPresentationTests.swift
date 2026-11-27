@@ -7632,9 +7632,10 @@ struct DetailDisplayPresentationTests {
                 && soloTapFrames.frames["clove.detail.bottomBand"] != nil
         }
 
-        // 2. Portrait Expanded Duo (669x951) enables Compare with >= 2 photos while Focus View
-        // places [Focus|Compare] bottom-left 12 pt above the filmstrip without squeezing the strip,
-        // and disables Compare cleanly when < 2 photos are in scope.
+        // 2. Portrait Expanded Duo (669x951) disables Compare in [Focus|Compare] even with >= 2
+        // photos while keeping Focus View bottom-left pill 12 pt above the filmstrip without
+        // squeezing the strip; Landscape Expanded Duo (951x669) enables Compare with >= 2 photos
+        // and disables it cleanly when < 2 photos are in scope.
         let multiBrowsing = BrowsingModel(library: TestLibrary.sample())
         multiBrowsing.openFolder()
         try await waitFor("sample folder open") { !multiBrowsing.isFolderOpening }
@@ -7674,7 +7675,7 @@ struct DetailDisplayPresentationTests {
         if let portraitCompareAlpha = effectiveRenderedOpacity(
             atCenterOf: portraitCompareFrame, in: window)
         {
-            #expect(portraitCompareAlpha > 0.9)
+            #expect(portraitCompareAlpha < 0.6)
         }
         let portraitFocusFrame = try #require(duoFrames.frames["clove.detail.focusToggle"])
         if let portraitFocusAlpha = effectiveRenderedOpacity(
@@ -7683,12 +7684,48 @@ struct DetailDisplayPresentationTests {
             #expect(portraitFocusAlpha > 0.9)
         }
         #expect(
-            CompareLayoutPolicy(
+            !CompareLayoutPolicy(
                 availableWidth: 669, availableHeight: 951, isRegularWidth: true,
                 isCompactHeight: false, isDuoExpanded: true, isDuoCover: false
             ).supportsCompare)
+        #expect(multiBrowsing.compareSession == nil)
 
-        // Single-photo Portrait Expanded Duo still disables Compare cleanly.
+        // Landscape Expanded Duo (951x669) enables Compare with >= 2 photos and disables it with < 2.
+        let landscapeDuoFrames = DetailFrameBox()
+        window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
+        soloHost.rootView = AnyView(
+            TestDuoPoseDetailHost(
+                browsing: multiBrowsing,
+                images: SampleDetailImages(),
+                presentation: duoPresentation,
+                isDuoExpanded: true,
+                isDuoCover: false,
+                usesVerticalToolbar: true,
+                hasFoldRegion: true,
+                showsGrid: true,
+                theme: .light
+            )
+            .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                landscapeDuoFrames.frames = $0
+            })
+        try await waitFor("Landscape Duo Focus View did not settle") {
+            landscapeDuoFrames.frames["clove.detail.inspectionPill"] != nil
+                && landscapeDuoFrames.frames["clove.detail.compare"] != nil
+                && landscapeDuoFrames.frames["clove.detail.filmstrip"] != nil
+        }
+        let landscapeCompareFrame = try #require(landscapeDuoFrames.frames["clove.detail.compare"])
+        if let landscapeCompareAlpha = effectiveRenderedOpacity(
+            atCenterOf: landscapeCompareFrame, in: window)
+        {
+            #expect(landscapeCompareAlpha > 0.9)
+        }
+        #expect(
+            CompareLayoutPolicy(
+                availableWidth: 951, availableHeight: 669, isRegularWidth: true,
+                isCompactHeight: false, isDuoExpanded: true, isDuoCover: false
+            ).supportsCompare)
+
+        // Single-photo Landscape Expanded Duo still disables Compare cleanly.
         let soloDuoFrames = DetailFrameBox()
         soloHost.rootView = AnyView(
             TestDuoPoseDetailHost(
@@ -7697,7 +7734,7 @@ struct DetailDisplayPresentationTests {
                 presentation: duoPresentation,
                 isDuoExpanded: true,
                 isDuoCover: false,
-                usesVerticalToolbar: false,
+                usesVerticalToolbar: true,
                 hasFoldRegion: true,
                 showsGrid: true,
                 theme: .light
@@ -7705,7 +7742,7 @@ struct DetailDisplayPresentationTests {
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
                 soloDuoFrames.frames = $0
             })
-        try await waitFor("Solo Portrait Duo Focus View did not settle") {
+        try await waitFor("Solo Landscape Duo Focus View did not settle") {
             soloDuoFrames.frames["clove.detail.compare"] != nil
         }
         let soloDuoCompareFrame = try #require(soloDuoFrames.frames["clove.detail.compare"])

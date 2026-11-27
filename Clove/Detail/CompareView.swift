@@ -12,6 +12,7 @@ struct CompareView: View {
     let images: any DetailImageSource
     let displayMode: PhotoDisplayMode
     var duo: DuoDetailLayout? = nil
+    var onUnsupportedLayoutExit: ((_ showsRotateToast: Bool) -> Void)? = nil
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -68,7 +69,7 @@ struct CompareView: View {
 
     private var usesDuoSystemToolbar: Bool {
         if #available(iOS 27.1, *) {
-            return isDuoExpanded && usesSystemToolbar
+            return isDuoExpanded && usesSystemToolbar && usesVerticalToolbar
         }
         return false
     }
@@ -114,6 +115,12 @@ struct CompareView: View {
             .onChange(of: containerSize) { _, newSize in
                 checkSupportedLayout(for: newSize)
             }
+            .onChange(of: horizontalSizeClass) { _, _ in
+                checkSupportedLayout(for: containerSize)
+            }
+            .onChange(of: verticalSizeClass) { _, _ in
+                checkSupportedLayout(for: containerSize)
+            }
             .onChange(of: isDuoCover) { _, _ in
                 checkSupportedLayout(for: containerSize)
             }
@@ -144,8 +151,17 @@ struct CompareView: View {
             .accessibilityIdentifier("clove.compare")
             .navigationBarBackButtonHidden(true)
 
-        if #available(iOS 27.1, *), isDuoExpanded, usesSystemToolbar {
-            duoToolbarContainer(content)
+        if #available(iOS 27.1, *), isDuoExpanded, usesSystemToolbar, usesVerticalToolbar {
+            content
+                .toolbar {
+                    duoCompareToolbar
+                }
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+                .toolbarVisibility(.visible, for: .navigationBar)
+                .toolbarVerticalBehavior(.automatic)
+                .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+                .contentMargins(for: .container, edges: .horizontal)
         } else if #available(iOS 27.1, *), usesVerticalToolbar {
             content
                 .toolbar(.hidden, for: .navigationBar)
@@ -156,73 +172,31 @@ struct CompareView: View {
     }
 
     @available(iOS 27.1, *)
-    @ViewBuilder
-    private func duoToolbarContainer<Content: View>(_ content: Content) -> some View {
-        let configured =
-            content
-            .toolbar {
-                duoCompareToolbar
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbarVisibility(.visible, for: .navigationBar)
-            .toolbarVerticalBehavior(.automatic)
-            .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
-
-        if usesVerticalToolbar {
-            configured.contentMargins(for: .container, edges: .horizontal)
-        } else {
-            configured
-        }
-    }
-
-    @available(iOS 27.1, *)
     @ToolbarContentBuilder
     private var duoCompareToolbar: some ToolbarContent {
-        if usesVerticalToolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                duoCompareDoneButton
-            }
-            .axisBehavior(.verticalPreferred)
-
-            ToolbarItem(placement: .topBarTrailing) {
-                duoCompareFocusButton
-            }
-            .axisBehavior(.verticalPreferred)
-
-            ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-            ToolbarItem(placement: .topBarTrailing) {
-                duoCompareSyncButton
-            }
-            .axisBehavior(.verticalPreferred)
-
-            ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
-            ToolbarItem(placement: .topBarTrailing) {
-                duoCompareSetAsAButton
-            }
-            .axisBehavior(.verticalPreferred)
-        } else {
-            ToolbarItem(placement: .topBarLeading) {
-                duoCompareDoneButton
-            }
-
-            ToolbarItem(placement: .principal) {
-                Text(AppLocalization.string("Compare", language: language))
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color.clove.text.primary)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("clove.compare.title")
-            }
-            .axisBehavior(.horizontalOnly)
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                duoCompareFocusButton
-                duoCompareSyncButton
-                duoCompareSetAsAButton
-            }
+        ToolbarItem(placement: .cancellationAction) {
+            duoCompareDoneButton
         }
+        .axisBehavior(.verticalPreferred)
+
+        ToolbarItem(placement: .topBarTrailing) {
+            duoCompareFocusButton
+        }
+        .axisBehavior(.verticalPreferred)
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        ToolbarItem(placement: .topBarTrailing) {
+            duoCompareSyncButton
+        }
+        .axisBehavior(.verticalPreferred)
+
+        ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+        ToolbarItem(placement: .topBarTrailing) {
+            duoCompareSetAsAButton
+        }
+        .axisBehavior(.verticalPreferred)
     }
 
     private var duoCompareDoneButton: some View {
@@ -941,7 +915,12 @@ struct CompareView: View {
             isDuoCover: isDuoCover)
         if !policy.supportsCompare && !pendingExitForUnsupportedLayout {
             pendingExitForUnsupportedLayout = true
-            browsing.exitCompare()
+            let showsRotateToast = !policy.isDuoCover && !policy.isLandscape
+            if let onUnsupportedLayoutExit {
+                onUnsupportedLayoutExit(showsRotateToast)
+            } else {
+                browsing.exitCompare()
+            }
         }
     }
 

@@ -283,10 +283,10 @@ struct CompareSessionTests {
         #expect(landscapeMaxPhone.supportsCompare)
         #expect(!landscapeMaxPhone.showsFilmstrip)
 
-        // Unfolded Duo -> supported, shows filmstrip
+        // Unfolded Duo landscape -> supported, shows filmstrip
         let duoExpanded = CompareLayoutPolicy(
-            availableWidth: 980,
-            availableHeight: 740,
+            availableWidth: 951,
+            availableHeight: 669,
             isRegularWidth: true,
             isCompactHeight: false,
             isDuoExpanded: true,
@@ -295,7 +295,7 @@ struct CompareSessionTests {
         #expect(duoExpanded.supportsCompare)
         #expect(duoExpanded.showsFilmstrip)
 
-        // Unfolded Duo portrait (669 x 951, regular horizontal size class) -> supported, shows filmstrip
+        // Unfolded Duo portrait (669 x 951, regular horizontal size class) -> excluded (landscape only)
         let duoExpandedPortrait = CompareLayoutPolicy(
             availableWidth: 669,
             availableHeight: 951,
@@ -304,8 +304,20 @@ struct CompareSessionTests {
             isDuoExpanded: true,
             isDuoCover: false
         )
-        #expect(duoExpandedPortrait.supportsCompare)
-        #expect(duoExpandedPortrait.showsFilmstrip)
+        #expect(!duoExpandedPortrait.supportsCompare)
+        #expect(!duoExpandedPortrait.showsFilmstrip)
+
+        // Square unfolded Duo (availableWidth <= availableHeight) -> excluded
+        let duoExpandedSquare = CompareLayoutPolicy(
+            availableWidth: 669,
+            availableHeight: 669,
+            isRegularWidth: true,
+            isCompactHeight: false,
+            isDuoExpanded: true,
+            isDuoCover: false
+        )
+        #expect(!duoExpandedSquare.supportsCompare)
+        #expect(!duoExpandedSquare.showsFilmstrip)
 
         // Compact non-landscape Duo strip -> excluded
         let duoCompactPortrait = CompareLayoutPolicy(
@@ -330,7 +342,7 @@ struct CompareSessionTests {
         #expect(padLandscape.supportsCompare)
         #expect(padLandscape.showsFilmstrip)
 
-        // iPad portrait -> supported, shows filmstrip
+        // iPad portrait (>= 560 pt, non-Duo) -> supported, shows filmstrip
         let padPortrait = CompareLayoutPolicy(
             availableWidth: 834,
             availableHeight: 1194,
@@ -341,6 +353,17 @@ struct CompareSessionTests {
         )
         #expect(padPortrait.supportsCompare)
         #expect(padPortrait.showsFilmstrip)
+
+        let padNarrowRegularPortrait = CompareLayoutPolicy(
+            availableWidth: 560,
+            availableHeight: 900,
+            isRegularWidth: true,
+            isCompactHeight: false,
+            isDuoExpanded: false,
+            isDuoCover: false
+        )
+        #expect(padNarrowRegularPortrait.supportsCompare)
+        #expect(padNarrowRegularPortrait.showsFilmstrip)
 
         // iPad narrow Slide Over strip -> excluded
         let padSlideOver = CompareLayoutPolicy(

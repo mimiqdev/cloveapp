@@ -901,6 +901,15 @@ struct AppLocalizationTests {
                 change: .label(.clear),
                 previousMarks: PhotoMarks(label: ColourLabel(colour: .blue)))
                 == .clearedLabel)
+        #expect(
+            AppLocalization.string("Rotate to landscape to compare", language: .english)
+                == "Rotate to landscape to compare")
+        #expect(
+            AppLocalization.string("Rotate to landscape to compare", language: .simplifiedChinese)
+                == "旋转至横屏即可对比")
+        #expect(
+            AppLocalization.string("Rotate to landscape to compare", language: .traditionalChinese)
+                == "旋轉至橫向即可對比")
     }
 
     @Test func gridAllReviewedLocalizesAcrossLanguagesAndCounts() {

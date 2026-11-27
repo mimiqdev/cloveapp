@@ -328,12 +328,15 @@ public struct CompareLayoutPolicy: Hashable, Sendable {
         availableWidth > availableHeight
     }
 
-    /// True on unfolded Duo (landscape and regular-width portrait), iPad (regular-width or
-    /// landscape split), and landscape iPhone; false on Duo Cover, portrait iPhone, and compact
-    /// portrait Split View / Slide Over strips.
+    /// True on unfolded Duo landscape, iPad (regular-width or landscape split), and landscape
+    /// iPhone; false on unfolded Duo portrait, Duo Cover, portrait iPhone, and compact portrait
+    /// Split View / Slide Over strips.
     public var supportsCompare: Bool {
         guard !isDuoCover, availableWidth > 0, availableHeight > 0 else {
             return false
+        }
+        if isDuoExpanded {
+            return isLandscape && availableWidth >= Self.minimumCompareWidth
         }
         if isRegularWidth && !isCompactHeight && availableWidth >= Self.minimumRegularWidthCompare {
             return true

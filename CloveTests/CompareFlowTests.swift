@@ -283,6 +283,7 @@ struct CompareFlowTests {
 
         let p1 = library.identity("p1")
         let p2 = library.identity("p2")
+        let p3 = library.identity("p3")
         model.openPhoto(p1)
         let timeline = DetailTimeline(
             photos: model.photos, groups: model.groups, groupsEnabled: true)
@@ -292,37 +293,97 @@ struct CompareFlowTests {
         model.apply(MarkChange(rating: Rating(rawValue: 5)!), to: p2)
         #expect(model.compareSession?.activePhoto == p2)
 
+        let env = PortraitHostEnv()
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let tapFrames = CompareFrameBox()
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        struct HostView: View {
+            let model: BrowsingModel
+            let store: SettingsStore
+            let env: PortraitHostEnv
+            let tapFrames: CompareFrameBox
+            var body: some View {
+                DetailScreen(browsing: model, images: SampleDetailImages())
+                    .environment(store)
+                    .environment(\.isDuoCover, env.isDuoCover)
+                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                        tapFrames.frames = $0
+                    }
+            }
+        }
         let host = UIHostingController(
-            rootView: DetailScreen(browsing: model, images: SampleDetailImages())
-                .environment(SettingsStore.sample))
+            rootView: HostView(model: model, store: store, env: env, tapFrames: tapFrames))
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .compact
         window.rootViewController = host
-        window.isHidden = false
-        defer { window.isHidden = true }
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
         host.view.frame = window.bounds
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { self.findPanes(in: window).count == 2 }
         #expect(model.compareSession != nil)
 
-        // Rotate to portrait phone -> auto-exits Compare to Detail on active side's photo (p2) with mark intact.
+        // Rotate to portrait phone -> auto-exits Compare to Detail on active side's photo (p2)
+        // with mark intact and shows the non-blocking rotate toast.
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
         host.view.frame = window.bounds
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
-        try await waitUntil { model.compareSession == nil }
+        try await waitUntil {
+            model.compareSession == nil
+                && tapFrames.frames["clove.detail.compareRotateToast"] != nil
+        }
 
         #expect(model.state.route == .detail)
         #expect(model.state.currentPhoto == p2)
         #expect(model.placedPhoto(for: p2)?.marks.rating == Rating(rawValue: 5))
+
+        // Toast never blocks gestures/marking on the underlying stage.
+        let toastFrame = try #require(tapFrames.frames["clove.detail.compareRotateToast"])
+        if let preview = findPanes(in: window).first {
+            let hit = window.hitTest(CGPoint(x: toastFrame.midX, y: toastFrame.midY), with: nil)
+            #expect(hit == nil || hit?.isDescendant(of: preview) == true)
+        }
+
+        // Navigating to another photo clears the rotate toast immediately.
+        model.openPhoto(p3)
+        try await waitUntil {
+            model.state.currentPhoto == p3
+                && tapFrames.frames["clove.detail.compareRotateToast"] == nil
+        }
+
+        // Re-entering Compare in landscape and folding to Duo Cover exits WITHOUT showing the rotate toast.
+        window.frame = CGRect(x: 0, y: 0, width: 852, height: 393)
+        host.traitOverrides.verticalSizeClass = .compact
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        let landscapeTimeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: landscapeTimeline))
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+
+        env.isDuoCover = true
+        window.frame = CGRect(x: 0, y: 0, width: 412, height: 915)
+        host.traitOverrides.verticalSizeClass = .regular
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitUntil { model.compareSession == nil }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.state.route == .detail)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
     }
 
     @Test(
@@ -2097,6 +2158,12 @@ private struct CompareFilmstripHarnessView: View {
 @MainActor
 private final class CompareFrameBox {
     var frames: [String: CGRect] = [:]
+}
+
+@MainActor
+@Observable
+private final class PortraitHostEnv {
+    var isDuoCover = false
 }
 
 @MainActor

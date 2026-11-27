@@ -31,6 +31,7 @@ struct DetailScreen: View {
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isDuoCover) private var isDuoCover
 
     /// The auto-advance a mark started, waiting out its pause (PRD Auto-advance).
     @State private var autoAdvance = MarkAutoAdvance()
@@ -39,6 +40,12 @@ struct DetailScreen: View {
     @State private var undoToast: DetailUndoToast?
     @State private var toastContextPhoto: PhotoIdentity?
     @State private var toastContextExpandedGroup: GroupID?
+
+    /// Brief non-blocking toast shown when Compare exits on rotation to portrait.
+    static let compareRotateToastAutoDismissDelay: Duration = .seconds(2)
+    @State private var compareRotateToastID: UUID?
+    @State private var rotateToastContextPhoto: PhotoIdentity?
+    @State private var rotateToastContextExpandedGroup: GroupID?
 
     /// C12's current settings: the double-tap behaviour, the zoomed gestures and the enabled
     /// ratings.
@@ -85,7 +92,10 @@ struct DetailScreen: View {
                     settings: settings,
                     images: images,
                     displayMode: store.photoDisplayMode,
-                    duo: duo)
+                    duo: duo,
+                    onUnsupportedLayoutExit: { showsRotateToast in
+                        handleUnsupportedCompareLayoutExit(showsRotateToast: showsRotateToast)
+                    })
             } else if let photo = browsing.currentPhoto {
                 content(for: photo)
             } else {
@@ -105,12 +115,14 @@ struct DetailScreen: View {
             if isComparing {
                 autoAdvance.cancel()
                 dismissUndoToast()
+                dismissCompareRotateToast()
             }
         }
         .onChange(of: settings.similarGroupsEnabled) { _, enabled in
             if !enabled {
                 autoAdvance.cancel()
                 dismissUndoToast()
+                dismissCompareRotateToast()
                 browsing.collapseGroup()
             }
         }
@@ -118,38 +130,55 @@ struct DetailScreen: View {
             if undoToast != nil, newPhoto != toastContextPhoto {
                 dismissUndoToast()
             }
+            if compareRotateToastID != nil, newPhoto != rotateToastContextPhoto {
+                dismissCompareRotateToast()
+            }
         }
         .onChange(of: browsing.expandedGroup) { _, newGroup in
             if undoToast != nil, newGroup != toastContextExpandedGroup {
                 dismissUndoToast()
+            }
+            if compareRotateToastID != nil, newGroup != rotateToastContextExpandedGroup {
+                dismissCompareRotateToast()
             }
         }
         .onChange(of: browsing.state.route) { _, route in
             if route != .detail {
                 autoAdvance.cancel()
                 dismissUndoToast()
+                dismissCompareRotateToast()
             }
         }
         .onChange(of: browsing.state.folder) { _, _ in
             dismissUndoToast()
+            dismissCompareRotateToast()
         }
         .onChange(of: browsing.state.filter) { _, _ in
             dismissUndoToast()
+            dismissCompareRotateToast()
         }
         .onChange(of: browsing.labelFilter) { _, _ in
             dismissUndoToast()
+            dismissCompareRotateToast()
         }
         .onChange(of: browsing.metadataFilter) { _, _ in
             dismissUndoToast()
+            dismissCompareRotateToast()
         }
         .onChange(of: browsing.failureToastMessage != nil) { _, hasFailure in
             if hasFailure {
                 dismissUndoToast()
+                dismissCompareRotateToast()
             }
         }
         .onChange(of: browsing.canUndoMark) { _, canUndo in
             if !canUndo {
                 dismissUndoToast()
+            }
+        }
+        .onChange(of: isDuoCover) { _, covered in
+            if covered {
+                dismissCompareRotateToast()
             }
         }
         .task(id: undoToast?.id) {
@@ -158,11 +187,18 @@ struct DetailScreen: View {
             guard !Task.isCancelled, undoToast?.id == toastID else { return }
             dismissUndoToast()
         }
+        .task(id: compareRotateToastID) {
+            guard let toastID = compareRotateToastID else { return }
+            try? await Task.sleep(for: Self.compareRotateToastAutoDismissDelay)
+            guard !Task.isCancelled, compareRotateToastID == toastID else { return }
+            dismissCompareRotateToast()
+        }
         .onDisappear {
             // Leaving detail drops a pending advance, so coming back never jumps photos
             // (PRD Auto-advance).
             autoAdvance.cancel()
             dismissUndoToast()
+            dismissCompareRotateToast()
         }
     }
 
@@ -183,8 +219,9 @@ struct DetailScreen: View {
             actions: actions,
             duo: duo,
             presentation: presentation,
-            initialPresentation: initialPresentation,
-            undoToast: undoToast)
+            initialPresentation: compareRotateToastID != nil ? .focus : initialPresentation,
+            undoToast: undoToast,
+            compareRotateToastID: compareRotateToastID)
     }
 
     /// What the marking view asks this screen to do: write a mark, advance after it, and move
@@ -234,6 +271,7 @@ struct DetailScreen: View {
     /// crossing levels or wrapping at ends.
     private func stepPhoto(offset: Int) {
         dismissUndoToast()
+        dismissCompareRotateToast()
         guard let current = browsing.state.currentPhoto,
             let target = timeline.steppedPhoto(
                 from: current, offset: offset, expandedGroup: activeExpandedGroup?.id)
@@ -248,6 +286,7 @@ struct DetailScreen: View {
     /// Opens one photo in Timeline mode (`expandedGroup = nil`) and drops any pending advance.
     private func openPhoto(_ photo: PhotoIdentity) {
         dismissUndoToast()
+        dismissCompareRotateToast()
         autoAdvance.cancel()
         browsing.openPhoto(photo)
     }
@@ -255,6 +294,7 @@ struct DetailScreen: View {
     /// Selects another member within the active expanded group and drops any pending advance.
     private func selectGroupPhoto(_ photo: PhotoIdentity) {
         dismissUndoToast()
+        dismissCompareRotateToast()
         autoAdvance.cancel()
         browsing.selectGroupPhoto(photo)
     }
@@ -262,6 +302,7 @@ struct DetailScreen: View {
     /// Enters Group Focus for `groupID` and drops any pending advance.
     private func expandGroup(_ groupID: GroupID) {
         dismissUndoToast()
+        dismissCompareRotateToast()
         autoAdvance.cancel()
         browsing.openGroup(groupID, on: browsing.state.currentPhoto)
     }
@@ -269,14 +310,57 @@ struct DetailScreen: View {
     /// Collapses Group Focus back to Timeline on the group's Representative Photo.
     private func collapseGroup() {
         dismissUndoToast()
+        dismissCompareRotateToast()
         autoAdvance.cancel()
         browsing.collapseGroup()
     }
 
-    // MARK: - Transient Undo toast
+    // MARK: - Transient toasts
+
+    private func handleUnsupportedCompareLayoutExit(showsRotateToast: Bool) {
+        if showsRotateToast {
+            presentation?.wrappedValue = .focus
+            duo?.presentation.wrappedValue = .focus
+            presentCompareRotateToast(animated: false)
+        } else {
+            dismissCompareRotateToast()
+        }
+        browsing.exitCompare()
+        if showsRotateToast {
+            rotateToastContextPhoto = browsing.state.currentPhoto
+            rotateToastContextExpandedGroup = browsing.expandedGroup
+        }
+    }
+
+    private func presentCompareRotateToast(animated: Bool = true) {
+        browsing.dismissFailureToast()
+        dismissUndoToast()
+        rotateToastContextPhoto = browsing.state.currentPhoto
+        rotateToastContextExpandedGroup = browsing.expandedGroup
+        if animated {
+            withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+                compareRotateToastID = UUID()
+            }
+        } else {
+            compareRotateToastID = UUID()
+        }
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: AppLocalization.string("Rotate to landscape to compare", language: language))
+    }
+
+    private func dismissCompareRotateToast() {
+        rotateToastContextPhoto = nil
+        rotateToastContextExpandedGroup = nil
+        guard compareRotateToastID != nil else { return }
+        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
+            compareRotateToastID = nil
+        }
+    }
 
     private func presentUndoToast(_ kind: DetailUndoToast.Kind) {
         browsing.dismissFailureToast()
+        dismissCompareRotateToast()
         let toast = DetailUndoToast(kind: kind)
         toastContextPhoto = browsing.state.currentPhoto
         toastContextExpandedGroup = browsing.expandedGroup
@@ -299,6 +383,7 @@ struct DetailScreen: View {
     private func performUndo() {
         autoAdvance.cancel()
         dismissUndoToast()
+        dismissCompareRotateToast()
         browsing.undoLastMark(restoringNavigation: true)
     }
 

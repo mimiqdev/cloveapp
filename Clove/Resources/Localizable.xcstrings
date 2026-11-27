@@ -8675,6 +8675,28 @@
         }
       }
     },
+    "Rotate to landscape to compare": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rotate to landscape to compare"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "旋转至横屏即可对比"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "旋轉至橫向即可對比"
+          }
+        }
+      }
+    },
     "Save %lld": {
       "localizations": {
         "en": {
