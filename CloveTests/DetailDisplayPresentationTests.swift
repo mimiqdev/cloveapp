@@ -7632,10 +7632,10 @@ struct DetailDisplayPresentationTests {
                 && soloTapFrames.frames["clove.detail.bottomBand"] != nil
         }
 
-        // 2. Portrait Expanded Duo (669x951) disables Compare in [Focus|Compare] even with >= 2
-        // photos while keeping Focus View bottom-left pill 12 pt above the filmstrip without
-        // squeezing the strip; Landscape Expanded Duo (951x669) enables Compare with >= 2 photos
-        // and disables it cleanly when < 2 photos are in scope.
+        // 2. Portrait Expanded Duo (669x951) hides Compare completely and shrinks the capsule to
+        // 44 x 44 pt Focus Regions even with >= 2 photos while keeping the pill 12 pt above the
+        // filmstrip without squeezing the strip; Landscape Expanded Duo (951x669) restores the
+        // paired 96 x 44 capsule, enables Compare with >= 2 photos, and disables it with < 2.
         let multiBrowsing = BrowsingModel(library: TestLibrary.sample())
         multiBrowsing.openFolder()
         try await waitFor("sample folder open") { !multiBrowsing.isFolderOpening }
@@ -7662,22 +7662,21 @@ struct DetailDisplayPresentationTests {
             })
         try await waitFor("Portrait Duo Focus View did not settle") {
             duoFrames.frames["clove.detail.inspectionPill"] != nil
-                && duoFrames.frames["clove.detail.compare"] != nil
+                && duoFrames.frames["clove.detail.focusToggle"] != nil
                 && duoFrames.frames["clove.detail.filmstrip"] != nil
         }
-        let portraitCompareFrame = try #require(duoFrames.frames["clove.detail.compare"])
+        #expect(duoFrames.frames["clove.detail.compare"] == nil)
         let portraitDuoPreview = try #require(findPreview(in: window))
         let portraitPill = try #require(duoFrames.frames["clove.detail.inspectionPill"])
+        let portraitFocusFrame = try #require(duoFrames.frames["clove.detail.focusToggle"])
+        #expect(abs(portraitPill.width - 44) <= 1.5 && abs(portraitPill.height - 44) <= 1.5)
+        #expect(
+            abs(portraitFocusFrame.width - 44) <= 1.5
+                && abs(portraitFocusFrame.height - 44) <= 1.5)
         #expect(
             abs(
                 (portraitDuoPreview.convert(portraitDuoPreview.bounds, to: window).maxY - 12)
                     - portraitPill.maxY) <= 1.5)
-        if let portraitCompareAlpha = effectiveRenderedOpacity(
-            atCenterOf: portraitCompareFrame, in: window)
-        {
-            #expect(portraitCompareAlpha < 0.6)
-        }
-        let portraitFocusFrame = try #require(duoFrames.frames["clove.detail.focusToggle"])
         if let portraitFocusAlpha = effectiveRenderedOpacity(
             atCenterOf: portraitFocusFrame, in: window)
         {
@@ -7690,7 +7689,7 @@ struct DetailDisplayPresentationTests {
             ).supportsCompare)
         #expect(multiBrowsing.compareSession == nil)
 
-        // Landscape Expanded Duo (951x669) enables Compare with >= 2 photos and disables it with < 2.
+        // Landscape Expanded Duo (951x669) restores the 96 x 44 pill and enables Compare with >= 2 photos.
         let landscapeDuoFrames = DetailFrameBox()
         window.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
         soloHost.rootView = AnyView(
@@ -7713,6 +7712,8 @@ struct DetailDisplayPresentationTests {
                 && landscapeDuoFrames.frames["clove.detail.compare"] != nil
                 && landscapeDuoFrames.frames["clove.detail.filmstrip"] != nil
         }
+        let landscapePill = try #require(landscapeDuoFrames.frames["clove.detail.inspectionPill"])
+        #expect(abs(landscapePill.width - 96) <= 1.5 && abs(landscapePill.height - 44) <= 1.5)
         let landscapeCompareFrame = try #require(landscapeDuoFrames.frames["clove.detail.compare"])
         if let landscapeCompareAlpha = effectiveRenderedOpacity(
             atCenterOf: landscapeCompareFrame, in: window)

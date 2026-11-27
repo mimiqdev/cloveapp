@@ -3676,18 +3676,23 @@ struct BrowsingLayoutTests {
             #expect(toastFrame.width >= 150 && toastFrame.height >= 44)
 
             // Toast is hit-test transparent (.allowsHitTesting(false)) so stage gestures pass through.
-            if let preview = findDetailZoomPreview(in: window) {
-                let hit = window.hitTest(CGPoint(x: toastFrame.midX, y: toastFrame.midY), with: nil)
-                #expect(hit == nil || hit?.isDescendant(of: preview) == true)
-            }
+            let preview = try #require(findDetailZoomPreview(in: window))
+            let hit = try #require(
+                window.hitTest(CGPoint(x: toastFrame.midX, y: toastFrame.midY), with: nil))
+            #expect(hit.isDescendant(of: preview))
 
-            // Focus View inspection pill disables Compare cleanly in Duo Portrait even with >= 2 photos.
+            // Focus View inspection pill hides Compare completely in Duo Portrait (44 x 44 pt Focus).
             let focusSnapshot = inspectToolbarState(in: host, window: window)
             #expect(!focusSnapshot.entries.contains { $0.identifier == "clove.detail.compare" })
-            if let compareFrame = tapFrames.frames["clove.detail.compare"],
-                let compareAlpha = effectiveRenderedOpacity(atCenterOf: compareFrame, in: window)
-            {
-                #expect(compareAlpha < 0.6)
+            #expect(tapFrames.frames["clove.detail.compare"] == nil)
+            #expect(headerFrames.frames["clove.detail.compare"] == nil)
+            let focusToggleFrame = try #require(tapFrames.frames["clove.detail.focusToggle"])
+            #expect(abs(pillFrame.width - 44) <= 1.5 && abs(pillFrame.height - 44) <= 1.5)
+            #expect(
+                abs(focusToggleFrame.width - 44) <= 1.5
+                    && abs(focusToggleFrame.height - 44) <= 1.5)
+            if let focusAlpha = effectiveRenderedOpacity(atCenterOf: focusToggleFrame, in: window) {
+                #expect(focusAlpha > 0.9)
             }
 
             // Auto-dismisses cleanly after ~2 seconds.
@@ -3713,7 +3718,10 @@ struct BrowsingLayoutTests {
 
             let otherPhoto = try #require(model.photos.first { $0.id != mountedTarget }?.id)
             model.openPhoto(otherPhoto)
-            try await waitFor("Navigating to another photo did not clear rotate toast") {
+            try await waitFor(
+                "Navigating to another photo did not clear rotate toast",
+                timeout: .milliseconds(800)
+            ) {
                 model.state.currentPhoto == otherPhoto
                     && tapFrames.frames["clove.detail.compareRotateToast"] == nil
             }

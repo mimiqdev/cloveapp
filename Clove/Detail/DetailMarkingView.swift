@@ -498,6 +498,7 @@ struct DetailMarkingView: View {
         DetailInspectionPill(
             isFocusRegionsOn: browsing.showsFocusRegions,
             canCompare: canEnterCompare,
+            showsCompare: !isDuoExpanded || compareLayoutPolicy.supportsCompare,
             onToggleFocus: {
                 browsing.showsFocusRegions.toggle()
             },

@@ -326,14 +326,17 @@ struct DetailScreen: View {
             dismissCompareRotateToast()
         }
         browsing.exitCompare()
-        if showsRotateToast {
+        if showsRotateToast, compareRotateToastID != nil {
             rotateToastContextPhoto = browsing.state.currentPhoto
             rotateToastContextExpandedGroup = browsing.expandedGroup
         }
     }
 
     private func presentCompareRotateToast(animated: Bool = true) {
-        browsing.dismissFailureToast()
+        guard browsing.failureToastMessage == nil else {
+            dismissCompareRotateToast()
+            return
+        }
         dismissUndoToast()
         rotateToastContextPhoto = browsing.state.currentPhoto
         rotateToastContextExpandedGroup = browsing.expandedGroup
@@ -344,9 +347,6 @@ struct DetailScreen: View {
         } else {
             compareRotateToastID = UUID()
         }
-        UIAccessibility.post(
-            notification: .announcement,
-            argument: AppLocalization.string("Rotate to landscape to compare", language: language))
     }
 
     private func dismissCompareRotateToast() {

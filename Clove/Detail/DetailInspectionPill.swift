@@ -1,14 +1,16 @@
 import CloveCore
 import SwiftUI
 
-/// Paired native Liquid Glass capsule (`[ Focus | Compare ]`) for iPad and expanded Duo Detail.
+/// Native Liquid Glass capsule (`[ Focus | Compare ]`, or `[ Focus ]` when Compare is hidden) for
+/// iPad and expanded Duo Detail.
 ///
-/// Toggles camera/face focus overlays on the leading half and enters side-by-side Compare on the
-/// trailing half, disabling Compare gracefully when fewer than two photos or narrow bounds prevent
-/// split comparison.
+/// Toggles camera/face focus overlays on the leading side and enters side-by-side Compare on the
+/// trailing side when `showsCompare` is `true`, disabling Compare gracefully when fewer than two
+/// photos or narrow bounds prevent split comparison.
 struct DetailInspectionPill: View {
     let isFocusRegionsOn: Bool
     let canCompare: Bool
+    var showsCompare = true
     var focusIdentifier = "clove.detail.focusToggle"
     var compareIdentifier = "clove.detail.compare"
     var identifier = "clove.detail.inspectionPill"
@@ -25,6 +27,7 @@ struct DetailInspectionPill: View {
             isFocusRegionsOn ? "On" : "Off", language: language)
         let compareLabel = AppLocalization.string("Compare", language: language)
         let toggleAnimation = CloveMotion.micro(reduceMotion: reduceMotion)
+        let pillSize = showsCompare ? Self.size : Self.singleButtonSize
 
         HStack(spacing: 0) {
             Button(action: onToggleFocus) {
@@ -48,27 +51,29 @@ struct DetailInspectionPill: View {
             .reportHeaderControlFrame(focusIdentifier)
             .reportTapPickerFrame(focusIdentifier)
 
-            Rectangle()
-                .fill(Color.clove.separator)
-                .frame(width: 1, height: 22)
+            if showsCompare {
+                Rectangle()
+                    .fill(Color.clove.separator)
+                    .frame(width: 1, height: 22)
 
-            Button(action: onCompare) {
-                Image(systemName: "rectangle.split.2x1")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(theme.tokens.primaryText.color)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
+                Button(action: onCompare) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(theme.tokens.primaryText.color)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .opacity(canCompare ? 1 : 0.35)
+                .disabled(!canCompare)
+                .buttonStyle(.cloveGlassPress)
+                .help(compareLabel)
+                .accessibilityLabel(compareLabel)
+                .accessibilityIdentifier(compareIdentifier)
+                .reportHeaderControlFrame(compareIdentifier)
+                .reportTapPickerFrame(compareIdentifier)
             }
-            .opacity(canCompare ? 1 : 0.35)
-            .disabled(!canCompare)
-            .buttonStyle(.cloveGlassPress)
-            .help(compareLabel)
-            .accessibilityLabel(compareLabel)
-            .accessibilityIdentifier(compareIdentifier)
-            .reportHeaderControlFrame(compareIdentifier)
-            .reportTapPickerFrame(compareIdentifier)
         }
-        .frame(width: Self.size.width, height: Self.size.height)
+        .frame(width: pillSize.width, height: pillSize.height)
         .cloveGlass(in: Capsule())
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
@@ -78,6 +83,9 @@ struct DetailInspectionPill: View {
 
     /// Fixed paired capsule dimensions (`96 × 44 pt`, `47.5 × 44` per side around a `1 pt` divider).
     static let size = CGSize(width: 96, height: 44)
+
+    /// Single-button capsule dimensions (`44 × 44 pt`) when Compare is hidden.
+    static let singleButtonSize = CGSize(width: 44, height: 44)
 }
 
 enum DetailBottomBandRole {
