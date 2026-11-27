@@ -458,6 +458,63 @@ struct CompareFlowTests {
         #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
     }
 
+    @Test("Narrowing portrait iPad Compare window exits without rotate toast")
+    func hostedPadPortraitNarrowingExitsWithoutRotateToast() async throws {
+        let library = ControlledPhotoLibrary(rejected: [], stems: ["p1", "p2", "p3"])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+        library.reportScanFinished()
+        try await waitUntil { !model.isFolderOpening && model.photos.count == 3 }
+
+        let p1 = library.identity("p1")
+        let p2 = library.identity("p2")
+        model.openPhoto(p1)
+        let timeline = DetailTimeline(
+            photos: model.photos, groups: model.groups, groupsEnabled: true)
+        #expect(model.enterCompareFromDetail(timeline: timeline))
+        #expect(model.compareSession?.activePhoto == p2)
+
+        let store = SettingsStore.sample
+        store.markGestureGuideSeen()
+        let tapFrames = CompareFrameBox()
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let host = UIHostingController(
+            rootView: DetailScreen(browsing: model, images: SampleDetailImages())
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.isDuoExpanded, false)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    tapFrames.frames = $0
+                })
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 768, height: 1024)
+        host.traitOverrides.horizontalSizeClass = .regular
+        host.traitOverrides.verticalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        try await waitUntil { self.findPanes(in: window).count == 2 }
+
+        // Narrowing an iPad window (e.g., Slide Over / narrow Split View) exits Compare without
+        // showing the phone/Duo rotation toast.
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 1024)
+        host.traitOverrides.horizontalSizeClass = .compact
+        host.traitOverrides.verticalSizeClass = .regular
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        try await waitUntil { model.compareSession == nil }
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(model.state.route == .detail)
+        #expect(model.state.currentPhoto == p2)
+        #expect(tapFrames.frames["clove.detail.compareRotateToast"] == nil)
+    }
+
     private func hasVisibleFailureToastGlass(in window: UIWindow) -> Bool {
         func walk(_ view: UIView) -> Bool {
             let frame = view.convert(view.bounds, to: window)

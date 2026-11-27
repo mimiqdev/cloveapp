@@ -16,6 +16,7 @@ struct CompareView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.cloveUserInterfaceIdiom) private var idiomOverride
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
@@ -904,6 +905,10 @@ struct CompareView: View {
         }
     }
 
+    private var userInterfaceIdiom: UIUserInterfaceIdiom {
+        idiomOverride ?? UIDevice.current.userInterfaceIdiom
+    }
+
     private func checkSupportedLayout(for size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         let policy = CompareLayoutPolicy(
@@ -915,7 +920,10 @@ struct CompareView: View {
             isDuoCover: isDuoCover)
         if !policy.supportsCompare && !pendingExitForUnsupportedLayout {
             pendingExitForUnsupportedLayout = true
-            let showsRotateToast = !policy.isDuoCover && !policy.isLandscape
+            let showsRotateToast =
+                (userInterfaceIdiom == .phone || policy.isDuoExpanded)
+                && !policy.isDuoCover
+                && !policy.isLandscape
             if let onUnsupportedLayoutExit {
                 onUnsupportedLayoutExit(showsRotateToast)
             } else {
@@ -2022,6 +2030,7 @@ struct CompareFilmstrip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.cloveUserInterfaceIdiom) private var idiomOverride
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.appLanguage) private var language
     @Environment(\.cloveTheme) private var theme

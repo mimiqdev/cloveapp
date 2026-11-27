@@ -5956,7 +5956,7 @@ struct DetailDisplayPresentationTests {
         }
 
         // Focus View in Expanded Duo Portrait (669x951): centered tappable title in top bar,
-        // no viewport corner overlay, and [Focus | Compare] bottom-left with Compare enabled.
+        // no viewport corner overlay, and single-button Focus capsule bottom-left with Compare hidden.
         try await waitFor("Portrait Duo Focus View did not settle") {
             guard let preview = self.findPreview(in: window) else { return false }
             return self.findFilmstripScrollView(in: window, excluding: preview) != nil
@@ -5968,11 +5968,8 @@ struct DetailDisplayPresentationTests {
         let focusInfo = try #require(headerFrames.frames["clove.detail.info"])
         #expect(focusInfo.width >= 44 && focusInfo.height >= 44)
         #expect(headerFrames.frames["clove.detail.photoCornerOverlay"] == nil)
-        if let compareElement = findAccessibilityElement(
-            withIdentifier: "clove.detail.compare", in: window)
-        {
-            #expect(!compareElement.accessibilityTraits.contains(.notEnabled))
-        }
+        #expect(headerFrames.frames["clove.detail.compare"] == nil)
+        #expect(findAccessibilityElement(withIdentifier: "clove.detail.compare", in: window) == nil)
 
         // Photo Preview in Expanded Duo Portrait (669x951): centered tappable title stays visible
         // in the single horizontal top bar (never disappearing when usesExpandedDuoViewportOverlay
