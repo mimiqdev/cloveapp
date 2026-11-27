@@ -1,120 +1,28 @@
 import Foundation
 
-/// The rejected photos a person chooses to keep before a Move rejects run (PRD P0-10).
-///
-/// The design handoff's confirmation lets a tap keep one reject and a second tap un-keep it, and
-/// the keep is only staged: nothing is written until Move, and dismissing the sheet discards the
-/// selection. This value owns that staging, so the sheet's counts and the plan it moves come from
-/// one place that has no file or UI dependency.
-public struct RejectMoveKeepSelection: Hashable, Sendable {
-    /// The plan the confirmation was built from (PRD P0-10).
-    public let plan: RejectMovePlan
-    /// The ready sets the person kept, in no order (PRD P0-10).
-    public private(set) var keptIdentities: Set<PhotoIdentity>
-
-    /// Starts with no keep, so every ready set will move (PRD P0-10).
-    public init(plan: RejectMovePlan) {
-        self.plan = plan
-        self.keptIdentities = []
-    }
-
-    /// Keeps one ready set, or un-keeps it when it is already kept (PRD P0-10).
-    ///
-    /// A refused set is not ready to move, so it cannot be kept. The keep stays staged; clearing
-    /// its Reject and moving the rest happen only when the sheet's Move action runs.
-    public mutating func toggle(_ identity: PhotoIdentity) {
-        guard plan.readyEntries.contains(where: { $0.identity == identity }) else { return }
-        if keptIdentities.contains(identity) {
-            keptIdentities.remove(identity)
-        } else {
-            keptIdentities.insert(identity)
-        }
-    }
-
-    /// Whether one ready set is currently kept (PRD P0-10).
-    public func isKept(_ identity: PhotoIdentity) -> Bool {
-        keptIdentities.contains(identity)
-    }
-
-    /// How many ready sets the confirmation counts (PRD P0-10).
-    public var totalCount: Int { plan.photoCount }
-
-    /// How many ready sets will move after the staged keeps (PRD P0-10).
-    public var movingCount: Int { plan.photoCount - keptCount }
-
-    /// How many ready sets are staged to stay (PRD P0-10).
-    public var keptCount: Int {
-        plan.readyEntries.filter { keptIdentities.contains($0.identity) }.count
-    }
-
-    /// The kept identities in the plan's order, for the completed move C14 will undo (P0-10).
-    public var orderedKeptIdentities: [PhotoIdentity] {
-        plan.readyEntries.map(\.identity).filter { keptIdentities.contains($0) }
-    }
-
-    /// The plan with every kept set removed, so the move never touches a kept photo (P0-10).
-    public var movingPlan: RejectMovePlan {
-        plan.removing(kept: keptIdentities)
-    }
-}
-
-extension RejectMovePlan {
-    /// The same plan with the listed sets removed from its entries and inputs (PRD P0-10).
-    ///
-    /// Filtering is not re-planning: destinations, suffixes and refusals stay exactly as C6 built
-    /// them. A kept set is simply no longer requested, so C6's move cannot rename it.
-    public func removing(kept identities: Set<PhotoIdentity>) -> RejectMovePlan {
-        guard !identities.isEmpty else { return self }
-        let entries = entries.filter { !identities.contains($0.identity) }
-        let remaining = Set(entries.map(\.identity))
-        return RejectMovePlan(
-            rootURL: rootURL, configuration: configuration,
-            sets: sets.filter { remaining.contains($0.photoSet.id) }, entries: entries,
-            destinationURL: destinationURL)
-    }
-}
-
 /// The confirmation sheet's copy for one Move rejects plan (PRD P0-10, design handoff).
 ///
 /// The design handoff's "Move Rejects" copy replaces the PRD's proposed sentence for this sheet:
-/// a title with the rejected count, the destination and the promise that nothing is deleted, and
-/// a partial line and button once the person keeps some rejects. The refused line is kept from
-/// the earlier brief because the handoff has no string for sets that cannot move (P0-10).
+/// a title with the rejected count, the destination and the promise that nothing is deleted. The
+/// refused line is kept from the earlier brief because the handoff has no string for sets that
+/// cannot move (P0-10).
 public struct RejectMoveConfirmation: Hashable, Sendable {
     /// The sheet's title, "Move N rejected photos" (design handoff, P0-10).
     public let title: String
     /// "To <folder> in this folder. Nothing is deleted." (design handoff, P0-10).
     public let body: String
-    /// "K of N will move" once a keep is staged, or nil while every ready set moves (P0-10).
-    public let partialLine: String?
-    /// "Move" or "Move K" for the confirm action (design handoff, P0-10).
+    /// "Move" for the confirm action (design handoff, P0-10).
     public let moveButtonTitle: String
     /// The separate line for refused sets, or nil when every set is ready (P0-10).
     public let refusedMessage: String?
     /// How many ready sets the sheet counts (PRD P0-10).
     public let photoCount: Int
-    /// How many ready sets will move after the staged keeps (PRD P0-10).
-    public let movingCount: Int
     /// How many requested sets the plan refuses to move (PRD P0-10).
     public let refusedCount: Int
 
-    /// Builds the sheet copy from a plan and its staged keeps (design handoff, P0-10).
-    public init(plan: RejectMovePlan, kept: Set<PhotoIdentity> = []) {
-        let keptCount = plan.readyEntries.filter { kept.contains($0.identity) }.count
-        self.init(
-            plan: plan, keptCount: keptCount, movingCount: plan.photoCount - keptCount)
-    }
-
-    /// Builds the sheet copy from the staging value the sheet toggles (design handoff, P0-10).
-    public init(selection: RejectMoveKeepSelection) {
-        self.init(
-            plan: selection.plan, keptCount: selection.keptCount,
-            movingCount: selection.movingCount)
-    }
-
-    private init(plan: RejectMovePlan, keptCount: Int, movingCount: Int) {
+    /// Builds the sheet copy from a plan (design handoff, P0-10).
+    public init(plan: RejectMovePlan) {
         photoCount = plan.photoCount
-        self.movingCount = movingCount
         refusedCount = plan.refusedCount
         title =
             plan.photoCount == 1
@@ -122,9 +30,7 @@ public struct RejectMoveConfirmation: Hashable, Sendable {
         body =
             "To \(plan.configuration.rejectsFolderName.rawValue) in this folder."
             + " Nothing is deleted."
-        partialLine =
-            keptCount == 0 ? nil : "\(movingCount) of \(plan.photoCount) will move"
-        moveButtonTitle = movingCount == plan.photoCount ? "Move" : "Move \(movingCount)"
+        moveButtonTitle = "Move"
         refusedMessage =
             plan.refusedCount == 0
             ? nil

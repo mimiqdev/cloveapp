@@ -3,9 +3,8 @@ public enum PhotoAction: Sendable {
     case mark(DesiredMarkEdit)
     case batch([DesiredMarkEdit])
     case finishing(GroupFinishingPlan, [DesiredMarkEdit])
-    case keep([DesiredMarkEdit])
-    case move(RejectMovePlan, kept: [DesiredMarkEdit])
-    case moveUndo(RejectMoveUndoEntry, [DesiredMarkEdit])
+    case move(RejectMovePlan)
+    case moveUndo(RejectMoveUndoEntry)
 }
 
 /// FIFO admission and a single active entry. The consumer completes an entry only after
@@ -28,10 +27,9 @@ public struct PhotoActionPipeline: Sendable {
         pending.contains { entry in
             switch entry.action {
             case .mark(let edit): edit.photo == photo
-            case .batch(let edits), .keep(let edits), .finishing(_, let edits),
-                .moveUndo(_, let edits):
+            case .batch(let edits), .finishing(_, let edits):
                 edits.contains { $0.photo == photo }
-            case .move: false
+            case .move, .moveUndo: false
             }
         }
     }

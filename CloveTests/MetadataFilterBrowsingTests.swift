@@ -514,9 +514,7 @@ struct MetadataFilterBrowsingTests {
         assertCachedStateMatchesPlacedPhotos(model)
 
         let rejectedIDs = model.allPlacedPhotos.filter(\.marks.isRejected).map(\.id)
-        let kept = try #require(rejectedIDs.first)
         let moved = try #require(rejectedIDs.last)
-        #expect(kept != moved)
         let initialAllCount = model.sidebarCounts.all
         let initialRejectedCount = model.sidebarCounts.rejected
         #expect(initialRejectedCount == 2)
@@ -528,9 +526,9 @@ struct MetadataFilterBrowsingTests {
         #expect(model.metadataFilterOptions.keywords.contains { $0.value == "DiscardTag" })
 
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(plan, kept: [kept]) { _ in }
+        model.runRejectMove(plan) { _ in }
         await model.drainActions()
-        #expect(model.sidebarCounts.all == initialAllCount - 1)
+        #expect(model.sidebarCounts.all == initialAllCount - initialRejectedCount)
         #expect(model.sidebarCounts.rejected == 0)
         #expect(!model.metadataFilterOptions.keywords.contains { $0.value == "DiscardTag" })
         assertCachedStateMatchesPlacedPhotos(model)

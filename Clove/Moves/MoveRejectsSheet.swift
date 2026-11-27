@@ -2,21 +2,12 @@ import CloveCore
 import CoreGraphics
 import SwiftUI
 
-/// Confirmation stages keeps locally. Only Move submits them to the ordered action pipeline.
+/// Confirmation sheet for moving rejected photos.
 struct MoveRejectsSheet: View {
     let flow: MoveRejectsFlow
     @Environment(SettingsStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
-    @State private var expanded: Bool
-    @State private var detent: PresentationDetent
-
-    init(flow: MoveRejectsFlow, initiallyExpanded: Bool = false) {
-        self.flow = flow
-        _expanded = State(initialValue: initiallyExpanded)
-        _detent = State(initialValue: initiallyExpanded ? .large : .height(330))
-    }
 
     var body: some View {
         content
@@ -25,7 +16,7 @@ struct MoveRejectsSheet: View {
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
             .presentationBackground(Color.clove.surface.sheet)
-            .presentationDetents([.height(330), .large], selection: $detent)
+            .presentationDetents([.height(330), .large])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(isMoving)
             .accessibilityElement(children: .contain)
@@ -47,13 +38,11 @@ struct MoveRejectsSheet: View {
             VStack(spacing: 16) {
                 ProgressView(value: Double(finished), total: Double(max(total, 1)))
                 Text(
-                    total == 0
-                        ? AppLocalization.string("Clearing kept rejects", language: language)
-                        : total == 1
-                            ? AppLocalization.string("Moving 1 photo", language: language)
-                            : AppLocalization.format(
-                                "Moving %lld of %lld photos", language: language,
-                                Int64(min(finished + 1, total)), Int64(total))
+                    total == 1
+                        ? AppLocalization.string("Moving 1 photo", language: language)
+                        : AppLocalization.format(
+                            "Moving %lld of %lld photos", language: language,
+                            Int64(min(finished + 1, total)), Int64(total))
                 )
                 .accessibilityIdentifier("clove.moves.progress")
             }
@@ -71,7 +60,6 @@ struct MoveRejectsSheet: View {
     }
 
     private func confirmation(_ plan: RejectMovePlan) -> some View {
-        let selection = flow.keepSelection ?? RejectMoveKeepSelection(plan: plan)
         let title = AppLocalization.format(
             "Move %lld rejected photos", language: language, Int64(plan.photoCount))
         let bodyText = AppLocalization.format(
@@ -83,79 +71,26 @@ struct MoveRejectsSheet: View {
             : AppLocalization.format(
                 "%lld photos can't be moved right now.", language: language,
                 Int64(plan.refusedCount))
-        let moveButtonTitle =
-            selection.movingCount == plan.photoCount
-            ? AppLocalization.string("Move", language: language)
-            : AppLocalization.format("Move %lld", language: language, Int64(selection.movingCount))
         return VStack(spacing: 16) {
-            if expanded {
-                VStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(
-                            AppLocalization.format(
-                                "%lld of %lld will move", language: language,
-                                Int64(selection.movingCount), Int64(selection.totalCount))
-                        )
-                        .font(.headline)
-                        .accessibilityIdentifier("clove.moves.partial")
-                        Text(AppLocalization.string("Tap a photo to keep it.", language: language))
-                            .font(.footnote).foregroundStyle(Color.clove.text.secondary)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                    ScrollView { keepGrid(plan, selection: selection) }
-                        .accessibilityIdentifier("clove.moves.keepGrid")
-                }
-                .transition(
-                    .asymmetric(
-                        insertion: CloveMotion.scaleOpacityTransition(
-                            scale: 0.96, anchor: .center, reduceMotion: reduceMotion),
-                        removal: .identity))
-            } else {
-                VStack(spacing: 16) {
-                    Button {
-                        withAnimation(CloveMotion.chrome(reduceMotion: reduceMotion)) {
-                            expanded = true
-                            detent = .large
-                        }
-                    } label: {
-                        fannedStack(plan)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(
-                        AppLocalization.string("Review rejected photos", language: language)
-                    )
-                    .accessibilityIdentifier("clove.moves.expand")
-                    Text(title)
-                        .font(.title3.bold())
-                        .accessibilityIdentifier("clove.moves.confirmation")
-                        .reportHeaderControlFrame("clove.moves.confirmation")
-                    Text(bodyText)
-                        .font(.footnote)
-                        .foregroundStyle(Color.clove.text.secondary)
-                        .multilineTextAlignment(.center)
-                        .accessibilityIdentifier("clove.moves.body")
-                }
-                .transition(.asymmetric(insertion: .opacity, removal: .identity))
-            }
+            fannedStack(plan)
+            Text(title)
+                .font(.title3.bold())
+                .accessibilityIdentifier("clove.moves.confirmation")
+                .reportHeaderControlFrame("clove.moves.confirmation")
+            Text(bodyText)
+                .font(.footnote)
+                .foregroundStyle(Color.clove.text.secondary)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("clove.moves.body")
             if let refused = refusedMessage {
                 Text(refused).font(.footnote).foregroundStyle(Color.clove.reject)
                     .accessibilityIdentifier("clove.moves.refused")
             }
-            Button {
+            Button(AppLocalization.string("Move", language: language)) {
                 flow.move(plan) { dismiss() }
-            } label: {
-                Text(
-                    expanded
-                        ? AppLocalization.format(
-                            "Move %lld", language: language, Int64(selection.movingCount))
-                        : moveButtonTitle
-                )
-                .contentTransition(reduceMotion ? .identity : .numericText())
-                .animation(
-                    CloveMotion.micro(reduceMotion: reduceMotion), value: selection.movingCount
-                )
             }
             .buttonStyle(MoveSheetButtonStyle())
-            .disabled(selection.movingCount == 0)
+            .disabled(plan.photoCount == 0)
             .accessibilityIdentifier("clove.moves.confirm")
         }
     }
@@ -179,38 +114,6 @@ struct MoveRejectsSheet: View {
         .frame(height: 120)
         .frame(maxWidth: .infinity)
         .accessibilityHidden(true)
-    }
-
-    private func keepGrid(_ plan: RejectMovePlan, selection: RejectMoveKeepSelection) -> some View {
-        LazyVGrid(
-            columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 4), spacing: 4
-        ) {
-            ForEach(plan.readyEntries) { entry in
-                let kept = selection.isKept(entry.identity)
-                Button {
-                    withAnimation(CloveMotion.micro(reduceMotion: reduceMotion)) {
-                        flow.toggleKeep(entry.identity)
-                    }
-                } label: {
-                    MoveRejectsThumbnail(
-                        photo: entry.identity,
-                        source: flow.thumbnails,
-                        isDimmed: !kept
-                    )
-                    .aspectRatio(1, contentMode: .fit)
-                    .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: kept)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    entry.files.first(where: { $0.role == .primary })?.source.lastPathComponent
-                        ?? entry.identity.stem
-                )
-                .accessibilityValue(
-                    AppLocalization.string(kept ? "Kept" : "Will move", language: language)
-                )
-                .accessibilityIdentifier("clove.moves.keep.\(entry.identity.stem)")
-            }
-        }
     }
 
     private func failure(_ message: String, identifier: String) -> some View {
@@ -256,13 +159,11 @@ struct MoveSheetButtonStyle: ButtonStyle {
 struct MoveRejectsThumbnail: View {
     let photo: PhotoIdentity
     let source: any GridThumbnailSource
-    var isDimmed = false
     @State private var image: CGImage?
 
-    init(photo: PhotoIdentity, source: any GridThumbnailSource, isDimmed: Bool = false) {
+    init(photo: PhotoIdentity, source: any GridThumbnailSource) {
         self.photo = photo
         self.source = source
-        self.isDimmed = isDimmed
         if case .image(let cached) = source.cachedThumbnail(for: photo) {
             _image = State(initialValue: cached)
         }
@@ -279,7 +180,6 @@ struct MoveRejectsThumbnail: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
-            .rejectedThumbnailDimming(isDimmed)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .task(id: photo) {

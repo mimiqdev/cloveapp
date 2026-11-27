@@ -1065,8 +1065,10 @@ final class CloveFlowTests: XCTestCase {
         openLibrary(app)
         element(app, "clove.grid.moveRejects").tap()
         XCTAssertEqual(element(app, "clove.moves.confirmation").label, "Move 2 rejected photos")
-        element(app, "clove.moves.expand").tap()
-        element(app, "clove.moves.keep.mmq02679").tap()
+        XCTAssertEqual(
+            element(app, "clove.moves.body").label,
+            "To _Rejected in this folder. Nothing is deleted.")
+        XCTAssertEqual(element(app, "clove.moves.confirm").label, "Move")
         element(app, "clove.moves.confirm").tap()
         let details = element(app, "clove.moves.toast.action")
         XCTAssertTrue(details.waitForExistence(timeout: 5))
@@ -1075,6 +1077,7 @@ final class CloveFlowTests: XCTestCase {
         details.tap()
         XCTAssertTrue(element(app, "clove.moves.details.row.mmq02685").exists)
         element(app, "clove.moves.details.done").tap()
+        XCTAssertFalse(element(app, "clove.grid.photo.mmq02679").exists)
         XCTAssertTrue(element(app, "clove.grid.photo.mmq02685").label.contains("Rejected"))
     }
 
@@ -1131,12 +1134,8 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertTrue(waitForLabel("MMQ02680.ARW", element(app, "clove.detail.fileName")))
             element(app, "clove.nav.back").tap()
             element(app, "clove.grid.moveRejects").tap()
-            XCTAssertTrue(element(app, "clove.moves.expand").exists)
+            XCTAssertTrue(element(app, "clove.moves.confirmation").waitForExistence(timeout: 5))
             capture("move-confirm-\(theme)")
-            element(app, "clove.moves.expand").tap()
-            element(app, "clove.moves.keep.mmq02685").tap()
-            XCTAssertEqual(element(app, "clove.moves.partial").label, "2 of 3 will move")
-            capture("move-keeps-\(theme)")
             element(app, "clove.moves.confirm").tap()
             XCTAssertTrue(element(app, "clove.moves.toast.action").waitForExistence(timeout: 5))
             capture("move-done-\(theme)")

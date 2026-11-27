@@ -227,7 +227,6 @@ final class BrowsingModel {
     private var actionConsumer: Task<Void, Never>?
     private var shownGeneration: Int
     private var moveCompletions: [UInt64: (Result<RejectMoveResult, any Error>) -> Void] = [:]
-    private var keptEditsByMove: [RejectMoveBatchID: [DesiredMarkEdit]] = [:]
 
     private struct MarkUndoStep {
         let photo: PhotoIdentity?
@@ -960,7 +959,6 @@ final class BrowsingModel {
         markUndo = nil
         compareSession = nil
         lastRejectMove = nil
-        keptEditsByMove = [:]
         dismissRejectMoveToast()
         desiredMarks.removeAll()
         clearSelection()
@@ -1104,28 +1102,26 @@ final class BrowsingModel {
             rejected: storedPhotos.filter(\.marks.isRejected).map(\.id))
     }
 
-    /// Commits staged keeps and queues the move behind them and every earlier user action.
+    /// Queues the move behind every earlier user action.
     func runRejectMove(
-        _ plan: RejectMovePlan, kept: [PhotoIdentity],
+        _ plan: RejectMovePlan,
         completion: @escaping (Result<RejectMoveResult, any Error>) -> Void
     ) {
         guard canMark else {
             completion(.failure(RejectMoveRefusal.disabled))
             return
         }
-        let edits = requestBatch(kept.map { (.rating(.unrated), $0) })
-        submit(.keep(edits))
-        let id = submit(.move(plan, kept: edits))
+        let id = submit(.move(plan))
         moveCompletions[id] = completion
     }
 
     /// Records one completed move, so the toast can show it and C14 can undo it (PRD P0-10).
     func recordRejectMove(
-        _ result: RejectMoveResult, keptIdentities: [PhotoIdentity],
+        _ result: RejectMoveResult,
         rejectsFolderName: RejectsFolderName, folder: FolderIdentity?, openGeneration: Int
     ) {
         lastRejectMove = CompletedRejectMove(
-            result: result, keptIdentities: keptIdentities, rejectsFolderName: rejectsFolderName,
+            result: result, rejectsFolderName: rejectsFolderName,
             folder: folder, openGeneration: openGeneration)
         dismissFailureToast()
         dismissPhotosSaveToast()
@@ -1140,37 +1136,19 @@ final class BrowsingModel {
             && completed.openGeneration == openGeneration
     }
 
-    /// The toast restores the completed move and the exact marks its staged keeps left behind.
+    /// The toast restores the completed move.
     func undoRejectMove(_ completed: CompletedRejectMove) {
         guard canUndoRejectMove(completed),
-            let photo = completed.keptIdentities.first ?? completed.result.movedIdentities.first
+            let photo = completed.result.movedIdentities.first
         else { return }
-        let kept = (keptEditsByMove[completed.id] ?? []).compactMap {
-            edit -> RejectMoveKeptPhoto? in
-            guard let set = library.scannedSet(for: edit.photo) else { return nil }
-            return RejectMoveKeptPhoto(set: set, marksAfter: edit.after)
-        }
-        submitMoveUndo(
-            RejectMoveUndoEntry(batch: completed.id, keptPhotos: kept, photoToReturnTo: photo))
+        submitMoveUndo(RejectMoveUndoEntry(batch: completed.id, photoToReturnTo: photo))
         dismissRejectMoveToast()
     }
 
     /// Submits a move undo to the existing ordered pipeline.
     func submitMoveUndo(_ entry: RejectMoveUndoEntry) {
         guard canMark else { return }
-        let changes = entry.keptPhotos.compactMap { kept -> (MarkChange, PhotoIdentity)? in
-            var target = kept.marksAfter
-            target.rating = .rejected
-            guard
-                let change = DesiredMarkRestore.change(
-                    photo: kept.set.id, current: shownMarks(for: kept.set.id),
-                    expected: kept.marksAfter, target: target,
-                    fields: .rating(kept.marksAfter.rating))
-            else { return nil }
-            return (change, kept.set.id)
-        }
-        let edits = requestBatch(changes)
-        submit(.moveUndo(entry, edits))
+        submit(.moveUndo(entry))
     }
 
     /// Hides the move toast while keeping the completed move for a later undo (PRD P0-10).
@@ -1329,7 +1307,6 @@ final class BrowsingModel {
     func drainActions() async { await actionConsumer?.value }
 
     private func consumeActions() async {
-        var keptStatuses: [MarkChangeStatus] = []
         while let entry = actionPipeline.beginNext() {
             switch entry.action {
             case .mark(let edit):
@@ -1338,69 +1315,39 @@ final class BrowsingModel {
                 _ = await persist(edits)
             case .finishing(_, let edits):
                 _ = await persist(edits)
-            case .keep(let edits):
-                keptStatuses = await persist(edits).outcomes
-            case .move(let preview, let kept):
-                await performMove(
-                    preview, kept: kept, keptStatuses: keptStatuses, actionID: entry.id)
-                keptStatuses = []
-            case .moveUndo(let move, let edits):
-                await performMoveUndo(move, edits: edits)
+            case .move(let preview):
+                await performMove(preview, actionID: entry.id)
+            case .moveUndo(let move):
+                await performMoveUndo(move)
             }
             actionPipeline.finish(entry.id)
         }
         actionConsumer = nil
     }
 
-    private func performMove(
-        _ preview: RejectMovePlan, kept: [DesiredMarkEdit], keptStatuses: [MarkChangeStatus],
-        actionID: UInt64
-    ) async {
+    private func performMove(_ preview: RejectMovePlan, actionID: UInt64) async {
         isMovingRejects = true
         defer { isMovingRejects = false }
         let context = (folder: state.folder, generation: openGeneration)
         let progress = await observeMoveProgress()
         defer { progress.cancel() }
         do {
-            let excluded = Set(kept.map(\.photo))
             let candidates = Set(preview.sets.map(\.id))
             let rejected = confirmedPhotos.filter {
-                $0.marks.isRejected && candidates.contains($0.id) && !excluded.contains($0.id)
+                $0.marks.isRejected && candidates.contains($0.id)
                     && !desiredMarks.hasPending(for: $0.id)
             }.map(\.id)
             await library.drainWrites()
             let plan = try await library.planRejectMove(
                 configuration: preview.configuration, rejected: rejected)
-            let moved = try await library.runRejectMove(plan)
-            let clearFailures = keptStatuses.compactMap { status -> RejectMoveOutcome? in
-                guard let failure = status.state.failure else { return nil }
-                return .failed(
-                    RejectMoveFailedSet(
-                        identity: status.identity, failure: RejectMoveFailure(classifying: failure),
-                        files: preview.readyEntries.first { $0.identity == status.identity }?.files
-                            ?? []
-                    ))
-            }
-            let result = RejectMoveResult(id: moved.id, outcomes: moved.outcomes + clearFailures)
-            keptEditsByMove[result.id] = kept
+            let result = try await library.runRejectMove(plan)
             recordRejectMove(
-                result, keptIdentities: kept.map(\.photo),
+                result,
                 rejectsFolderName: plan.configuration.rejectsFolderName,
                 folder: context.folder, openGeneration: context.generation)
             refresh()
             moveCompletions.removeValue(forKey: actionID)?(.success(result))
         } catch {
-            // A whole-request refusal restores only keeps the user has not changed since.
-            let restoreChanges = kept.compactMap { edit -> (MarkChange, PhotoIdentity)? in
-                guard
-                    let change = DesiredMarkRestore.change(
-                        photo: edit.photo, current: shownMarks(for: edit.photo),
-                        expected: edit.after, target: edit.before, fields: edit.change)
-                else { return nil }
-                return (change, edit.photo)
-            }
-            let restores = requestBatch(restoreChanges)
-            _ = await persist(restores)
             moveCompletions.removeValue(forKey: actionID)?(.failure(error))
         }
     }
@@ -1420,22 +1367,17 @@ final class BrowsingModel {
         }
     }
 
-    private func performMoveUndo(_ entry: RejectMoveUndoEntry, edits: [DesiredMarkEdit]) async {
+    private func performMoveUndo(_ entry: RejectMoveUndoEntry) async {
         isMovingRejects = true
         defer { isMovingRejects = false }
-        var current = Dictionary(uniqueKeysWithValues: storedPhotos.map { ($0.id, $0.marks) })
-        for edit in edits { current[edit.photo] = edit.before }
         do {
-            let result = try await library.undoRejectMove(
-                entry, currentMarks: current, restoring: edits)
-            finishPendingMarks(edits)
+            let result = try await library.undoRejectMove(entry)
             refresh()
             if result.restored.contains(where: { !$0.isRejectStored }) {
                 showFailureToast(Self.saveFailureToastMessage)
             }
             lastMoveUndo = .success(result)
         } catch {
-            finishPendingMarks(edits)
             refresh()
             showFailureToast(Self.saveFailureToastMessage)
             lastMoveUndo = .failure(error)
@@ -2096,14 +2038,11 @@ final class BrowsingModel {
 
 /// The latest completed Move rejects run, kept for the toast and C14's undo (PRD P0-10).
 ///
-/// The result names every set the run moved, failed or skipped, and the kept identities are the
-/// photos the person kept in the confirmation. C14's undo will move the files back and restore
-/// Reject on both lists as one step; this task only keeps the value.
+/// The result names every set the run moved, failed or skipped. C14's undo will move the files
+/// back and restore Reject on them as one step; this task only keeps the value.
 struct CompletedRejectMove: Sendable, Identifiable {
     /// The run's outcomes and its undo handle.
     let result: RejectMoveResult
-    /// The ready sets the person kept, in the plan's order (PRD P0-10).
-    let keptIdentities: [PhotoIdentity]
     /// The rejects folder name that run used, for the toast (PRD Move rejects).
     let rejectsFolderName: RejectsFolderName
     /// The folder open the run belonged to (PRD P0-02).
@@ -2115,5 +2054,5 @@ struct CompletedRejectMove: Sendable, Identifiable {
     var id: RejectMoveBatchID { result.id }
 
     /// Whether the run left photos to undo, before the folder's own state is considered.
-    var canUndo: Bool { !keptIdentities.isEmpty || !result.movedIdentities.isEmpty }
+    var canUndo: Bool { !result.movedIdentities.isEmpty }
 }

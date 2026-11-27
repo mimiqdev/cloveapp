@@ -41,7 +41,6 @@ struct WorkflowPresentationTests {
                             identity: b, files: [fileB], removedStoredReject: true,
                             staleRejectRecord: nil)),
                 ]),
-            keptIdentities: [],
             rejectsFolderName: .defaultFolderName,
             folder: browsing.state.folder,
             openGeneration: browsing.openGeneration)
@@ -88,7 +87,6 @@ struct WorkflowPresentationTests {
                                 reason: .permissionLost, message: "Permission denied"),
                             files: [fileB])),
                 ]),
-            keptIdentities: [],
             rejectsFolderName: .defaultFolderName,
             folder: browsing.state.folder,
             openGeneration: browsing.openGeneration)

@@ -45,20 +45,15 @@ public enum RejectMoveUndoRefusal: Error, Hashable, Sendable, CustomStringConver
 
 /// One photo set that is back at its original path, with Reject stored again.
 ///
-/// PRD P0-10's Undo rule moves a completed move's files back and restores Reject on them, and
-/// PRD Move rejects' "Keeping before the move" adds the photos the user kept in the
-/// confirmation. A kept photo never moved, so ``keptInConfirmation`` is `true` and ``files`` is
-/// empty: only its Reject was cleared, and only its Reject comes back.
+/// PRD P0-10's Undo rule moves a completed move's files back and restores Reject on them.
 public struct RejectMoveUndoRestoredPhoto: Hashable, Sendable, Identifiable {
     /// C1's stable identity, which the grid uses to put the photo back (PRD P0-10).
     public let identity: PhotoIdentity
     /// C1's set as it was scanned before the move, so the grid can show the photo again without
     /// a rescan (PRD P0-10's Undo rule).
     public let set: ScannedPhotoSet
-    /// Every file and its original path, or empty for a kept photo (PRD P0-10).
+    /// Every file and its original path (PRD P0-10).
     public let files: [RejectMoveFilePlan]
-    /// Whether the confirmation kept the photo, so only its Reject was restored (PRD Move rejects).
-    public let keptInConfirmation: Bool
     /// C4's failure when the stored Reject could not be written again, or `nil` when it was.
     ///
     /// PRD P0-08 keeps a stale record as a diagnostic and keeps an unconfirmed change from
@@ -77,13 +72,11 @@ public struct RejectMoveUndoRestoredPhoto: Hashable, Sendable, Identifiable {
         identity: PhotoIdentity,
         set: ScannedPhotoSet,
         files: [RejectMoveFilePlan],
-        keptInConfirmation: Bool,
         rejectStoreFailure: RejectMoveFailure?
     ) {
         self.identity = identity
         self.set = set
         self.files = files
-        self.keptInConfirmation = keptInConfirmation
         self.rejectStoreFailure = rejectStoreFailure
     }
 }
@@ -207,7 +200,7 @@ public struct RejectMoveUndoMissingFiles: Hashable, Sendable, Identifiable {
 
 /// One photo's result after undoing a Move rejects run (PRD P0-10's Undo rule).
 public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
-    /// The photo is back at its original path, or was kept and never moved, with Reject stored.
+    /// The photo is back at its original path with Reject stored.
     case restored(RejectMoveUndoRestoredPhoto)
     /// The photo's original path is taken, so the set stays under the rejects folder untouched.
     case conflict(RejectMoveUndoConflict)
@@ -217,8 +210,6 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
     case split(RejectMoveUndoSplitPhoto)
     /// The photo's files are no longer all under the rejects folder, so nothing was attempted.
     case missingFiles(RejectMoveUndoMissingFiles)
-    /// The kept photo has newer desired marks; undo leaves it alone.
-    case changedSince(PhotoIdentity)
 
     /// The photo's stable identity, whatever the result (G1 decision 5).
     public var identity: PhotoIdentity {
@@ -228,7 +219,6 @@ public enum RejectMoveUndoOutcome: Hashable, Sendable, Identifiable {
         case .failed(let photo): photo.identity
         case .split(let photo): photo.identity
         case .missingFiles(let set): set.identity
-        case .changedSince(let photo): photo
         }
     }
 
@@ -258,9 +248,6 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
             return photo
         }
     }
-
-    /// Photos the confirmation kept, restored with Reject (PRD Move rejects).
-    public var kept: [RejectMoveUndoRestoredPhoto] { restored.filter(\.keptInConfirmation) }
 
     /// Photos whose original path is taken, left under the rejects folder (PRD P0-10).
     public var conflicts: [RejectMoveUndoConflict] {
@@ -297,9 +284,6 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
     /// PRD P0-10's "Restored N photos".
     public var restoredCount: Int { restored.count }
 
-    /// How many restored photos the confirmation had kept (PRD Move rejects).
-    public var keptCount: Int { kept.count }
-
     /// Photos a taken original path kept under the rejects folder (PRD P0-10).
     public var conflictCount: Int { conflicts.count }
 
@@ -313,15 +297,8 @@ public struct RejectMoveUndoResult: Hashable, Sendable {
     public var missingFilesCount: Int { missingFiles.count }
 
     /// PRD P0-10's "M photos couldn't be restored": everything but the restored photos.
-    public var changedSince: [PhotoIdentity] {
-        outcomes.compactMap {
-            guard case .changedSince(let photo) = $0 else { return nil }
-            return photo
-        }
-    }
-
     public var unrestoredCount: Int {
-        conflictCount + failedCount + splitCount + missingFilesCount + changedSince.count
+        conflictCount + failedCount + splitCount + missingFilesCount
     }
 
     /// Every photo the grid shows again, in the caller's order (PRD P0-10's Undo rule).

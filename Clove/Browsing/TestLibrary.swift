@@ -568,10 +568,7 @@ final class TestLibrary: FolderLibrary {
         return simulateMove(plan.entries)
     }
 
-    func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
-        restoring edits: [DesiredMarkEdit]
-    ) async throws -> RejectMoveUndoResult {
+    func undoRejectMove(_ entry: RejectMoveUndoEntry) async throws -> RejectMoveUndoResult {
         guard let moved = movedPhotoRecords.removeValue(forKey: entry.batch) else {
             throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
         }
@@ -583,40 +580,10 @@ final class TestLibrary: FolderLibrary {
             outcomes.append(
                 .restored(
                     RejectMoveUndoRestoredPhoto(
-                        identity: photo.id, set: set, files: [], keptInConfirmation: false,
+                        identity: photo.id, set: set, files: [],
                         rejectStoreFailure: status.state.failure.map {
                             RejectMoveFailure(classifying: $0)
                         })))
-        }
-        for kept in entry.keptPhotos {
-            var target = kept.marksAfter
-            target.rating = .rejected
-            guard let current = currentMarks[kept.set.id],
-                DesiredMarkRestore.change(
-                    photo: kept.set.id, current: current, expected: kept.marksAfter,
-                    target: target, fields: .rating(kept.marksAfter.rating)) != nil
-            else {
-                outcomes.append(.changedSince(kept.set.id))
-                continue
-            }
-            let status = perform(.rating(.rejected), for: kept.set.id, id: MarkChangeID())
-            outcomes.append(
-                .restored(
-                    RejectMoveUndoRestoredPhoto(
-                        identity: kept.set.id, set: kept.set, files: [], keptInConfirmation: true,
-                        rejectStoreFailure: status.state.failure.map {
-                            RejectMoveFailure(classifying: $0)
-                        })))
-        }
-        let restored = Set(
-            outcomes.compactMap { outcome -> PhotoIdentity? in
-                guard case .restored(let photo) = outcome, photo.isRejectStored else { return nil }
-                return photo.identity
-            })
-        for edit in edits where restored.contains(edit.photo) {
-            if let index = stored.firstIndex(where: { $0.id == edit.photo }) {
-                stored[index].marks = edit.after
-            }
         }
         syncCompletedPreparationCount()
         updateContinuation.yield(.photos([]))
@@ -691,7 +658,7 @@ final class TestLibrary: FolderLibrary {
             destinationURL: destination)
     }
 
-    /// Move undo resolves kept sample photos through the same identity-based seam as production.
+    /// Move undo resolves sample photos through the same identity-based seam as production.
     func scannedSet(for identity: PhotoIdentity) -> ScannedPhotoSet? {
         stored.first(where: { $0.id == identity }).flatMap { scannedSet(for: $0) }
     }

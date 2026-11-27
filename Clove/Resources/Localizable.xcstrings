@@ -785,28 +785,6 @@
         }
       }
     },
-    "%lld of %lld will move": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld of %lld will move"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将移动 %1$lld / %2$lld 张"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "將移動 %1$lld / %2$lld 張"
-          }
-        }
-      }
-    },
     "%lld of %lld · swipe for the next in this order": {
       "localizations": {
         "en": {
@@ -2471,28 +2449,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已取消淘汰"
-          }
-        }
-      }
-    },
-    "Clearing kept rejects": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clearing kept rejects"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在取消保留照片的淘汰标记"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在取消保留相片的淘汰標記"
           }
         }
       }
@@ -4611,28 +4567,6 @@
         }
       }
     },
-    "Kept": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kept"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已保留"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已保留"
-          }
-        }
-      }
-    },
     "Keywords": {
       "localizations": {
         "en": {
@@ -5179,28 +5113,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "整理 %@ 張淘汰片"
-          }
-        }
-      }
-    },
-    "Move %lld": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move %lld"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移动 %lld 张"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移動 %lld 張"
           }
         }
       }
@@ -8499,28 +8411,6 @@
         }
       }
     },
-    "Review rejected photos": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Review rejected photos"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "查看淘汰照片"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "檢視淘汰相片"
-          }
-        }
-      }
-    },
     "Rotate to landscape to compare": {
       "localizations": {
         "en": {
@@ -9847,28 +9737,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "拍攝時間"
-          }
-        }
-      }
-    },
-    "Tap a photo to keep it.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tap a photo to keep it."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "轻点照片可将其保留。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "輕點相片可將其保留。"
           }
         }
       }
@@ -11277,28 +11145,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "廣角"
-          }
-        }
-      }
-    },
-    "Will move": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Will move"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "将移出"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "將移出"
           }
         }
       }
