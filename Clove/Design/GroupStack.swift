@@ -6,6 +6,7 @@ struct GroupStack<Content: View>: View {
     var peek: CGFloat = 8
     var peekingImages: [CGImage?]? = nil
     var cardBacking: CloveColour = Color.clove.bg.canvas
+    var isDimmed = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -17,7 +18,14 @@ struct GroupStack<Content: View>: View {
                 content()
                     .frame(width: width, height: max(0, height - peek))
                     .clipped()
-                    .background(cardBacking)
+                    .background {
+                        if isDimmed {
+                            Color.black
+                        } else {
+                            Rectangle().fill(cardBacking)
+                        }
+                    }
+                    .rejectedThumbnailDimming(isDimmed)
                     .clipShape(RoundedRectangle(cornerRadius: 5))
             }
         }
@@ -60,9 +68,13 @@ struct GroupStack<Content: View>: View {
         } else {
             RoundedRectangle(cornerRadius: 5)
                 .fill(Color.clove.text.secondary).opacity(0.35)
+                .rejectedThumbnailDimming(isDimmed)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
                 .padding(.horizontal, peek + 2).padding(.bottom, peek - 2)
             RoundedRectangle(cornerRadius: 5)
                 .fill(Color.clove.surface.card)
+                .rejectedThumbnailDimming(isDimmed)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
                 .padding(.horizontal, peek / 2 + 1)
                 .padding(.top, peek / 2).padding(.bottom, peek / 2)
         }
@@ -78,18 +90,30 @@ struct GroupStack<Content: View>: View {
     ) -> some View {
         Group {
             if let image {
-                Rectangle()
-                    .fill(cardBacking)
-                    .overlay {
-                        Image(decorative: image, scale: 1)
-                            .resizable()
-                            .scaledToFill()
-                            .opacity(opacity)
-                    }
+                if isDimmed {
+                    Color.black
+                        .overlay {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                                .saturation(RejectedThumbnailDimming.saturation)
+                                .opacity(RejectedThumbnailDimming.brightness * opacity)
+                        }
+                } else {
+                    Rectangle()
+                        .fill(cardBacking)
+                        .overlay {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                                .opacity(opacity)
+                        }
+                }
             } else {
                 Rectangle()
                     .fill(placeholder)
                     .opacity(placeholderOpacity)
+                    .rejectedThumbnailDimming(isDimmed)
             }
         }
         .frame(width: width, height: height)

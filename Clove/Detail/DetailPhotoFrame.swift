@@ -20,8 +20,7 @@ struct DetailPhotoFrame: View {
     var side: CGFloat = 56
     var height: CGFloat?
     var showsMarks = true
-    var appliesRejectedOpacity = true
-    @Environment(\.cloveTheme) private var theme
+    var appliesRejectedDimming = true
     @Environment(\.appLanguage) private var language
 
     @State private var thumbnail: CGImage?
@@ -29,16 +28,14 @@ struct DetailPhotoFrame: View {
     var body: some View {
         pixels
             .frame(width: side, height: height ?? side)
+            .clipped()
+            // PRD In-group culling: rejected photos dim neutrally with desaturation so a cull
+            // decision reads at a glance without white haze on Light themes.
+            .rejectedThumbnailDimming(appliesRejectedDimming && photo.marks.isRejected)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(alignment: .bottomLeading) {
                 if showsMarks { marks }
             }
-            // PRD In-group culling: rejected photos are dimmed, so a cull decision reads at a
-            // glance in the strip (PRD In-group culling, comparison and elimination).
-            .opacity(
-                appliesRejectedOpacity && photo.marks.isRejected
-                    ? theme.tokens.rejectedOpacity : 1
-            )
             .task(id: photo.id) {
                 guard thumbnail == nil else { return }
                 if case .image(let pixels) = await thumbnails.thumbnail(

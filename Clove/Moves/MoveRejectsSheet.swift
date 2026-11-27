@@ -7,11 +7,16 @@ struct MoveRejectsSheet: View {
     let flow: MoveRejectsFlow
     @Environment(SettingsStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.cloveTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
-    @State private var expanded = false
-    @State private var detent: PresentationDetent = .height(330)
+    @State private var expanded: Bool
+    @State private var detent: PresentationDetent
+
+    init(flow: MoveRejectsFlow, initiallyExpanded: Bool = false) {
+        self.flow = flow
+        _expanded = State(initialValue: initiallyExpanded)
+        _detent = State(initialValue: initiallyExpanded ? .large : .height(330))
+    }
 
     var body: some View {
         content
@@ -191,10 +196,13 @@ struct MoveRejectsSheet: View {
                         flow.toggleKeep(entry.identity)
                     }
                 } label: {
-                    MoveRejectsThumbnail(photo: entry.identity, source: flow.thumbnails)
-                        .aspectRatio(1, contentMode: .fit)
-                        .opacity(kept ? 1 : theme.tokens.rejectedOpacity)
-                        .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: kept)
+                    MoveRejectsThumbnail(
+                        photo: entry.identity,
+                        source: flow.thumbnails,
+                        isDimmed: !kept
+                    )
+                    .aspectRatio(1, contentMode: .fit)
+                    .animation(CloveMotion.micro(reduceMotion: reduceMotion), value: kept)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
@@ -252,7 +260,17 @@ struct MoveSheetButtonStyle: ButtonStyle {
 struct MoveRejectsThumbnail: View {
     let photo: PhotoIdentity
     let source: any GridThumbnailSource
+    var isDimmed = false
     @State private var image: CGImage?
+
+    init(photo: PhotoIdentity, source: any GridThumbnailSource, isDimmed: Bool = false) {
+        self.photo = photo
+        self.source = source
+        self.isDimmed = isDimmed
+        if case .image(let cached) = source.cachedThumbnail(for: photo) {
+            _image = State(initialValue: cached)
+        }
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -263,9 +281,15 @@ struct MoveRejectsThumbnail: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+            .rejectedThumbnailDimming(isDimmed)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .task(id: photo) {
+            if case .image(let cached) = source.cachedThumbnail(for: photo) {
+                image = cached
+                return
+            }
             image = nil
             if case .image(let loaded) = await source.thumbnail(for: photo, priority: .visible) {
                 guard !Task.isCancelled else { return }

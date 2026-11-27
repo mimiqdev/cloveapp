@@ -345,7 +345,6 @@ private struct GridTile: View {
     var trayPosition: GridGroupTrayPosition? = nil
     var stackCardToken: ThemeToken = .canvas
     let openGroup: (GroupID) -> Void
-    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
 
     private var isCover: Bool { item.group?.isCover == true }
@@ -385,9 +384,9 @@ private struct GridTile: View {
                     if isCover {
                         GroupStack(
                             peekingImages: peekingThumbnails,
-                            cardBacking: CloveColour(stackCardToken)
+                            cardBacking: CloveColour(stackCardToken),
+                            isDimmed: item.isDimmed
                         ) { image }
-                        .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
                         .overlay(alignment: .bottomLeading) { rating }
                         .overlay(alignment: .bottomTrailing) { label }
                         .overlay(alignment: .bottomTrailing) { bottomMarkers }
@@ -454,8 +453,9 @@ private struct GridTile: View {
     private func photoContent(width: CGFloat, height: CGFloat) -> some View {
         image
             .frame(width: width, height: height)
+            .clipped()
+            .rejectedThumbnailDimming(item.isDimmed)
             .clipShape(RoundedRectangle(cornerRadius: tileCornerRadius, style: .continuous))
-            .opacity(item.isDimmed ? theme.tokens.rejectedOpacity : 1)
             .overlay(alignment: .bottomLeading) { rating }
             .overlay(alignment: .bottomTrailing) { label }
             .overlay(alignment: .bottomTrailing) { bottomMarkers }
