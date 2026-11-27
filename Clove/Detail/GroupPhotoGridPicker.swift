@@ -180,7 +180,6 @@ private struct GroupPhotoGridPickerCell: View {
     let isCurrent: Bool
     let thumbnails: any GridThumbnailSource
 
-    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
     @State private var thumbnail: CGImage?
     @State private var isUnavailable = false
@@ -220,6 +219,8 @@ private struct GroupPhotoGridPickerCell: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+            .rejectedThumbnailDimming(photo.marks.isRejected)
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .overlay(alignment: .bottomLeading) {
                 PhotoTileRatingBadge(rating: photo.marks.rating)
@@ -227,7 +228,6 @@ private struct GroupPhotoGridPickerCell: View {
             .overlay(alignment: .bottomTrailing) {
                 PhotoTileLabelDot(label: photo.marks.label)
             }
-            .opacity(photo.marks.isRejected ? theme.tokens.rejectedOpacity : 1)
             .overlay {
                 if isCurrent {
                     CurrentPhotoIndicator(cornerRadius: 6)

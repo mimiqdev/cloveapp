@@ -2056,7 +2056,7 @@ struct CompareFilmstrip: View {
                             .padding(2)
                     }
                 }
-                .opacity(isReference && !isChallenger ? 0.78 : 1)
+                .opacity(isReference && !isChallenger && !photo.marks.isRejected ? 0.78 : 1)
             }
         }
         .buttonStyle(.plain)

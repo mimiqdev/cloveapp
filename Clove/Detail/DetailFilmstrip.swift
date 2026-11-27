@@ -938,20 +938,19 @@ private struct FilmstripGroupStack: View {
     let peek: CGFloat
     let thumbnails: any GridThumbnailSource
     @State private var peekingThumbnails: [PhotoIdentity: CGImage] = [:]
-    @Environment(\.cloveTheme) private var theme
 
     var body: some View {
         GroupStack(
             peek: peek,
             peekingImages: peekingIDs.map { peekingThumbnails[$0] },
-            cardBacking: Color.clove.bg.stage
+            cardBacking: Color.clove.bg.stage,
+            isDimmed: isDimmed
         ) {
             DetailPhotoFrame(
                 photo: cover, isCurrent: false, thumbnails: thumbnails,
                 side: thumbnailWidth, height: thumbnailHeight,
-                showsMarks: true, appliesRejectedOpacity: false)
+                showsMarks: true, appliesRejectedDimming: false)
         }
-        .opacity(isDimmed ? theme.tokens.rejectedOpacity : 1)
         .overlay(alignment: .topTrailing) {
             GroupCountBadge(count: visibleCount, presentation: .filmstrip)
                 .padding(2)
