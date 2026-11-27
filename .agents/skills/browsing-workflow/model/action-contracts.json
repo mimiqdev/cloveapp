@@ -346,12 +346,12 @@
     ]
   },
   "Mark": {
-    "precondition": "Connected ready admitted Detail; not collapsed stack; changed value; FIFO room",
+    "precondition": "Connected ready admitted Detail; changed value; FIFO room",
     "request": "Rated or Rejected",
-    "postcondition": "Show requested mark; update desired and append exact request; capture Undo and plan from pre-state",
+    "postcondition": "Show requested mark; enter Group Focus on same photo if on collapsed stack (keeping zoom); update desired and append exact request; capture Undo and plan from expanded group or Timeline",
     "invariants": [
       "MarkActionEffects",
-      "CollapsedStackIsReadOnly",
+      "CollapsedStackMarkEntersGroupFocus",
       "NewerDesiredInputWins",
       "OnlyLastUnmarkedPlansGroupExit",
       "SecondPassNeverPlansGroupExit",
@@ -360,7 +360,9 @@
     "negativeMutations": [
       "mark-does-not-enqueue",
       "mark-wrong-requested-value",
-      "collapsed-stack-marking",
+      "collapsed-stack-mark-stays-timeline",
+      "collapsed-stack-mark-plans-before-expand",
+      "collapsed-stack-mark-resets-zoom",
       "early-group-exit",
       "second-pass-group-exit"
     ],
@@ -376,6 +378,18 @@
       {
         "name": "rejected",
         "condition": "event.request.mark = \"X\""
+      },
+      {
+        "name": "collapsed-stack",
+        "condition": "event.before.route = \"Timeline\" /\\ event.before.grouped /\\ event.before.currentPhoto \\in MemberSet(event.before.activeFolder) /\\ route = \"GroupFocus\" /\\ expandedGroup = event.before.activeFolder"
+      },
+      {
+        "name": "collapsed-stack-100",
+        "condition": "event.before.route = \"Timeline\" /\\ event.before.grouped /\\ event.before.currentPhoto \\in MemberSet(event.before.activeFolder) /\\ event.before.scale = \"100\" /\\ route = \"GroupFocus\" /\\ scale = \"100\" /\\ anchor = event.before.anchor"
+      },
+      {
+        "name": "collapsed-stack-second-pass",
+        "condition": "event.before.route = \"Timeline\" /\\ event.before.grouped /\\ event.before.currentPhoto \\in MemberSet(event.before.activeFolder) /\\ ~HasUnmarked(event.before.activeFolder, event.before.marks) /\\ advance.secondPass /\\ route = \"GroupFocus\""
       }
     ]
   },

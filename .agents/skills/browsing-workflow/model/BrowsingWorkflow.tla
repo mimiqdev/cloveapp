@@ -444,7 +444,9 @@ CanMarkCurrent ==
     /\ ~scanning
     /\ route \in {"Timeline", "GroupFocus"}
     /\ currentPhoto \in FolderPhotos(activeFolder)
-    /\ (route = "GroupFocus" \/ ~grouped \/ currentPhoto = Standalone(activeFolder))
+
+EntersGroupOnMark(p) == route = "Timeline" /\ grouped /\ p \in MemberSet(activeFolder)
+InGroupOnMark(p) == route = "GroupFocus" \/ EntersGroupOnMark(p)
 
 Mark(p, value) ==
     /\ CanMarkCurrent
@@ -453,6 +455,8 @@ Mark(p, value) ==
     /\ marks[p] /= value
     /\ Len(writeQueue) < MaxPending
     /\ steps < MaxSteps
+    /\ route' = IF InGroupOnMark(p) THEN "GroupFocus" ELSE "Timeline"
+    /\ expandedGroup' = IF InGroupOnMark(p) THEN activeFolder ELSE NoFolder
     /\ marks' = [marks EXCEPT ![p] = value]
     /\ sourceGeneration' = [sourceGeneration EXCEPT ![p] = generation]
     /\ writeQueue' = Append(writeQueue, [photo |-> p, value |-> value, generation |-> generation])
@@ -460,12 +464,12 @@ Mark(p, value) ==
     /\ undo' = [folder |-> activeFolder, generation |-> generation,
                 photo |-> p, before |-> marks[p], after |-> value]
     /\ advance' =
-        IF route = "GroupFocus" THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
+        IF InGroupOnMark(p) THEN GroupAdvanceBeforeMark(activeFolder, p, marks)
         ELSE TimelineAdvance(activeFolder, p, grouped, marks)
     /\ event' = [Event("Mark") EXCEPT !.request.mark = value]
     /\ steps' = steps + 1
-    /\ UNCHANGED <<route, activeFolder, generation, scanning, grouped, connected,
-                   expandedGroup, currentPhoto, scale, anchor, diskMarks, writePhase, confirmedMarks, libraryMarks, retiredGeneration>>
+    /\ UNCHANGED <<activeFolder, generation, scanning, grouped, connected,
+                   currentPhoto, scale, anchor, diskMarks, writePhase, confirmedMarks, libraryMarks, retiredGeneration>>
 
 UndoLastMark ==
     /\ (undo /= NoUndo)
@@ -664,9 +668,15 @@ BurstOpensRepresentativeGroupFocus ==
         /\ expandedGroup = activeFolder
         /\ currentPhoto = Representative(activeFolder, marks)
 
-CollapsedStackIsReadOnly ==
-    ~(event.action = "Mark" /\ event.oldRoute = "Timeline" /\ grouped
-      /\ event.oldPhoto \in MemberSet(activeFolder))
+CollapsedStackMarkEntersGroupFocus ==
+    (event.action = "Mark" /\ event.oldRoute = "Timeline" /\ grouped
+      /\ event.oldPhoto \in MemberSet(activeFolder)) =>
+        /\ route = "GroupFocus"
+        /\ expandedGroup = activeFolder
+        /\ currentPhoto = event.oldPhoto
+        /\ scale = event.oldScale
+        /\ anchor = event.oldAnchor
+        /\ advance = GroupAdvanceBeforeMark(activeFolder, event.oldPhoto, event.before.marks)
 
 GroupFocusStaysWithinVisibleMembers ==
     route = "GroupFocus" =>
@@ -850,14 +860,18 @@ ReferenceNavigation(b, a, r) ==
         !.anchor = IF b.advance.kind = "group" THEN b.anchor ELSE "centre", !.advance = NoAdvance]
 
 ReferenceMark(b, r) ==
-    LET p == b.currentPhoto IN [b EXCEPT
+    LET p == b.currentPhoto
+        inGroup == b.route = "GroupFocus" \/ (b.grouped /\ p \in MemberSet(b.activeFolder))
+    IN [b EXCEPT
+        !.route = IF inGroup THEN "GroupFocus" ELSE "Timeline",
+        !.expandedGroup = IF inGroup THEN b.activeFolder ELSE NoFolder,
         !.marks = [b.marks EXCEPT ![p] = r.mark],
         !.desired = [b.desired EXCEPT ![p] = r.mark],
         !.sourceGeneration = [b.sourceGeneration EXCEPT ![p] = b.generation],
         !.writeQueue = Append(b.writeQueue, [photo |-> p, value |-> r.mark, generation |-> b.generation]),
         !.undo = [folder |-> b.activeFolder, generation |-> b.generation,
                   photo |-> p, before |-> b.marks[p], after |-> r.mark],
-        !.advance = IF b.route = "GroupFocus" THEN GroupAdvanceBeforeMark(b.activeFolder, p, b.marks)
+        !.advance = IF inGroup THEN GroupAdvanceBeforeMark(b.activeFolder, p, b.marks)
                     ELSE TimelineAdvance(b.activeFolder, p, b.grouped, b.marks)]
 
 ReferenceUndo(b) ==
@@ -934,7 +948,6 @@ ReferenceAdmissible(b, a, r) ==
     [] a = "ReturnFit" -> b.route \in {"Timeline", "GroupFocus"} /\ b.scale /= "fit"
     [] a = "Mark" -> b.activeFolder \in Folders /\ b.connected /\ ~b.scanning
         /\ b.route \in {"Timeline", "GroupFocus"} /\ b.currentPhoto \in FolderPhotos(b.activeFolder)
-        /\ (b.route = "GroupFocus" \/ ~b.grouped \/ b.currentPhoto = Standalone(b.activeFolder))
         /\ r.mark \in {"R", "X"} /\ b.marks[b.currentPhoto] /= r.mark /\ Len(b.writeQueue) < MaxPending
     [] a = "UndoLastMark" -> b.undo /= NoUndo /\ b.activeFolder \in Folders /\ b.connected /\ ~b.scanning
         /\ b.undo.folder = b.activeFolder /\ b.undo.generation = b.generation
