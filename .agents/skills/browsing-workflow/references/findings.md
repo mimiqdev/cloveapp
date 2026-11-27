@@ -1,7 +1,48 @@
 # Model correspondence and run evidence
 
-Source sync commit: `ee5fa221f2c2665ee07b0c7630d6d52aa240013e`.
+Source sync commit: `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`.
 No product defect is diagnosed by this verification revision.
+
+## Symbol-scoped drift tracking and sync at `3aa0f2c`
+
+Whole-file `git diff --name-only` across 11 files triggered false-positive drift on UI, layout,
+toast, filter, and readout edits (19/30 recent commits on `main`, while 0/30 touched the 4 pure
+state-machine files). `model/source-sync.json` and `scripts/check` (via `scripts/source_drift.py`)
+now keep whole-file tracking for the 4 pure state-machine files, drop the 2 stateless UI dispatch
+shells (`GridScreen.swift`, `DetailFilmstrip.swift`, whose tap/gesture wiring is covered by
+`CloveTests` / `CloveUITests`), and enforce fail-closed symbol-scoped tracking across 133 modeled
+Swift declarations in the 5 mixed files (supporting `Scope :: member` lookup across bodyless
+protocol requirements and extension defaults, tracking active `#if`/`#elseif`/`#else`/`#endif`
+directive stacks, preserving string interpolation delimiters and maximal operator token runs,
+stripping comments, and failing closed on 0 matches, >1 matches, or missing files). Covering
+`BrowsingModel.openGeneration`, `BrowsingModel.init` (which subscribes to `library.updates` and
+initializes `shownGeneration`), `protocol FolderLibrary` bodyless requirements alongside `extension
+FolderLibrary` defaults, and `FolderLibrarySession` grouping/publication helpers (`makeGrouping`,
+`startGrouping`, `publishGroups`, `publish`) closes remaining model-boundary blind spots without
+widening into UI code.
+
+Changes between the prior sync commit (`1affa6dc86cb568ce835ce40bb67ce2f124a3a95`) and
+`3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec` were audited before advancing `model/source-sync.json`:
+
+- `#491` (`ab8b085`) changed only `GridScreen.swift` (all-reviewed empty state; dropped dispatch shell).
+- `#490` (`3aa0f2c`) added `BrowsingModel.scannedSet(for:)` and 250 ms RAW progressive decode
+  readout state in `DetailMarkingView` (`loadPreview`, `show`, `zoomChanged`, `doubleTap`,
+  `inspectFullResolution`, `upgradeIfNeeded`, `upgrade`, `DetailPhotoCornerOverlay`). In
+  `doubleTap(at:)`, `!isAtFullResolution` lets a second double-tap return to `.fit` when `zoomMode`
+  is `.fullResolution` while waiting at fit scale for a RAW render; fit <-> 100% zoom, anchor,
+  marking, Undo, and Group Focus zoom retention remain unchanged relative to `BrowsingWorkflow.tla`.
+
+Real-source scratch-break verification at `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec` inside
+`BrowsingModel.collapseGroup()`:
+
+```diff
+- let representative = active.representative.id
++ let representative = active.visibleMembers[0].id
+```
+
+`.agents/skills/browsing-workflow/scripts/check --good-only` exited `1` before TLC and reported:
+`Clove/Browsing/BrowsingModel.swift :: func collapseGroup() [drift]: declaration changed (baseline lines 571-584, working tree lines 571-584)`.
+The Swift file was restored with `git checkout -- Clove/Browsing/BrowsingModel.swift`.
 
 ## Integration-base correspondence refresh
 
@@ -237,7 +278,8 @@ This is drift detection, not semantic proof. Review the source and model, then r
 The source was restored. Covered product files have no diff, the sync commit is unchanged, and the
 normal command passed the drift gate, the model, mutation checks, and the rollback witness.
 The current action audit additionally checks all 35 invariants, 50 mutants, and 53 action/branch
-witnesses. The reviewed source commit and 12 covered paths have not changed.
+witnesses. The reviewed source commit (`3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`), 4 whole-file
+targets, and 133 tracked declarations across 5 mixed files have not changed.
 
 ## Evidence limits
 

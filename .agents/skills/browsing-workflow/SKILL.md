@@ -38,7 +38,9 @@ The script prints each counterexample as an action path and stores full TLC outp
 [the tool decision record](../../../docs/decisions/tla-plus-workflow-verification.md).
 
 The normal command starts with a source-drift gate. `model/source-sync.json` records the reviewed
-commit and covered files. If any covered file differs from that commit, the command exits 1 before
+commit, the pure state-machine files tracked whole-file, and the exact modeled Swift declarations
+tracked inside mixed files. If any whole-file target or tracked declaration differs from that
+commit—or if a tracked declaration is missing, renamed, or ambiguous—the command exits 1 before
 starting TLC and requires a maintenance review. This is Git drift detection, not semantic proof.
 Review the changed source and update the model as needed before advancing the sync commit. Do not
 advance the commit merely to bypass the gate.
@@ -54,40 +56,49 @@ results. A passing variant is a failed check because the defect did not break it
 
 ## Compare the model with the code
 
-Source sync commit: `1affa6dc86cb568ce835ce40bb67ce2f124a3a95`. The machine-readable copy and
-covered-path list used by the drift gate live in `model/source-sync.json`.
+Source sync commit: `3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec`. The machine-readable copy,
+whole-file list, and symbol-scoped declaration list used by the drift gate live in
+`model/source-sync.json`.
 
-The model was manually compared with these 11 covered files at that commit:
+Four pure state-machine files are tracked whole-file, and five mixed Swift files are tracked by
+exact declaration tokens (`Scope :: member` when scoped inside a type, protocol, or extension),
+active `#if`/`#elseif`/`#else`/`#endif` directive stack, and brace-matched body (preserving
+string interpolation boundaries and operator runs, stripping Swift comments and whitespace-only
+formatting differences outside string literals, and failing closed on missing, renamed, or
+ambiguous symbols):
 
-| Covered file | Functions and properties |
-| --- | --- |
-| `Clove/Browsing/BrowsingModel.swift` | `openPickedFolderNow`, `reopenNow`, `showOpenFolder`, `leaveFolder`, `back`, `openPhoto`, `openGroup`, `selectGroupPhoto`, `collapseGroup`, `canMark`, `apply`, `undoLastMark`, `persist`, `discardDisconnectedChanges`, `apply(_ update:)`, `refresh` |
-| `Clove/Browsing/FolderLibrary.swift` | `FolderLibraryUpdate`, the `FolderLibrary` generation, write, close, and reopen contracts |
-| `Clove/Folder/FolderLibrarySession.swift` | `install`, `scan`, `admit`, `applyReads`, `finishScan`, `closeFolder`, `locationLost`, `record` |
-| `Clove/Browsing/GridScreen.swift` | Grid `openPhoto` and `openGroup` dispatch |
-| `Clove/Browsing/DetailScreen.swift` | `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `startAutoAdvance`, `schedule` |
-| `Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift` | `representative`, `stageOrder`, `steppedPhoto`, `autoAdvancePlan`, Timeline slot and visible-member rules |
-| `Clove/Detail/DetailMarkingView.swift` | `isReadOnlyCollapsedGroup`, `allowsMarkingInput`, `apply`, `loadPreview`, `refreshPrefetchForOrderChange`, zoom capture and restoration |
-| `Clove/Detail/DetailFilmstrip.swift` | Timeline and Group Focus dispatch to open, select, expand, and collapse |
-| `Clove/Detail/MarkAutoAdvance.swift` | `schedule` and `cancel` |
-| `Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift` | `apply`, `shown`, `finish`, `removeAll`, and `DesiredMarkRestore.change` |
-| `Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift` | `submit`, `beginNext`, `hasPendingMark`, `removePending`, and `finish` |
+| Tracked file | Mode | Covered declarations / scope |
+| --- | --- | --- |
+| `Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift` | Whole file | `representative`, `stageOrder`, `steppedPhoto`, `autoAdvancePlan`, Timeline slot and visible-member rules |
+| `Clove/Detail/MarkAutoAdvance.swift` | Whole file | `schedule` and `cancel` |
+| `Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift` | Whole file | `apply`, `shown`, `finish`, `removeAll`, and `DesiredMarkRestore.change` |
+| `Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift` | Whole file | `submit`, `beginNext`, `hasPendingMark`, `removePending`, and `finish` |
+| `Clove/Browsing/BrowsingModel.swift` | Symbol-scoped (40) | `openGeneration`, `init`, `hasFinishedScan`, `isScanning`, `openFolder`, `openPickedFolder`, `openPickedFolderNow`, `reopen`, `reopenNow`, `reopenOpenFolder`, `openPhoto`, `openGroup`, `selectGroupPhoto`, `collapseGroup`, `setSimilarGroupsEnabled`, `back`, `shownMarks`, `canMark`, `apply(_ change:to:)`, `canUndoMark`, `undoLastMark`, `request`, `requestBatch`, `stageMark`, `applyShownMarks`, `recordUndo`, `submit`, `drainActions`, `consumeActions`, `finishPendingMarks`, `persist`, `discardDisconnectedChanges`, `leaveFolder`, `showEntryAfterLeaving`, `apply(_ update:)`, `showOpenFolder`, `applyReads`, `refresh`, `reconcileRemovedPhotos`, `reconcileExpandedGroup` |
+| `Clove/Browsing/FolderLibrary.swift` | Symbol-scoped (25) | `FolderLibraryUpdate`, 14 `protocol FolderLibrary` requirements (`folder`, `photos`, `groups`, `updates`, `openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`), and 10 `extension FolderLibrary` defaults (`openGeneration`, `pick`, `reopen`, `openSavedFolder`, `rereadMarks`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `apply`, `setSimilarGroupsEnabled`) |
+| `Clove/Folder/FolderLibrarySession.swift` | Symbol-scoped (28) | `photos`, `groups`, `openGeneration`, `drainWrites`, `discardPendingChanges`, `closeFolder`, `uninstallFolder`, `apply`, `rereadMarks`, `pick`, `reopen`, `openSavedFolder`, `open`, `install`, `endOpenFolder`, `scan`, `admit`, `applyReads`, `finishScan`, `failedScan`, `locationLost`, `record`, `applyConfirmedProgressChange`, `makeGrouping`, `startGrouping`, `publishGroups`, `setSimilarGroupsEnabled`, `publish` |
+| `Clove/Browsing/DetailScreen.swift` | Symbol-scoped (13) | `groupsEnabled`, `timeline`, `activeExpandedGroup`, `actions`, `stepPhoto`, `openPhoto`, `selectGroupPhoto`, `expandGroup`, `collapseGroup`, `performUndo`, `startAutoAdvance`, `schedule`, `rules` |
+| `Clove/Detail/DetailMarkingView.swift` | Symbol-scoped (27) | `currentTimelineGroup`, `isReadOnlyCollapsedGroup`, `allowsMarkingInput`, `captureZoomForPresentationTransition`, `loadPreview`, `refreshPrefetchForOrderChange`, `show`, `openingScale`, `nativeFullResolutionScale`, `renderFitAndPrefetch`, `zoomChanged`, `isAtFullResolution`, `doubleTap`, `focusRegionTapped`, `inspectFullResolution`, `retargetFullResolution`, `setZoom`, `beginToolbarMarking`, `beginMarkingGesture`, `undo`, `markKey`, `rate`, `choose`, `toggleReject`, `applyMarkingSwipe`, `apply(_ result:)`, `rules` |
 
-Before trusting a run after a source change, compare the covered files with the sync commit:
+Two pure stateless UI dispatch shells are intentionally excluded from `model/source-sync.json`
+because they own zero workflow state-machine rules (`GridScreen.swift` dispatches `openPhoto` /
+`openGroup` to `BrowsingModel`, and `DetailFilmstrip.swift` dispatches Timeline/Group Focus closures
+from `DetailScreen` / `DetailMarkingView`). Their tap and gesture wiring is verified by hosted and
+UI tests (`CloveTests` / `CloveUITests`).
+
+Before trusting a run after a source change, compare the tracked files against the sync commit and
+run the drift gate:
 
 ```sh
-git diff 1affa6dc86cb568ce835ce40bb67ce2f124a3a95 -- \
+git diff 3aa0f2c8a97ec80bb500aa58c96b30ba1b1de6ec -- \
+  Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift \
+  Clove/Detail/MarkAutoAdvance.swift \
+  Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift \
+  Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift \
   Clove/Browsing/BrowsingModel.swift \
   Clove/Browsing/FolderLibrary.swift \
   Clove/Folder/FolderLibrarySession.swift \
-  Clove/Browsing/GridScreen.swift \
   Clove/Browsing/DetailScreen.swift \
-  Packages/CloveCore/Sources/CloveCore/GroupCulling/DetailTimeline.swift \
-  Clove/Detail/DetailMarkingView.swift \
-  Clove/Detail/DetailFilmstrip.swift \
-  Clove/Detail/MarkAutoAdvance.swift \
-  Packages/CloveCore/Sources/CloveCore/Marking/DesiredPhotoMarks.swift \
-  Packages/CloveCore/Sources/CloveCore/Marking/PhotoActionPipeline.swift
+  Clove/Detail/DetailMarkingView.swift
 ```
 
 If this diff changes the workflow, update the model and its mutations before treating a pass as
