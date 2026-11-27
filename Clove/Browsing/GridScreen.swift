@@ -805,6 +805,7 @@ struct GridScreen: View {
                 ) {
                     presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                 }
+                .reportHeaderControlFrame("clove.grid.moveRejects")
             }
         } tools: {
             headerTools
@@ -919,6 +920,7 @@ struct GridScreen: View {
                     ) {
                         presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
+                    .reportHeaderControlFrame("clove.grid.moveRejects")
                 }
             }
             moreMenu

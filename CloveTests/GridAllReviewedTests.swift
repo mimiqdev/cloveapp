@@ -297,6 +297,7 @@ struct GridAllReviewedTests {
 
         struct HostView: View {
             let summary: GridReviewSummary
+            let framesBox: AllReviewedFrameStore
             let triggerBox: AllReviewedTriggerBox
             let actionBox: AllReviewedActionBox
 
@@ -306,7 +307,11 @@ struct GridAllReviewedTests {
                     onMoveRejects: { actionBox.moveRejectsCount += 1 },
                     onShowAll: { actionBox.showAllCount += 1 }
                 )
+                .environment(\.appLanguage, .english)
                 .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                }
             }
         }
 
@@ -315,11 +320,13 @@ struct GridAllReviewedTests {
             let noRejectsSummary = GridReviewSummary(
                 totalCount: 4, highRatedCount: 4, ratedCount: 4, labelledOnlyCount: 0,
                 rejectedCount: 0, moveRejectsEnabled: true)
+            let framesBox = AllReviewedFrameStore()
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: 393, height: 844)
             let host = UIHostingController(
                 rootView: HostView(
-                    summary: noRejectsSummary, triggerBox: triggerBox, actionBox: actionBox))
+                    summary: noRejectsSummary, framesBox: framesBox, triggerBox: triggerBox,
+                    actionBox: actionBox))
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer {
@@ -330,9 +337,9 @@ struct GridAllReviewedTests {
             try await waitFor("all-reviewed view did not mount") {
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
-                return self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
+                return framesBox.frames["clove.grid.allReviewed.showAll"] != nil
             }
-            #expect(!hasAccessibilityIdentifier("clove.grid.allReviewed.moveRejects", in: window))
+            #expect(framesBox.frames["clove.grid.allReviewed.moveRejects"] == nil)
 
             triggerBox.sendTrigger("clove.grid.allReviewed.moveRejects")
             try await Task.sleep(for: .milliseconds(40))
@@ -347,11 +354,13 @@ struct GridAllReviewedTests {
             let withRejectsSummary = GridReviewSummary(
                 totalCount: 4, highRatedCount: 2, ratedCount: 2, labelledOnlyCount: 0,
                 rejectedCount: 2, moveRejectsEnabled: true)
+            let framesBox = AllReviewedFrameStore()
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: 393, height: 844)
             let host = UIHostingController(
                 rootView: HostView(
-                    summary: withRejectsSummary, triggerBox: triggerBox, actionBox: actionBox))
+                    summary: withRejectsSummary, framesBox: framesBox, triggerBox: triggerBox,
+                    actionBox: actionBox))
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer {
@@ -362,9 +371,8 @@ struct GridAllReviewedTests {
             try await waitFor("all-reviewed view with move rejects did not mount") {
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
-                return self.hasAccessibilityIdentifier(
-                    "clove.grid.allReviewed.moveRejects", in: window)
-                    && self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
+                return framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
+                    && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
             }
 
             triggerBox.sendTrigger("clove.grid.allReviewed.moveRejects")
@@ -420,6 +428,7 @@ struct GridAllReviewedTests {
             var body: some View {
                 GridScreen(browsing: model, thumbnails: model.thumbnails)
                     .environment(store)
+                    .environment(\.appLanguage, .english)
                     .environment(\.cloveUserInterfaceIdiom, .phone)
                     .environment(\.cloveTheme, .light)
                     .environment(\.usesSystemBrowsingToolbar, false)
@@ -449,7 +458,7 @@ struct GridAllReviewedTests {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
             return self.findCollectionView(in: window) != nil
-                && self.hasMoveRejectsControl(in: host, window: window)
+                && framesBox.frames["clove.grid.moveRejects"] != nil
         }
         model.apply(.rating(fourStars), to: photos[2].id)
         await model.drainActions()
@@ -457,8 +466,8 @@ struct GridAllReviewedTests {
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
         #expect(findCollectionView(in: window) != nil)
-        #expect(!hasAccessibilityIdentifier("clove.grid.allReviewed", in: window))
-        #expect(hasMoveRejectsControl(in: host, window: window))
+        #expect(framesBox.frames["clove.grid.allReviewed"] == nil)
+        #expect(framesBox.frames["clove.grid.moveRejects"] != nil)
 
         // 2. Restore p3 unmarked, switch to Unmarked (old Move Rejects still shown while 1 left),
         //    then mark p3 -> dedicated all-reviewed state mounts and old Move Rejects disappears.
@@ -469,7 +478,7 @@ struct GridAllReviewedTests {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
             return self.findCollectionView(in: window)?.visibleCells.count == 1
-                && self.hasMoveRejectsControl(in: host, window: window)
+                && framesBox.frames["clove.grid.moveRejects"] != nil
         }
         model.apply(.rating(fourStars), to: photos[2].id)
         await model.drainActions()
@@ -477,12 +486,12 @@ struct GridAllReviewedTests {
         try await waitFor("all-reviewed state did not mount and suppress old move rejects") {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                && self.hasAccessibilityIdentifier("clove.grid.allReviewed.moveRejects", in: window)
-                && self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
-                && !self.hasMoveRejectsControl(in: host, window: window)
+            return framesBox.frames["clove.grid.allReviewed"] != nil
+                && framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
+                && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
+                && framesBox.frames["clove.grid.moveRejects"] == nil
         }
-        #expect(!hasAccessibilityIdentifier("clove.grid.empty", in: window))
+        #expect(framesBox.frames["clove.grid.empty"] == nil)
 
         // 3. Invoking Move rejects action from GridAllReviewedView presents MoveRejectsSheet.
         triggerBox.sendTrigger("clove.grid.allReviewed.moveRejects")
@@ -490,9 +499,9 @@ struct GridAllReviewedTests {
             guard let presented = self.topPresentedViewController(from: host) else { return false }
             presented.view.setNeedsLayout()
             presented.view.layoutIfNeeded()
-            return !presented.isBeingPresented
+            return presented.sheetPresentationController != nil
+                && !presented.isBeingPresented
                 && presented.transitionCoordinator == nil
-                && self.hasAccessibilityIdentifier("clove.moves.confirmation", in: presented.view)
         }
         let presentedSheet = try #require(topPresentedViewController(from: host))
         await withCheckedContinuation { continuation in
@@ -509,10 +518,9 @@ struct GridAllReviewedTests {
         try await waitFor("move rejects pill did not hide when setting turned off") {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                && !self.hasAccessibilityIdentifier(
-                    "clove.grid.allReviewed.moveRejects", in: window)
-                && self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
+            return framesBox.frames["clove.grid.allReviewed"] != nil
+                && framesBox.frames["clove.grid.allReviewed.moveRejects"] == nil
+                && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
         }
 
         // 5. Re-enabling Move Rejects with 0 rejects keeps Move rejects hidden.
@@ -522,10 +530,9 @@ struct GridAllReviewedTests {
         try await waitFor("move rejects pill stayed hidden when 0 rejects exist") {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                && !self.hasAccessibilityIdentifier(
-                    "clove.grid.allReviewed.moveRejects", in: window)
-                && self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
+            return framesBox.frames["clove.grid.allReviewed"] != nil
+                && framesBox.frames["clove.grid.allReviewed.moveRejects"] == nil
+                && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
         }
 
         // 6. Restore reject, then invoke Show all photos CTA -> clears Unmarked back to All and
@@ -535,7 +542,7 @@ struct GridAllReviewedTests {
         try await waitFor("move rejects pill did not reappear after restoring reject") {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.grid.allReviewed.moveRejects", in: window)
+            return framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
         }
         triggerBox.sendTrigger("clove.grid.allReviewed.showAll")
         try await waitFor("Show all photos CTA did not restore full All grid") {
@@ -544,8 +551,8 @@ struct GridAllReviewedTests {
             return model.state.filter == .all
                 && !model.hasActiveFilter
                 && self.findCollectionView(in: window) != nil
-                && !self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                && self.hasMoveRejectsControl(in: host, window: window)
+                && framesBox.frames["clove.grid.allReviewed"] == nil
+                && framesBox.frames["clove.grid.moveRejects"] != nil
         }
 
         // 7. Unmarked + metadata filter shows generic empty state with Clear filters instead of
@@ -555,9 +562,9 @@ struct GridAllReviewedTests {
         try await waitFor("generic filtered empty state did not mount") {
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.grid.empty", in: window)
-                && self.hasAccessibilityIdentifier("clove.grid.empty.clearFilters", in: window)
-                && !self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
+            return framesBox.frames["clove.grid.empty"] != nil
+                && framesBox.frames["clove.grid.empty.clearFilters"] != nil
+                && framesBox.frames["clove.grid.allReviewed"] == nil
         }
     }
 
@@ -583,12 +590,14 @@ struct GridAllReviewedTests {
 
             let store = SettingsStore.sample
             store.update { $0.moveRejectsEnabled = true }
+            let framesBox = AllReviewedFrameStore()
             let triggerBox = AllReviewedTriggerBox()
 
             struct RegularGridHost: View {
                 let model: BrowsingModel
                 let store: SettingsStore
                 let usesSystemToolbar: Bool
+                let framesBox: AllReviewedFrameStore
                 let triggerBox: AllReviewedTriggerBox
 
                 var body: some View {
@@ -602,10 +611,14 @@ struct GridAllReviewedTests {
                         }
                     }
                     .environment(store)
+                    .environment(\.appLanguage, .english)
                     .environment(\.cloveUserInterfaceIdiom, .pad)
                     .environment(\.cloveTheme, .dark)
                     .environment(\.usesSystemBrowsingToolbar, usesSystemToolbar)
                     .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                        framesBox.frames = $0
+                    }
                 }
             }
 
@@ -614,7 +627,7 @@ struct GridAllReviewedTests {
             let host = UIHostingController(
                 rootView: RegularGridHost(
                     model: model, store: store, usesSystemToolbar: usesSystemToolbar,
-                    triggerBox: triggerBox))
+                    framesBox: framesBox, triggerBox: triggerBox))
             host.traitOverrides.horizontalSizeClass = .regular
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -628,7 +641,9 @@ struct GridAllReviewedTests {
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
                 return self.findCollectionView(in: window) != nil
-                    && self.hasMoveRejectsControl(in: host, window: window)
+                    && self.hasRegularMoveRejectsControl(
+                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
+                        window: window)
             }
 
             // Switching to empty Unmarked shows all-reviewed and suppresses iPad toolbar Move Rejects.
@@ -636,11 +651,12 @@ struct GridAllReviewedTests {
             try await waitFor("iPad all-reviewed state did not suppress toolbar move rejects") {
                 host.view.setNeedsLayout()
                 host.view.layoutIfNeeded()
-                return self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                    && self.hasAccessibilityIdentifier(
-                        "clove.grid.allReviewed.moveRejects", in: window)
-                    && self.hasAccessibilityIdentifier("clove.grid.allReviewed.showAll", in: window)
-                    && !self.hasMoveRejectsControl(in: host, window: window)
+                return framesBox.frames["clove.grid.allReviewed"] != nil
+                    && framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
+                    && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
+                    && !self.hasRegularMoveRejectsControl(
+                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
+                        window: window)
             }
 
             // Invoking Show all photos clears filter back to All and restores toolbar Move Rejects.
@@ -651,8 +667,10 @@ struct GridAllReviewedTests {
                 host.view.layoutIfNeeded()
                 return model.state.filter == .all
                     && self.findCollectionView(in: window) != nil
-                    && !self.hasAccessibilityIdentifier("clove.grid.allReviewed", in: window)
-                    && self.hasMoveRejectsControl(in: host, window: window)
+                    && framesBox.frames["clove.grid.allReviewed"] == nil
+                    && self.hasRegularMoveRejectsControl(
+                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
+                        window: window)
             }
         }
     }
@@ -683,6 +701,7 @@ struct GridAllReviewedTests {
         }
         #expect(plan.photoCount == 1)
 
+        let framesBox = AllReviewedFrameStore()
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let sheetWindow = UIWindow(windowScene: scene)
@@ -690,7 +709,11 @@ struct GridAllReviewedTests {
         let sheetHost = UIHostingController(
             rootView: MoveRejectsSheet(flow: flow)
                 .environment(SettingsStore.sample)
-                .environment(\.cloveTheme, .light))
+                .environment(\.appLanguage, .english)
+                .environment(\.cloveTheme, .light)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                })
         sheetWindow.rootViewController = sheetHost
         sheetWindow.makeKeyAndVisible()
         defer {
@@ -700,7 +723,7 @@ struct GridAllReviewedTests {
         try await waitFor("MoveRejectsSheet did not render confirmation") {
             sheetHost.view.setNeedsLayout()
             sheetHost.view.layoutIfNeeded()
-            return self.hasAccessibilityIdentifier("clove.moves.confirmation", in: sheetWindow)
+            return framesBox.frames["clove.moves.confirmation"] != nil
         }
 
         await withCheckedContinuation { continuation in
@@ -802,29 +825,21 @@ struct GridAllReviewedTests {
             metadata: metadata)
     }
 
-    private func hasAccessibilityIdentifier(_ identifier: String, in view: UIView) -> Bool {
-        if view.accessibilityIdentifier == identifier { return true }
-        if let elements = view.accessibilityElements {
-            for element in elements {
-                if let identifiable = element as? UIAccessibilityIdentification,
-                    identifiable.accessibilityIdentifier == identifier
-                {
-                    return true
-                }
-                if let nested = element as? UIView,
-                    hasAccessibilityIdentifier(identifier, in: nested)
-                {
-                    return true
-                }
-            }
+    private func hasRegularMoveRejectsControl(
+        usesSystemToolbar: Bool,
+        frames: [String: CGRect],
+        in host: UIViewController,
+        window: UIWindow
+    ) -> Bool {
+        if usesSystemToolbar {
+            return hasSystemToolbarMoveRejectsItem(in: host, window: window)
         }
-        return view.subviews.contains { hasAccessibilityIdentifier(identifier, in: $0) }
+        return frames["clove.grid.moveRejects"] != nil
     }
 
-    private func hasMoveRejectsControl(in host: UIViewController, window: UIWindow) -> Bool {
-        if hasAccessibilityIdentifier("clove.grid.moveRejects", in: window) {
-            return true
-        }
+    private func hasSystemToolbarMoveRejectsItem(in host: UIViewController, window: UIWindow)
+        -> Bool
+    {
         let navBar = findNavigationBar(in: window)
         let navController = findNavigationController(in: host)
         let topVC = navController?.topViewController
@@ -841,7 +856,8 @@ struct GridAllReviewedTests {
                 return true
             }
             if let custom = item.customView {
-                return hasAccessibilityIdentifier("clove.grid.moveRejects", in: custom)
+                return custom.accessibilityIdentifier == "clove.grid.moveRejects"
+                    || custom.accessibilityLabel == "Move rejects"
             }
             return false
         }
