@@ -4076,6 +4076,48 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testDetailAllReviewedToastOnLastMarkAndBackToGrid() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_ONLY_UNMARKED_STEM": "MMQ02680"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02680").tap()
+        let gridToggle = element(app, "clove.detail.gridToggle")
+        if element(app, "clove.detail.photoGrid").waitForExistence(timeout: 1), gridToggle.exists {
+            gridToggle.tap()
+        }
+
+        let preview = element(app, "clove.detail.preview")
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(capsule.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+
+        rate(4, in: app)
+
+        let toast = element(app, "clove.detail.allReviewedToast")
+        XCTAssertTrue(toast.waitForExistence(timeout: 5))
+        XCTAssertFalse(element(app, "clove.detail.undoToast").exists)
+        XCTAssertTrue(toast.staticTexts["All 36 reviewed"].exists)
+        XCTAssertEqual(toast.buttons.count, 1)
+
+        let backToGrid = element(app, "clove.detail.allReviewedToast.backToGrid")
+        XCTAssertTrue(backToGrid.exists)
+        XCTAssertTrue(backToGrid.isHittable)
+        XCTAssertEqual(backToGrid.label, "Back to Grid")
+
+        let filmstrip = element(app, "clove.detail.filmstrip")
+        if filmstrip.exists {
+            XCTAssertLessThanOrEqual(toast.frame.maxY, filmstrip.frame.minY)
+        } else {
+            XCTAssertLessThanOrEqual(toast.frame.maxY, capsule.frame.minY)
+        }
+
+        backToGrid.tap()
+        XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), element(app, "clove.detail")))
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }

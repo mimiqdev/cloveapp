@@ -105,6 +105,10 @@ final class TestLibrary: FolderLibrary {
     /// metadata across the sample photos so metadata/keyword filters appear in UI tests.
     static let metadataSamplesVariable = "CLOVE_TEST_LIBRARY_METADATA_SAMPLES"
 
+    /// The launch environment value leaving only the named stem unmarked while rating all other
+    /// previously unmarked photos so UI tests can mark the last unmarked photo in Focus View.
+    static let onlyUnmarkedStemVariable = "CLOVE_TEST_LIBRARY_ONLY_UNMARKED_STEM"
+
     /// The library this launch browses: the sample when the launch value asks for it (PRD P0-13).
     static func forLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -904,6 +908,16 @@ final class TestLibrary: FolderLibrary {
                     ? PhotoMarks(
                         rating: stored[index].id == group.members.first ? Self.stars(3) : .rejected)
                     : PhotoMarks()
+            }
+        }
+        if let stem = environment[Self.onlyUnmarkedStemVariable], !stem.isEmpty {
+            let targetStem = stem.lowercased()
+            for index in stored.indices {
+                if stored[index].id.stem == targetStem {
+                    stored[index].marks = PhotoMarks()
+                } else if stored[index].marks.isUnmarked {
+                    stored[index].marks = PhotoMarks(rating: Self.stars(4))
+                }
             }
         }
         if let count = environment[Self.groupCountVariable].flatMap(Int.init),
