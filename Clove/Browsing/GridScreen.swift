@@ -125,8 +125,32 @@ struct GridScreen: View {
         ).supportsCompare
     }
     private var showsMoveRejects: Bool {
-        store.settings.moveRejectsEnabled && browsing.rejectedPhotoCount > 0
-            && !browsing.isFolderOpening && !browsing.isMovingRejects && !isSelecting
+        Self.showsMoveRejectsControl(
+            moveRejectsEnabled: store.settings.moveRejectsEnabled,
+            rejectedPhotoCount: browsing.rejectedPhotoCount,
+            isFolderOpening: browsing.isFolderOpening,
+            isMovingRejects: browsing.isMovingRejects,
+            isSelecting: isSelecting,
+            isShowingAllReviewed: isShowingAllReviewed)
+    }
+    private var isShowingAllReviewed: Bool {
+        GridEmptyStateKind.isAllReviewed(browsing: browsing)
+    }
+
+    static func showsMoveRejectsControl(
+        moveRejectsEnabled: Bool,
+        rejectedPhotoCount: Int,
+        isFolderOpening: Bool,
+        isMovingRejects: Bool,
+        isSelecting: Bool,
+        isShowingAllReviewed: Bool
+    ) -> Bool {
+        moveRejectsEnabled
+            && rejectedPhotoCount > 0
+            && !isFolderOpening
+            && !isMovingRejects
+            && !isSelecting
+            && !isShowingAllReviewed
     }
 
     private var activeToastKey: String? {
@@ -781,6 +805,7 @@ struct GridScreen: View {
                 ) {
                     presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                 }
+                .reportHeaderControlFrame("clove.grid.moveRejects")
             }
         } tools: {
             headerTools
@@ -895,6 +920,7 @@ struct GridScreen: View {
                     ) {
                         presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
                     }
+                    .reportHeaderControlFrame("clove.grid.moveRejects")
                 }
             }
             moreMenu
@@ -1046,10 +1072,23 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var emptyState: some View {
-        if !browsing.hasFolderContents && !browsing.isFolderOpening {
+        switch GridEmptyStateKind.resolve(
+            browsing: browsing, moveRejectsEnabled: store.settings.moveRejectsEnabled)
+        {
+        case .emptyFolder:
             EntryEmptyState(isEmptyFolder: true) { isPickingEmptyFolder = true }
                 .accessibilityIdentifier("clove.grid.empty")
-        } else {
+                .reportHeaderControlFrame("clove.grid.empty")
+        case .allReviewed(let summary):
+            GridAllReviewedView(
+                summary: summary,
+                onMoveRejects: {
+                    presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
+                },
+                onShowAll: {
+                    browsing.setFilter(.all)
+                })
+        case .filteredEmpty(let isOpening, let canClearFilters):
             ContentUnavailableView {
                 Label(
                     AppLocalization.string("No photos", language: language),
@@ -1057,21 +1096,22 @@ struct GridScreen: View {
             } description: {
                 Text(
                     AppLocalization.string(
-                        browsing.isFolderOpening
-                            ? "Reading photos…" : "No photos match this filter.",
+                        isOpening ? "Reading photos…" : "No photos match this filter.",
                         language: language))
             } actions: {
-                if !browsing.isFolderOpening && hasFilter {
+                if canClearFilters {
                     Button(AppLocalization.string("Clear filters", language: language)) {
                         browsing.clearAllFilters()
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color.clove.accent)
                     .accessibilityIdentifier("clove.grid.empty.clearFilters")
+                    .reportHeaderControlFrame("clove.grid.empty.clearFilters")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityIdentifier("clove.grid.empty")
+            .reportHeaderControlFrame("clove.grid.empty")
         }
     }
 

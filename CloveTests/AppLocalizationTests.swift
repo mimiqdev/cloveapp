@@ -886,4 +886,26 @@ struct AppLocalizationTests {
                 previousMarks: PhotoMarks(label: ColourLabel(colour: .blue)))
                 == .clearedLabel)
     }
+
+    @Test func gridAllReviewedLocalizesAcrossLanguagesAndCounts() {
+        #expect(
+            AppLocalization.string("Show all photos", language: .english) == "Show all photos")
+        #expect(
+            AppLocalization.string("Show all photos", language: .simplifiedChinese) == "显示全部照片")
+        #expect(
+            AppLocalization.string("Show all photos", language: .traditionalChinese) == "顯示全部相片")
+
+        let summary = GridReviewSummary(
+            totalCount: 24, highRatedCount: 12, ratedCount: 14, labelledOnlyCount: 0,
+            rejectedCount: 5, moveRejectsEnabled: true)
+        #expect(summary.localizedTitle(language: .english) == "All 24 photos reviewed")
+        #expect(summary.localizedTitle(language: .simplifiedChinese) == "全部 24 张照片已审阅")
+        #expect(summary.localizedTitle(language: .traditionalChinese) == "全部 24 張相片已審閱")
+        #expect(summary.localizedSubtitle(language: .english) == "12 ★4+ · 5 rejected")
+        #expect(summary.localizedSubtitle(language: .simplifiedChinese) == "12 张 ★4+ · 5 张已淘汰")
+        #expect(summary.localizedSubtitle(language: .traditionalChinese) == "12 張 ★4+ · 5 張已淘汰")
+        #expect(summary.localizedMoveRejectsTitle(language: .english) == "Move 5 rejects")
+        #expect(summary.localizedMoveRejectsTitle(language: .simplifiedChinese) == "整理 5 张淘汰片")
+        #expect(summary.localizedMoveRejectsTitle(language: .traditionalChinese) == "整理 5 張淘汰片")
+    }
 }

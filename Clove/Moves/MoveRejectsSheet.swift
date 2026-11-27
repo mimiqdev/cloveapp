@@ -126,6 +126,7 @@ struct MoveRejectsSheet: View {
                     Text(title)
                         .font(.title3.bold())
                         .accessibilityIdentifier("clove.moves.confirmation")
+                        .reportHeaderControlFrame("clove.moves.confirmation")
                     Text(bodyText)
                         .font(.footnote)
                         .foregroundStyle(Color.clove.text.secondary)
