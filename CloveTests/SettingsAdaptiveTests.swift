@@ -462,6 +462,178 @@ struct SettingsAdaptiveTests {
         }
     }
 
+    @Test func wideSplitDetailCardsKeepRoundedRightCornersWithoutSeparatorBleed() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        struct Case {
+            let size: CGSize
+            let trailingSafeArea: CGFloat
+            let theme: CloveTheme
+            let label: String
+        }
+
+        let cases: [Case] = [
+            Case(
+                size: CGSize(width: 1024, height: 768), trailingSafeArea: 0, theme: .light,
+                label: "1024x768 light"),
+            Case(
+                size: CGSize(width: 1366, height: 1024), trailingSafeArea: 0, theme: .light,
+                label: "1366x1024 light"),
+            Case(
+                size: CGSize(width: 1024, height: 768), trailingSafeArea: 59, theme: .light,
+                label: "1024x768 trailingSafeArea=59 light"),
+            Case(
+                size: CGSize(width: 932, height: 430), trailingSafeArea: 59, theme: .light,
+                label: "932x430 trailingSafeArea=59 light"),
+            Case(
+                size: CGSize(width: 1036, height: 768), trailingSafeArea: 59, theme: .light,
+                label: "1036x768 (detailPane=680) trailingSafeArea=59 light"),
+            Case(
+                size: CGSize(width: 1037, height: 768), trailingSafeArea: 59, theme: .light,
+                label: "1037x768 (detailPane=681) trailingSafeArea=59 light"),
+            Case(
+                size: CGSize(width: 1366, height: 1024), trailingSafeArea: 59, theme: .dark,
+                label: "1366x1024 trailingSafeArea=59 dark"),
+        ]
+
+        for testCase in cases {
+            let navigation = SettingsNavigationState()
+            let framesBox = TestSettingsFramesBox()
+            let colorScheme: ColorScheme = testCase.theme.appearance == .dark ? .dark : .light
+            let host = UIHostingController(
+                rootView: SettingsScreen(
+                    navigation: navigation, availableWidth: testCase.size.width
+                )
+                .environment(SettingsStore.sample)
+                .environment(\.cloveTheme, testCase.theme)
+                .environment(\.colorScheme, colorScheme)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    framesBox.frames = frames
+                })
+            host.traitOverrides.horizontalSizeClass = .regular
+            host.overrideUserInterfaceStyle =
+                testCase.theme.appearance == .dark ? .dark : .light
+            if testCase.trailingSafeArea > 0 {
+                host.additionalSafeAreaInsets = UIEdgeInsets(
+                    top: 0, left: 0, bottom: 0, right: testCase.trailingSafeArea)
+            }
+
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(origin: .zero, size: testCase.size)
+            window.overrideUserInterfaceStyle =
+                testCase.theme.appearance == .dark ? .dark : .light
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+            }
+
+            try await waitForLayout(
+                "wide split layout did not stabilize for \(testCase.label)"
+            ) {
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                let collections = self.findSubviews(ofType: UICollectionView.self, in: window)
+                guard collections.count == 2 else { return false }
+                let sorted = collections.sorted {
+                    $0.convert($0.bounds, to: window).minX
+                        < $1.convert($1.bounds, to: window).minX
+                }
+                let detail = sorted[1]
+                return framesBox.frames["clove.settings.wideDivider"] != nil
+                    && framesBox.frames["clove.settings.done"] != nil
+                    && detail.numberOfSections >= 1
+                    && detail.numberOfItems(inSection: 0) == 3
+                    && detail.cellForItem(at: IndexPath(item: 0, section: 0)) != nil
+                    && detail.cellForItem(at: IndexPath(item: 2, section: 0)) != nil
+            }
+
+            let divider = try #require(framesBox.frames["clove.settings.wideDivider"])
+            let doneFrame = try #require(framesBox.frames["clove.settings.done"])
+            let trailingSafeMaxX = testCase.size.width - host.view.safeAreaInsets.right
+            #expect(
+                trailingSafeMaxX - doneFrame.maxX >= 19.5,
+                "\(testCase.label): Done button encroaches on trailing safe area")
+
+            let collections = findSubviews(ofType: UICollectionView.self, in: window)
+                .sorted {
+                    $0.convert($0.bounds, to: window).minX
+                        < $1.convert($1.bounds, to: window).minX
+                }
+            let detailCollection = try #require(collections.last)
+            for cell in detailCollection.visibleCells {
+                let cellFrame = cell.convert(cell.bounds, to: window)
+                #expect(
+                    cellFrame.minX - divider.maxX >= 19.5,
+                    "\(testCase.label): detail cell minX gap < 19.5")
+                #expect(
+                    trailingSafeMaxX - cellFrame.maxX >= 19.5,
+                    "\(testCase.label): detail cell maxX (\(cellFrame.maxX)) inside trailing safe area (\(trailingSafeMaxX))"
+                )
+                #expect(
+                    cellFrame.width <= 640.5,
+                    "\(testCase.label): detail cell width (\(cellFrame.width)) > 640.5")
+            }
+
+            let firstCell = try #require(
+                detailCollection.cellForItem(at: IndexPath(item: 0, section: 0)))
+            let lastCell = try #require(
+                detailCollection.cellForItem(at: IndexPath(item: 2, section: 0)))
+            let firstFrame = firstCell.convert(firstCell.bounds, to: window)
+            let lastFrame = lastCell.convert(lastCell.bounds, to: window)
+
+            let expectedSheet = try renderedRGBA(testCase.theme.tokens.sheet.color)
+            let expectedCard = try renderedRGBA(testCase.theme.tokens.card.color)
+            let snapshot = windowPixels(from: window)
+
+            // Sanity: card body near the right edge is filled with `card` color.
+            let bodyX = Int(firstFrame.maxX.rounded()) - 4
+            let bodyY = Int(firstFrame.midY.rounded())
+            assertRGBAClose(
+                snapshot.pixel(x: bodyX, y: bodyY), expectedCard,
+                "\(testCase.label): card body near right edge")
+
+            // Top-right and bottom-right outer corner pixels must show `surface/sheet`
+            // (rounded corners intact, not flat-clipped `card`).
+            let topRightX = Int(firstFrame.maxX.rounded()) - 1
+            let topRightY = Int(firstFrame.minY.rounded()) + 1
+            assertRGBAClose(
+                snapshot.pixel(x: topRightX, y: topRightY), expectedSheet,
+                "\(testCase.label): top-right corner should be rounded (sheet), not flat-clipped")
+
+            let bottomRightX = Int(lastFrame.maxX.rounded()) - 1
+            let bottomRightY = Int(lastFrame.maxY.rounded()) - 2
+            assertRGBAClose(
+                snapshot.pixel(x: bottomRightX, y: bottomRightY), expectedSheet,
+                "\(testCase.label): bottom-right corner should be rounded (sheet), not flat-clipped"
+            )
+
+            // No row separator pixels may bleed past `cellFrame.maxX` into the trailing gutter.
+            let minY = max(0, Int(firstFrame.minY.rounded()))
+            let maxY = min(Int(testCase.size.height) - 1, Int(lastFrame.maxY.rounded()))
+            for offset in [8, 20] {
+                let sampleX = Int(firstFrame.maxX.rounded()) + offset
+                guard sampleX < Int(testCase.size.width) else { continue }
+                var mismatchedY: Int?
+                var mismatchedPixel: TileRGBA?
+                for y in minY...maxY {
+                    let pixel = snapshot.pixel(x: sampleX, y: y)
+                    if !rgbaClose(pixel, expectedSheet, tolerance: 6) {
+                        mismatchedY = y
+                        mismatchedPixel = pixel
+                        break
+                    }
+                }
+                #expect(
+                    mismatchedY == nil,
+                    "\(testCase.label): separator/card bleed at x=\(sampleX) (maxX+\(offset)), y=\(mismatchedY ?? -1): actual \(String(describing: mismatchedPixel)) != expected sheet \(expectedSheet)"
+                )
+            }
+        }
+    }
+
     private func verifySidebarTitlesSingleLineAndUntruncated(
         frames: [String: CGRect],
         selected: SettingsCategory,

@@ -31,6 +31,7 @@ struct SettingsScreen: View {
     /// stay visually symmetric without clipping scroll indicators.
     private static let splitDividerInset: CGFloat = 20
     private static let detailMaxCardWidth: CGFloat = 640
+    private static let detailMaxListWidth: CGFloat = detailMaxCardWidth + splitDividerInset * 2
     private static let dividerWidth: CGFloat = 1
 
     private var effectiveWidth: CGFloat {
@@ -50,11 +51,12 @@ struct SettingsScreen: View {
         max(0, effectiveWidth - sidebarWidth - Self.dividerWidth)
     }
 
-    private var detailTrailingInset: CGFloat {
-        guard detailPaneWidth > Self.splitDividerInset * 2 + Self.detailMaxCardWidth else {
-            return Self.splitDividerInset
-        }
-        return detailPaneWidth - Self.splitDividerInset - Self.detailMaxCardWidth
+    /// When the detail list is capped below the pane width, it detaches from the trailing window
+    /// edge and UIKit's `.insetGrouped` drops from its regular 20 pt margin to 8 pt; supply
+    /// `splitDividerInset` explicitly there. When it fills the pane to the trailing edge, leave
+    /// `.trailing` automatic so UIKit preserves both the 20 pt margin and any trailing safe area.
+    private var detailTrailingContentMargin: CGFloat? {
+        detailPaneWidth > Self.detailMaxListWidth ? Self.splitDividerInset : nil
     }
 
     var body: some View {
@@ -245,12 +247,15 @@ struct SettingsScreen: View {
                 .id(navigation.selectedCategory)
                 .listStyle(.insetGrouped)
                 .contentMargins(.leading, Self.splitDividerInset, for: .scrollContent)
-                .contentMargins(.trailing, detailTrailingInset, for: .scrollContent)
+                .contentMargins(.trailing, detailTrailingContentMargin, for: .scrollContent)
                 .scrollContentBackground(.hidden)
                 .background(Color.clove.surface.sheet)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(
+                    maxWidth: Self.detailMaxListWidth,
+                    maxHeight: .infinity,
+                    alignment: .leading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .background(Color.clove.surface.sheet)
     }
