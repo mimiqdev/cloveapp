@@ -87,8 +87,8 @@ public struct MarkingInputRules: Hashable, Sendable {
     /// that label, or clears it when it is already applied. `↓` rejects, which sets −1. `←` and
     /// `→` navigate. `⌘Z` is reported as undo for C5. A rating key behaves like the rating bar
     /// rather than the bar's toggle: pressing the level already applied changes nothing.
-    /// `allowsMarking == false` (unexpanded collapsed group stack in Timeline) disables all
-    /// marking keys while preserving navigation, undo, and group focus keys.
+    /// `allowsMarking == false` disables all marking keys while preserving navigation, undo,
+    /// and group focus keys.
     public func result(
         for key: MarkingKey, marks: PhotoMarks, allowsMarking: Bool = true
     ) -> MarkingResult {

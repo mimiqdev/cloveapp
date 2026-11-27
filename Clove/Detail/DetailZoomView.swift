@@ -170,10 +170,8 @@ struct DetailZoomView: UIViewRepresentable {
     /// Cancels pending auto-advance when navigation or marking starts.
     let onSwipeBegin: () -> Void
 
-    /// Whether marking swipes apply marks; when `false`, vertical drags notify
-    /// `onReadOnlyMarkingDrag` without opening the rating ladder.
+    /// Whether marking swipes apply marks.
     var allowsMarking = true
-    var onReadOnlyMarkingDrag: (() -> Void)?
 
     let hasPrevious: Bool
     let hasNext: Bool
@@ -210,7 +208,6 @@ struct DetailZoomView: UIViewRepresentable {
         view.onTwoFingerMarkingSwipe = onTwoFingerMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
         view.allowsMarking = allowsMarking
-        view.onReadOnlyMarkingDrag = onReadOnlyMarkingDrag
         view.hasPrevious = hasPrevious
         view.hasNext = hasNext
         view.feedback = feedback
@@ -236,7 +233,6 @@ struct DetailZoomView: UIViewRepresentable {
         view.onTwoFingerMarkingSwipe = onTwoFingerMarkingSwipe
         view.onSwipeBegin = onSwipeBegin
         view.allowsMarking = allowsMarking
-        view.onReadOnlyMarkingDrag = onReadOnlyMarkingDrag
         view.hasPrevious = hasPrevious
         view.hasNext = hasNext
         view.feedback = feedback
@@ -351,7 +347,6 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
     var onTwoFingerMarkingSwipe: ((Rating) -> Void)?
     var onSwipeBegin: (() -> Void)?
     var allowsMarking = true
-    var onReadOnlyMarkingDrag: (() -> Void)?
     var hasPrevious = false
     var hasNext = false
 
@@ -939,12 +934,7 @@ final class DetailZoomContainerView: UIView, UIScrollViewDelegate, UIGestureReco
         travel: Double,
         commit: (Rating) -> Void
     ) {
-        guard allowsMarking else {
-            if state == .began {
-                onReadOnlyMarkingDrag?()
-            }
-            return
-        }
+        guard allowsMarking else { return }
         switch state {
         case .began:
             beginMarkingSwipe(at: startLocation)

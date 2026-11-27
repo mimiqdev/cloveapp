@@ -4117,6 +4117,63 @@ final class CloveFlowTests: XCTestCase {
     }
 
     @MainActor
+    func testSwipeRatingCollapsedGroupRepresentativeEntersGroupFocus() {
+        let app = launchSample(["CLOVE_TEST_LIBRARY_GROUP_STATE": "unmarked"])
+        defer { app.terminate() }
+        openLibrary(app)
+
+        element(app, "clove.grid.photo.mmq02695").tap()
+        let fileName = element(app, "clove.detail.fileName")
+        XCTAssertTrue(waitForLabel("MMQ02695.ARW", fileName))
+
+        let stack = element(app, "clove.detail.filmstrip.group.burst-2696")
+        XCTAssertTrue(wait(NSPredicate(format: "isHittable == true"), stack))
+        stack.tap()
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+
+        let preview = element(app, "clove.detail.preview")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Loaded"), preview))
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.expandedGroup").exists)
+        let expandPill = element(app, "clove.detail.expandGroup")
+        XCTAssertTrue(expandPill.waitForExistence(timeout: 5))
+        let zoomLabel = element(app, "clove.detail.zoom")
+        XCTAssertFalse(zoomLabel.label.hasPrefix("Group"))
+
+        // Swipe-rating the collapsed representative unfolds directly into Group Focus, applies the
+        // mark, updates the header/filmstrip, surfaces Reject N unmarked, and advances in-group.
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -130)))
+
+        let expandedStrip = element(app, "clove.detail.filmstrip.expandedGroup")
+        XCTAssertTrue(expandedStrip.waitForExistence(timeout: 5))
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), expandPill))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "label BEGINSWITH %@", "Group · "), zoomLabel),
+            "Header did not switch to Group Focus: \(zoomLabel.label)")
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02696").exists)
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02697").exists)
+        XCTAssertTrue(element(app, "clove.detail.filmstrip.mmq02698").exists)
+        XCTAssertFalse(element(app, "clove.detail.filmstrip.mmq02695").exists)
+
+        let rejectPill = element(app, "clove.detail.rejectUnmarked")
+        XCTAssertTrue(rejectPill.waitForExistence(timeout: 5))
+        XCTAssertEqual(rejectPill.label, "Reject 2 unmarked")
+        XCTAssertTrue(waitForLabel("MMQ02697.ARW", fileName))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "label BEGINSWITH %@", "Group · 2 / 3"), zoomLabel))
+
+        // Undo reverts the mark on MMQ02696 and stays in Group Focus without collapsing.
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(waitForLabel("MMQ02696.ARW", fileName))
+        XCTAssertTrue(expandedStrip.exists)
+        XCTAssertTrue(wait(NSPredicate(format: "exists == false"), rejectPill))
+        XCTAssertTrue(
+            wait(NSPredicate(format: "label BEGINSWITH %@", "Group · 1 / 3"), zoomLabel))
+        let capsule = element(app, "clove.detail.capsule")
+        XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
+    }
+
+    @MainActor
     func launchSample(_ environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["CLOVE_TEST_LIBRARY": "1"].merging(environment) { _, new in new }

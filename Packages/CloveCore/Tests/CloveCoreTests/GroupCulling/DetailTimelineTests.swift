@@ -424,4 +424,50 @@ struct DetailTimelineTests {
         #expect(positiveLabelPlan.target == .groupUndecidedPhoto(g1.id))
         #expect(!positiveLabelPlan.exitsGroupFocus)
     }
+
+    @Test func markingCollapsedRepresentativePlansAgainstExpandedGroupAndUnlocksRejectUnmarked()
+        throws
+    {
+        let four = try MarkingFixtures.stars(4)
+        let rep = photo("rep", time: capture(seconds(0)))
+        let g1 = photo("g1", time: capture(seconds(1)))
+        let g2 = photo("g2", time: capture(seconds(2)))
+        let sNext = photo("sNext", time: capture(seconds(3)))
+        let burst = BrowsingGroup(id: GroupID(rawValue: "burst"), members: [rep.id, g1.id, g2.id])
+        let timeline = DetailTimeline(photos: [rep, g1, g2, sNext], groups: [burst])
+
+        for destination in [AutoAdvanceDestination.nextPhoto, .nextUnmarkedPhoto] {
+            let rules = MarkingInputRules(
+                settings: AppSettings(autoAdvance: AutoAdvance(destination: destination)))
+
+            // Unexpanded Timeline slot returns .stay for group members; expanding first resolves to g1.
+            let collapsedPlan = timeline.autoAdvancePlan(
+                after: .rating, change: MarkChange(rating: four), from: rep.id,
+                expandedGroup: nil, rules: rules)
+            #expect(collapsedPlan.target == .stay)
+
+            let expandedPlan = timeline.autoAdvancePlan(
+                after: .rating, change: MarkChange(rating: four), from: rep.id,
+                expandedGroup: burst.id, rules: rules)
+            #expect(expandedPlan.target == .groupUndecidedPhoto(g1.id))
+            #expect(!expandedPlan.exitsGroupFocus)
+        }
+
+        let stayRules = MarkingInputRules(
+            settings: AppSettings(autoAdvance: AutoAdvance(destination: .stay)))
+        let stayPlan = timeline.autoAdvancePlan(
+            after: .rating, change: MarkChange(rating: four), from: rep.id,
+            expandedGroup: burst.id, rules: stayRules)
+        #expect(stayPlan.target == .stay)
+        #expect(!stayPlan.exitsGroupFocus)
+
+        // Applying a kept mark on rep makes "Reject N unmarked" available for the remaining members.
+        let markedRep = photo("rep", time: capture(seconds(0)), marks: PhotoMarks(rating: four))
+        let expandedAfterMark = DetailTimeline(photos: [markedRep, g1, g2, sNext], groups: [burst])
+        let activeGroup = try #require(expandedAfterMark.activeGroup(with: burst.id))
+        let finishing = GroupFinishingPlan(
+            group: activeGroup, action: .rejectUnmarked, currentPhoto: markedRep.id)
+        #expect(finishing.availability == .available)
+        #expect(finishing.rejects.map(\.photo) == [g1.id, g2.id])
+    }
 }

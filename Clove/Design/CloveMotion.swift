@@ -115,3 +115,7 @@ extension ButtonStyle where Self == CloveGlassPressButtonStyle {
         CloveGlassPressButtonStyle()
     }
 }
+
+extension EnvironmentValues {
+    @Entry var cloveReduceMotionOverride: Bool? = nil
+}

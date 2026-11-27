@@ -30,8 +30,13 @@ struct DetailScreen: View {
     /// this screen draws (PRD Gesture-related settings).
     @Environment(SettingsStore.self) private var store
     @Environment(\.appLanguage) private var language
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.cloveReduceMotionOverride) private var reduceMotionOverride
     @Environment(\.isDuoCover) private var isDuoCover
+
+    private var reduceMotion: Bool {
+        reduceMotionOverride ?? systemReduceMotion
+    }
 
     @State private var widePresentation: DetailPresentation
 
