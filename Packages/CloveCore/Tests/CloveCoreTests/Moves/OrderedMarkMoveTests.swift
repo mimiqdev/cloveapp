@@ -34,31 +34,6 @@ struct OrderedMarkMoveTests {
         #expect(try XMPCodec().read(bytes).rating == .rated(four))
     }
 
-    @Test func moveUndoReportsKeptPhotoChangedSinceAndPreservesThreeStars() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let kept = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "", stem: "kept", formats: [.raw])
-        try writeMoveSet(kept, in: fixture.folder)
-        await fixture.queue.apply(.rating(.unrated), to: kept)
-        let emptyPlan = try await fixture.plan([])
-        let run = try await fixture.move(emptyPlan)
-        let three = try #require(Rating(rawValue: 3))
-        await fixture.queue.apply(.rating(three), to: kept)
-        let entry = RejectMoveUndoEntry(
-            batch: run.id,
-            keptPhotos: [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())],
-            photoToReturnTo: kept.id)
-        let result = try await fixture.mover.undo(
-            entry, currentMarks: { _ in PhotoMarks(rating: three) })
-        #expect(result.changedSince == [kept.id])
-        #expect(result.restoredCount == 0)
-        let bytes = try Data(
-            contentsOf: kept.photoSet.primary.url.deletingPathExtension().appendingPathExtension(
-                "xmp"))
-        #expect(try XMPCodec().read(bytes).rating == .rated(three))
-    }
-
     @Test func moveConfirmedDuringRejectWriteCarriesNewSidecarAndUndoReturnsIt() async throws {
         let fixture = try MoveFixture()
         defer { fixture.cleanup() }
@@ -89,8 +64,7 @@ struct OrderedMarkMoveTests {
         #expect(!fixture.folder.exists("fresh.xmp"))
         #expect(fixture.folder.exists("_Rejected/fresh.xmp"))
         let undo = try await fixture.mover.undo(
-            RejectMoveUndoEntry(batch: result.id, photoToReturnTo: set.id),
-            currentMarks: { _ in nil })
+            RejectMoveUndoEntry(batch: result.id, photoToReturnTo: set.id))
         #expect(undo.restoredCount == 1)
         #expect(fixture.folder.exists("fresh.xmp"))
         #expect(!fixture.folder.exists("_Rejected/fresh.xmp"))

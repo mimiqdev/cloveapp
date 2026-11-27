@@ -2,8 +2,8 @@ import CloveCore
 import Foundation
 import Observation
 
-/// The sheet previews counts and stages keeps. Confirming submits both operations synchronously;
-/// the browsing model owns their ordered execution and replans against the files at run time.
+/// The sheet previews counts. Confirming submits the move; the browsing model owns its
+/// ordered execution and replans against the files at run time.
 @MainActor
 @Observable
 final class MoveRejectsFlow: Identifiable {
@@ -28,7 +28,6 @@ final class MoveRejectsFlow: Identifiable {
         }
         set { storedStage = newValue }
     }
-    private(set) var keepSelection: RejectMoveKeepSelection?
     private var confirmationFolder: FolderIdentity?
     private var confirmationGeneration: Int?
 
@@ -53,7 +52,6 @@ final class MoveRejectsFlow: Identifiable {
             }
             confirmationFolder = folder
             confirmationGeneration = generation
-            keepSelection = RejectMoveKeepSelection(plan: plan)
             stage = .confirming(plan)
         } catch let refusal as RejectMoveRefusal {
             stage = Self.stage(for: refusal)
@@ -62,20 +60,16 @@ final class MoveRejectsFlow: Identifiable {
         }
     }
 
-    func toggleKeep(_ identity: PhotoIdentity) { keepSelection?.toggle(identity) }
-
     func move(_ plan: RejectMovePlan, completion: @escaping () -> Void) {
-        guard case .confirming(let confirmed) = stage, confirmed == plan,
-            let selection = keepSelection
-        else { return }
+        guard case .confirming(let confirmed) = stage, confirmed == plan else { return }
         guard confirmationFolder == browsing.state.folder,
             confirmationGeneration == browsing.openGeneration
         else {
             stage = .failed("The folder changed before the move started.")
             return
         }
-        stage = .moving(finished: 0, total: selection.movingPlan.photoCount)
-        browsing.runRejectMove(plan, kept: selection.orderedKeptIdentities) { [weak self] result in
+        stage = .moving(finished: 0, total: plan.photoCount)
+        browsing.runRejectMove(plan) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:

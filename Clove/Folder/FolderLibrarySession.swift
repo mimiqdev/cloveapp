@@ -442,18 +442,15 @@ final class FolderLibrarySession: FolderLibrary {
         return result
     }
 
-    func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
-        restoring edits: [DesiredMarkEdit]
-    ) async throws -> RejectMoveUndoResult {
+    func undoRejectMove(_ entry: RejectMoveUndoEntry) async throws -> RejectMoveUndoResult {
         guard let mover = rejectMover, let session = openSession else {
             throw FolderSessionError.ended
         }
         let result = try await session.withAdmittedWork {
-            try await mover.undo(entry, currentMarks: { currentMarks[$0] })
+            try await mover.undo(entry)
         }
         var restoredSets: [ScannedPhotoSet] = []
-        for restored in result.restored where !restored.keptInConfirmation {
+        for restored in result.restored {
             store.insert([.photo(restored.set)])
             restoredSets.append(restored.set)
             if let photo = movedPhotoRecords.removeValue(forKey: restored.identity) {

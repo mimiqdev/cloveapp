@@ -203,10 +203,7 @@ protocol FolderLibrary: AnyObject {
     /// cannot move answers with a stream that finishes at once.
     func rejectMoveProgress() async -> AsyncStream<RejectMoveProgress>
 
-    func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
-        restoring edits: [DesiredMarkEdit]
-    ) async throws -> RejectMoveUndoResult
+    func undoRejectMove(_ entry: RejectMoveUndoEntry) async throws -> RejectMoveUndoResult
 
     /// Reads marks again after a failed write. An unreadable sidecar throws without changing marks.
     func rereadMarks(for photos: [PhotoIdentity]) async throws
@@ -414,10 +411,7 @@ extension FolderLibrary {
         throw PhotosSaveError.folderUnavailable
     }
 
-    func undoRejectMove(
-        _ entry: RejectMoveUndoEntry, currentMarks: [PhotoIdentity: PhotoMarks],
-        restoring edits: [DesiredMarkEdit]
-    ) async throws -> RejectMoveUndoResult {
+    func undoRejectMove(_ entry: RejectMoveUndoEntry) async throws -> RejectMoveUndoResult {
         throw RejectMoveUndoRefusal.unknownBatch(entry.batch)
     }
 

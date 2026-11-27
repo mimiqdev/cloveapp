@@ -81,7 +81,7 @@ struct FolderWriteFailureTests {
         model.apply(.rating(.rejected), to: photo)
         await model.drainActions()
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(plan, kept: []) { _ in }
+        model.runRejectMove(plan) { _ in }
         await model.drainActions()
         let completed = try #require(model.lastRejectMove)
         #expect(model.photos.isEmpty)

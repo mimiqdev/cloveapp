@@ -3,12 +3,11 @@ import Testing
 
 @testable import CloveCore
 
-/// Undoing a completed move: every set back in place, Reject stored, kept photos re-rejected.
+/// Undoing a completed move: every set back in place with Reject stored.
 ///
 /// PRD P0-10's Undo rule moves a completed move's files back to their original paths and never
-/// overwrites, and PRD Move rejects' "Keeping before the move" adds the photos the confirmation
-/// kept. Each test checks the files' actual bytes, not only the reported outcome, so a passing
-/// test proves nothing was lost, copied or overwritten.
+/// overwrites. Each test checks the files' actual bytes, not only the reported outcome, so a
+/// passing test proves nothing was lost, copied or overwritten.
 @Suite("Reject move undo", .timeLimit(.minutes(1)))
 struct RejectMoveUndoTests {
     /// Every moved set comes back byte for byte, across subfolders and companion kinds.
@@ -44,10 +43,9 @@ struct RejectMoveUndoTests {
         }
 
         let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: sets[0].id), currentMarks: { _ in PhotoMarks() })
+            undoStep(for: moveResult, returningTo: sets[0].id))
 
         #expect(result.restoredCount == sets.count)
-        #expect(result.keptCount == 0)
         #expect(result.conflictCount == 0)
         #expect(result.failedCount == 0)
         #expect(result.splitCount == 0)
@@ -64,61 +62,12 @@ struct RejectMoveUndoTests {
         for set in sets {
             #expect(try await storesReject(set, in: fixture))
             let restored = try #require(result.restored.first { $0.identity == set.id })
-            #expect(restored.keptInConfirmation == false)
             #expect(restored.isRejectStored)
             // The undo moves exactly what the move moved, including a sidecar C4 created
             // after the scan.
             let movedFiles = moveResult.moved.first { $0.identity == set.id }?.files.count
             #expect(restored.files.count == movedFiles)
             #expect(restored.set == set)
-        }
-    }
-
-    /// A kept photo never moved, so undo restores only the Reject the move cleared.
-    @Test func restoresRejectOnThePhotosTheConfirmationKept() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let moved = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
-            formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
-        // A standalone JPEG keeps its rating and label in Clove, so the test can read them back
-        // without a sidecar (G1 decision 6).
-        let kept = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002", formats: [.jpeg])
-        for set in [moved, kept] {
-            try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.rating(.rejected), to: set)
-        }
-        await fixture.queue.apply(
-            MarkChange(rating: Rating(rawValue: 3), label: ColourLabel(colour: .red)), to: kept)
-        // PRD Move rejects: a keep is applied on Move, which clears only the kept photo's Reject.
-        await fixture.queue.apply(.rating(.unrated), to: kept)
-        let keptBytes = try originalContents(of: [kept], in: fixture.folder)
-        let moveResult = try await fixture.move(try await fixture.plan([moved]))
-        #expect(moveResult.movedCount == 1)
-        // The run holds the keeps, so the step restores them even when the entry carries none.
-        await fixture.mover.recordKeptPhotos(
-            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: moveResult.id)
-
-        let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: kept.id), currentMarks: { _ in PhotoMarks() })
-
-        #expect(result.restoredCount == 2)
-        #expect(result.keptCount == 1)
-        #expect(result.restoredIdentities == [moved.id, kept.id])
-        #expect(try await storesReject(moved, in: fixture))
-        #expect(try await storesReject(kept, in: fixture))
-        // Undo re-rejects the kept photo, so its stored rating is −1 again; the stars the
-        // reject replaced are gone, as the owner decided (decision record `reject-as-rating.md`).
-        let keptMarks = try await fixture.queue.storedMarks(for: kept.id)
-        #expect(keptMarks?.rating == .rejected)
-        #expect(keptMarks?.label == ColourLabel(colour: .red))
-        let restored = try #require(result.kept.first)
-        #expect(restored.identity == kept.id)
-        #expect(restored.files.isEmpty)
-        #expect(restored.isRejectStored)
-        for (path, bytes) in keptBytes {
-            #expect(fixture.folder.contents(of: path) == bytes)
         }
     }
 
@@ -147,43 +96,12 @@ struct RejectMoveUndoTests {
         #expect(fixture.folder.exists("_Rejected/\(sidecarPath)"))
 
         let undoResult = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: set.id), currentMarks: { _ in PhotoMarks() })
+            undoStep(for: moveResult, returningTo: set.id))
         #expect(undoResult.restoredCount == 1)
         #expect(fixture.folder.exists(sidecarPath))
         #expect(
             try sidecarRating(at: fixture.folder.url.appendingPathComponent(sidecarPath))
                 == .rated(.rejected))
-    }
-
-    /// A kept RAW set is written rating 0 to its sidecar on Move, and undo writes −1 again.
-    @Test func keepingARawSetWritesRatingZeroAndUndoRejectsAgain() async throws {
-        let fixture = try MoveFixture()
-        defer { fixture.cleanup() }
-        let moved = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0001",
-            formats: [.raw, .jpeg], sidecarName: "IMG_0001.xmp")
-        let kept = try makeMoveSet(
-            root: fixture.folder.url, relativePath: "DCIM", stem: "IMG_0002", formats: [.raw],
-            sidecarName: "IMG_0002.xmp")
-        for set in [moved, kept] {
-            try writeMoveSet(set, in: fixture.folder)
-            await fixture.queue.apply(.rating(.rejected), to: set)
-        }
-        let keptSidecar = try #require(kept.photoSet.sidecarURL)
-        #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
-
-        // The confirmation's keep is the rating-0 write the move flow applies (PRD Move rejects).
-        await fixture.queue.apply(.rating(.unrated), to: kept)
-        #expect(try sidecarRating(at: keptSidecar) == .rated(.unrated))
-
-        let moveResult = try await fixture.move(try await fixture.plan([moved]))
-        await fixture.mover.recordKeptPhotos(
-            [RejectMoveKeptPhoto(set: kept, marksAfter: PhotoMarks())], for: moveResult.id)
-        let result = try await fixture.mover.undo(
-            undoStep(for: moveResult, returningTo: kept.id), currentMarks: { _ in PhotoMarks() })
-
-        #expect(result.restoredCount == 2)
-        #expect(try sidecarRating(at: keptSidecar) == .rated(.rejected))
     }
 
     /// The run's handle stops working after one undo, whatever handle the caller holds.
@@ -198,11 +116,11 @@ struct RejectMoveUndoTests {
         let moveResult = try await fixture.move(try await fixture.plan([set]))
         let entry = undoStep(for: moveResult, returningTo: set.id)
 
-        let result = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+        let result = try await fixture.mover.undo(entry)
         #expect(result.restoredCount == 1)
 
         await #expect(throws: RejectMoveUndoRefusal.alreadyUndone(entry.batch)) {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(entry)
         }
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
         #expect(try await storesReject(set, in: fixture))
@@ -219,7 +137,7 @@ struct RejectMoveUndoTests {
             batch: RejectMoveBatchID(), photoToReturnTo: set.id)
 
         await #expect(throws: RejectMoveUndoRefusal.unknownBatch(entry.batch)) {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(entry)
         }
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
     }
@@ -238,13 +156,13 @@ struct RejectMoveUndoTests {
         fixture.fileSystem.reportsReadOnlyVolume = true
 
         await #expect(throws: RejectMoveUndoRefusal.self) {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(entry)
         }
         #expect(fixture.fileSystem.count(of: .move) == moves)
         #expect(fixture.folder.exists("_Rejected/DCIM/IMG_0001.ARW"))
 
         fixture.fileSystem.reportsReadOnlyVolume = false
-        let result = try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+        let result = try await fixture.mover.undo(entry)
         #expect(result.restoredCount == 1)
         #expect(fixture.folder.exists("DCIM/IMG_0001.ARW"))
     }
@@ -268,7 +186,7 @@ struct RejectMoveUndoTests {
         let entry = undoStep(for: moveResult, returningTo: sets[0].id)
         let stream = await fixture.mover.undoProgressUpdates()
         let undoTask = Task {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(entry)
         }
 
         var events: [RejectMoveUndoProgress] = []
@@ -324,10 +242,10 @@ struct RejectMoveUndoTests {
         let firstEntry = undoStep(for: firstRun, returningTo: sets[0].id)
         let secondEntry = undoStep(for: secondRun, returningTo: sets[1].id)
         let first = Task {
-            try await fixture.mover.undo(firstEntry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(firstEntry)
         }
         let second = Task {
-            try await fixture.mover.undo(secondEntry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(secondEntry)
         }
 
         var events: [RejectMoveUndoProgress] = []
@@ -375,7 +293,7 @@ struct RejectMoveUndoTests {
         let stream = await fixture.mover.undoProgressUpdates()
 
         await #expect(throws: RejectMoveUndoRefusal.unknownBatch(entry.batch)) {
-            try await fixture.mover.undo(entry, currentMarks: { _ in PhotoMarks() })
+            try await fixture.mover.undo(entry)
         }
 
         var events: [RejectMoveUndoProgress] = []
@@ -392,13 +310,10 @@ struct RejectMoveUndoTests {
 
 /// The undo step U8's history would record for a run (PRD P0-10's Undo rule).
 private func undoStep(
-    for run: RejectMoveResult, keeping kept: [ScannedPhotoSet] = [],
+    for run: RejectMoveResult,
     returningTo photo: PhotoIdentity
 ) -> RejectMoveUndoEntry {
-    RejectMoveUndoEntry(
-        batch: run.id,
-        keptPhotos: kept.map { RejectMoveKeptPhoto(set: $0, marksAfter: PhotoMarks()) },
-        photoToReturnTo: photo)
+    RejectMoveUndoEntry(batch: run.id, photoToReturnTo: photo)
 }
 
 /// One sidecar's rating, read the way a folder open would read it.

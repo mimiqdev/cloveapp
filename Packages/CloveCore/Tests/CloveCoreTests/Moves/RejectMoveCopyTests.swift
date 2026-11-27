@@ -3,11 +3,11 @@ import Testing
 
 @testable import CloveCore
 
-/// The Move rejects sheet's wording and staged keeps, built from C6's plan and result.
+/// The Move rejects sheet's wording, built from C6's plan and result.
 ///
 /// The design handoff's "Move Rejects" copy replaces the PRD's proposed sentence: a title with
-/// the count, the destination and "Nothing is deleted", a partial line and button once rejects
-/// are kept, a toast, and a details sheet for failures (PRD P0-10).
+/// the count, the destination and "Nothing is deleted", a toast, and a details sheet for
+/// failures (PRD P0-10).
 @Suite("Reject move copy", .timeLimit(.minutes(1)))
 struct RejectMoveCopyTests {
     /// A plan with the requested companion kinds, sidecars and refused sets.
@@ -152,28 +152,12 @@ struct RejectMoveCopyTests {
 
         #expect(confirmation.title == "Move 2 rejected photos")
         #expect(confirmation.body == "To Outtakes in this folder. Nothing is deleted.")
-        #expect(confirmation.partialLine == nil)
         #expect(confirmation.moveButtonTitle == "Move")
         #expect(confirmation.refusedMessage == nil)
 
         let one = RejectMoveConfirmation(plan: makePlan(photos: 1))
         #expect(one.title == "Move 1 rejected photo")
         #expect(one.body == "To _Rejected in this folder. Nothing is deleted.")
-    }
-
-    /// Keeping one reject updates the count and the button, without changing the title (P0-10).
-    @Test func confirmationCountsStagedKeeps() throws {
-        let plan = makePlan(photos: 3, sidecars: 3)
-        let selection = RejectMoveKeepSelection(plan: plan)
-        let kept = try #require(plan.readyEntries.first?.identity)
-        var withKeep = selection
-        withKeep.toggle(kept)
-
-        let confirmation = RejectMoveConfirmation(selection: withKeep)
-        #expect(confirmation.title == "Move 3 rejected photos")
-        #expect(confirmation.partialLine == "2 of 3 will move")
-        #expect(confirmation.moveButtonTitle == "Move 2")
-        #expect(confirmation.movingCount == 2)
     }
 
     /// A refused set gets its own line so the photo count never hides it (PRD P0-10).
@@ -185,26 +169,6 @@ struct RejectMoveCopyTests {
 
         let singular = RejectMoveConfirmation(plan: makePlan(photos: 1, refused: 1))
         #expect(singular.refusedMessage == "1 photo can't be moved right now.")
-    }
-
-    /// A keep toggles both ways and keeps the kept set out of the staged moving plan (P0-10).
-    @Test func keepSelectionStagesWhichSetsMove() throws {
-        let plan = makePlan(photos: 3, sidecars: 3)
-        var selection = RejectMoveKeepSelection(plan: plan)
-        let first = try #require(plan.readyEntries.first?.identity)
-        let second = try #require(plan.readyEntries.dropFirst().first?.identity)
-
-        selection.toggle(first)
-        #expect(selection.keptIdentities == [first])
-        #expect(selection.movingCount == 2)
-        #expect(selection.orderedKeptIdentities == [first])
-        #expect(!selection.movingPlan.readyEntries.contains { $0.identity == first })
-        #expect(selection.movingPlan.readyEntries.contains { $0.identity == second })
-
-        selection.toggle(first)
-        #expect(selection.keptIdentities.isEmpty)
-        #expect(selection.movingCount == 3)
-        #expect(selection.movingPlan.readyEntries.count == 3)
     }
 
     /// The all-moved toast is "Moved N to <folder>", with no failure line or Details (handoff).

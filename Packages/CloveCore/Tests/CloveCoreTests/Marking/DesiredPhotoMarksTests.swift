@@ -53,7 +53,7 @@ struct DesiredPhotoMarksTests {
         let plan = RejectMovePlan(
             rootURL: root, configuration: RejectMoveConfiguration(), sets: [], entries: [],
             destinationURL: root.appendingPathComponent("_Rejected"))
-        let move = queue.submit(.move(plan, kept: []))
+        let move = queue.submit(.move(plan))
         let later = queue.submit(.mark(edit))
         #expect(queue.beginNext()?.id == mark)
         #expect(queue.beginNext() == nil)

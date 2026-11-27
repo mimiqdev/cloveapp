@@ -348,7 +348,7 @@ struct PhotoActionsTests {
         let photo = try #require(model.photos.first)
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
         library.holdsMove = true
-        model.runRejectMove(plan, kept: []) { _ in }
+        model.runRejectMove(plan) { _ in }
         try await waitUntil { library.isRunningMove }
         model.openPhoto(photo.id)
         var advances = 0
@@ -370,7 +370,7 @@ struct PhotoActionsTests {
         library.holdsMove = true
         library.failsMove = fails
         var results: [Result<RejectMoveResult, any Error>] = []
-        model.runRejectMove(plan, kept: []) { results.append($0) }
+        model.runRejectMove(plan) { results.append($0) }
         try await waitUntil { library.isRunningMove }
         defer { library.holdsMove = false }
         library.reportDriveLoss()
@@ -405,7 +405,7 @@ struct PhotoActionsTests {
         defer { library.heldPhoto = nil }
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
         var results: [Result<RejectMoveResult, any Error>] = []
-        model.runRejectMove(plan, kept: []) { results.append($0) }
+        model.runRejectMove(plan) { results.append($0) }
         library.reportDriveLoss()
         try await waitUntil { !results.isEmpty }
         #expect(results.count == 1)
@@ -430,7 +430,7 @@ struct PhotoActionsTests {
         model.apply(.label(ColourLabel(colour: .red)), to: a)
         try await waitUntil { library.writing == a }
         let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: []) { _ in }
+        model.runRejectMove(preview) { _ in }
         model.apply(.rating(.rejected), to: a)
         model.apply(.label(ColourLabel(colour: .blue)), to: b)
         library.heldPhoto = nil
@@ -450,28 +450,29 @@ struct PhotoActionsTests {
         await model.drainActions()
         #expect(model.shownMarks(for: a).isRejected)
         let preview = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(preview, kept: []) { _ in }
+        model.runRejectMove(preview) { _ in }
         await model.drainActions()
         #expect(library.moves == [[a]])
     }
 
-    @Test func toastUndoRestoresBothMovedAndKeptSamplePhotos() async throws {
+    @Test func toastUndoRestoresMovedSamplePhotos() async throws {
         let model = BrowsingModel(library: TestLibrary.sample)
         model.openFolder()
         let rejected = model.allPlacedPhotos.filter(\.marks.isRejected).map(\.id)
-        let kept = try #require(rejected.first)
-        let moved = try #require(rejected.last)
+        #expect(!rejected.isEmpty)
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(plan, kept: [kept]) { _ in }
+        model.runRejectMove(plan) { _ in }
         await model.drainActions()
         let completed = try #require(model.lastRejectMove)
         #expect(model.canUndoRejectMove(completed))
-        #expect(model.shownMarks(for: kept).rating == .unrated)
-        #expect(!model.photos.contains { $0.id == moved })
+        for photo in rejected {
+            #expect(!model.photos.contains { $0.id == photo })
+        }
         model.undoRejectMove(completed)
         await model.drainActions()
-        #expect(model.shownMarks(for: kept).isRejected)
-        #expect(model.photos.contains { $0.id == moved && $0.marks.isRejected })
+        for photo in rejected {
+            #expect(model.photos.contains { $0.id == photo && $0.marks.isRejected })
+        }
     }
 
     @Test func leavingAndResumingTheSampleReadsItsStoredMarks() async throws {
@@ -562,7 +563,7 @@ struct PhotoActionsTests {
         let model = BrowsingModel(library: TestLibrary.sample(failingMoveStemSuffix: ""))
         model.openFolder()
         let plan = try await model.planRejectMove(configuration: RejectMoveConfiguration())
-        model.runRejectMove(plan, kept: []) { _ in }
+        model.runRejectMove(plan) { _ in }
         await model.drainActions()
         let completed = try #require(model.lastRejectMove)
         #expect(!completed.canUndo)

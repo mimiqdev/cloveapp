@@ -249,7 +249,7 @@ extension CloveFlowTests {
     ///   `PhotoActionsTests`;
     /// - a batch rating with a failed write: `testFinishingPillAndSaveFailureToastStayUsable`,
     ///   `PhotoActionsTests`;
-    /// - Move rejects with a keep and a failure: `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
+    /// - Move rejects and a failure: `testMoveRejectsConfirmsAndReportsFilesLeftInPlace`,
     ///   `RejectMoveCopyTests`.
     @MainActor @objc
     func testBrowsingFlowFromEntryToSettings() {
