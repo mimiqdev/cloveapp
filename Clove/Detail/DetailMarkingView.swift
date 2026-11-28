@@ -102,7 +102,6 @@ struct DetailMarkingView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(\.cloveTheme) private var theme
-    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
@@ -538,10 +537,8 @@ struct DetailMarkingView: View {
         Group {
             if let duo {
                 expandedLayout(duo)
-            } else if usesSystemToolbar, #available(iOS 27.1, *) {
-                nativeStandardLayout
             } else {
-                standardLayout
+                nativeStandardLayout
             }
         }
         .background {
@@ -606,7 +603,6 @@ struct DetailMarkingView: View {
         return count
     }
 
-    @available(iOS 27.1, *)
     private var nativeStandardLayout: some View {
         standardLayout
             .toolbar {
@@ -650,7 +646,7 @@ struct DetailMarkingView: View {
                 }
                 if !emptyFromFilterSelection {
                     ToolbarItem(placement: .principal) { detailToolbarTitle }
-                        .axisBehavior(.horizontalOnly)
+                        .horizontalOnlyAxisIfAvailable()
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -669,32 +665,18 @@ struct DetailMarkingView: View {
             gridShown ? "Hide photo grid" : "Show photo grid", language: language)
         let stateValue = AppLocalization.string(
             gridShown ? "Photo Preview" : "Focus View", language: language)
-        if usesSystemToolbar {
-            Button {
-                togglePresentation()
-            } label: {
-                Image(systemName: "sidebar.left")
-                    .foregroundStyle(gridShown ? Color.clove.accent : Color.clove.text.primary)
-            }
-            .tint(gridShown ? Color.clove.accent : Color.clove.text.primary)
-            .help(actionTitle)
-            .accessibilityLabel(actionTitle)
-            .accessibilityValue(stateValue)
-            .accessibilityAddTraits(gridShown ? .isSelected : [])
-            .accessibilityIdentifier("clove.detail.gridToggle")
-        } else {
-            GlassIconButton(
-                label: actionTitle,
-                symbol: "sidebar.left",
-                isActive: gridShown,
-                activeAccessibilityValue: stateValue,
-                size: isWidePadLayout ? .pad : .phone,
-                identifier: "clove.detail.gridToggle"
-            ) {
-                togglePresentation()
-            }
-            .help(actionTitle)
+        Button {
+            togglePresentation()
+        } label: {
+            Image(systemName: "sidebar.left")
+                .foregroundStyle(gridShown ? Color.clove.accent : Color.clove.text.primary)
         }
+        .tint(gridShown ? Color.clove.accent : Color.clove.text.primary)
+        .help(actionTitle)
+        .accessibilityLabel(actionTitle)
+        .accessibilityValue(stateValue)
+        .accessibilityAddTraits(gridShown ? .isSelected : [])
+        .accessibilityIdentifier("clove.detail.gridToggle")
     }
 
     @ViewBuilder
@@ -702,33 +684,19 @@ struct DetailMarkingView: View {
         let focusLabel = AppLocalization.string("Focus regions", language: language)
         let focusValue = AppLocalization.string(
             browsing.showsFocusRegions ? "On" : "Off", language: language)
-        if usesSystemToolbar {
-            Button {
-                browsing.showsFocusRegions.toggle()
-            } label: {
-                Image(systemName: "dot.viewfinder")
-                    .foregroundStyle(
-                        browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
-            }
-            .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
-            .help(focusLabel)
-            .accessibilityLabel(focusLabel)
-            .accessibilityValue(focusValue)
-            .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
-            .accessibilityIdentifier("clove.detail.focusToggle")
-        } else {
-            GlassIconButton(
-                label: focusLabel,
-                symbol: "dot.viewfinder",
-                isActive: browsing.showsFocusRegions,
-                size: isWidePadLayout ? .pad : .phone,
-                identifier: "clove.detail.focusToggle"
-            ) {
-                browsing.showsFocusRegions.toggle()
-            }
-            .help(focusLabel)
-            .reportHeaderControlFrame("clove.detail.focusToggle")
+        Button {
+            browsing.showsFocusRegions.toggle()
+        } label: {
+            Image(systemName: "dot.viewfinder")
+                .foregroundStyle(
+                    browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
         }
+        .tint(browsing.showsFocusRegions ? Color.clove.accent : Color.clove.text.primary)
+        .help(focusLabel)
+        .accessibilityLabel(focusLabel)
+        .accessibilityValue(focusValue)
+        .accessibilityAddTraits(browsing.showsFocusRegions ? .isSelected : [])
+        .accessibilityIdentifier("clove.detail.focusToggle")
     }
 
     private var infoButtonAccessibilityLabel: String {
@@ -740,7 +708,6 @@ struct DetailMarkingView: View {
     private var detailFilterButton: some View {
         PhotoFilterButton(
             browsing: browsing,
-            controlSize: isWidePadLayout ? .pad : .phone,
             identifierPrefix: "clove.detail.filter",
             onMoreFilters: canPresentMetadataFilters ? { activeSheet = .metadataFilters } : nil
         )
@@ -1086,90 +1053,26 @@ struct DetailMarkingView: View {
     }
 
     private var standardLayout: some View {
-        VStack(spacing: 0) {
-            if !usesSystemToolbar && (!isOrdinaryPhoneLandscape || chromeIsVisible) {
-                BrowsingHeader(
-                    title: emptyFromFilterSelection ? "" : photo.fileName,
-                    titleIdentifier: "clove.detail.fileName",
-                    backTitle: detailBackTitle,
-                    usesInlineFlow: isOrdinaryPhoneLandscape,
-                    height: isOrdinaryPhoneLandscape ? 44 : 64,
-                    background: usesUnifiedStageBackground
-                        ? Color.clove.bg.stage : Color.clove.bg.canvas,
-                    titleTrailingSymbol: emptyFromFilterSelection ? nil : "info.circle",
-                    titleActionIdentifier: emptyFromFilterSelection ? nil : "clove.detail.info",
-                    titleActionLabel: emptyFromFilterSelection ? nil : infoButtonAccessibilityLabel,
-                    titleAction: emptyFromFilterSelection ? nil : { activeSheet = .information },
+        Group {
+            if emptyFromFilterSelection {
+                filteredEmptyStage
+            } else if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
+                PhotoArrangement(
+                    grid: AnyView(splitGridPane),
+                    presentation: presentationBinding,
                     back: { browsing.back() }
                 ) {
-                    if !emptyFromFilterSelection {
-                        HStack(spacing: 6) {
-                            detailZoomReadout
-                            InlineFolderPreparationBar(
-                                browsing: browsing,
-                                identifier: "clove.detail.preparation.progress")
-                            SaveStatusIndicator(
-                                browsing: browsing, identifierPrefix: "clove.detail.saveState")
-                        }
-                    }
-                } leadingTools: {
-                    if !emptyFromFilterSelection {
-                        if presentationPolicy.supportsPhotoPreview {
-                            photoGridToggle
-                        }
-                        if !usesInspectionPill {
-                            focusRegionsToggle
-                        }
-                    }
-                } tools: {
-                    if chromeIsVisible {
-                        if !emptyFromFilterSelection {
-                            if isOrdinaryPhoneLandscape, let pill = makeStagePill(compact: true) {
-                                pill
-                                    .fixedSize()
-                                    .reportHeaderControlFrame(pill.identifier)
-                            }
-                            if !usesInspectionPill, canEnterCompare {
-                                GlassIconButton(
-                                    label: AppLocalization.string("Compare", language: language),
-                                    symbol: "rectangle.split.2x1",
-                                    size: isWidePadLayout ? .pad : .phone,
-                                    identifier: "clove.detail.compare"
-                                ) {
-                                    dismissGestureGuide()
-                                    tapPickerDismissToken += 1
-                                    actions.markingSwipeBegan()
-                                    browsing.enterCompareFromDetail(timeline: timeline)
-                                }
-                                .reportHeaderControlFrame("clove.detail.compare")
-                            }
-                        }
-                        detailFilterButton
-                            .reportHeaderControlFrame("clove.detail.filter")
-                    }
+                    standardDetailStage
                 }
-            }
-            Group {
-                if emptyFromFilterSelection {
-                    filteredEmptyStage
-                } else if #available(iOS 27.1, *), hasFoldRegion, showsPhotoGrid {
-                    PhotoArrangement(
-                        grid: AnyView(splitGridPane),
-                        presentation: presentationBinding,
-                        back: { browsing.back() }
-                    ) {
-                        standardDetailStage
-                    }
-                } else {
-                    SplitPhotoView(
-                        showsGrid: showsPhotoGrid,
-                        presentation: presentationBinding,
-                        back: { browsing.back() }
-                    ) {
-                        splitGridPane
-                    } secondary: {
-                        standardDetailStage
-                    }
+            } else {
+                SplitPhotoView(
+                    showsGrid: showsPhotoGrid,
+                    presentation: presentationBinding,
+                    back: { browsing.back() }
+                ) {
+                    splitGridPane
+                } secondary: {
+                    standardDetailStage
                 }
             }
         }

@@ -260,7 +260,6 @@ struct TapPickerTests {
                     }
                     .environment(store)
                     .environment(\.isDuoExpanded, true)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.usesVerticalBrowsingToolbar, true)
                     .environment(\.hasFoldRegion, true)
                     .environment(\.scenePhase, .active)
@@ -350,7 +349,6 @@ struct TapPickerTests {
                 .environment(\.cloveTheme, theme)
                 .environment(\.colorScheme, theme == .dark ? .dark : .light)
                 .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.scenePhase, .active)
@@ -571,7 +569,6 @@ struct TapPickerTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoCover, posture.isDuoCover)
                 .environment(\.isDuoExpanded, posture.isDuoExpanded)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, posture.isDuoExpanded)
                 .environment(\.scenePhase, .active)
@@ -1197,7 +1194,6 @@ struct TapPickerTests {
                     }
                     .environment(store)
                     .environment(\.isDuoExpanded, true)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.usesVerticalBrowsingToolbar, true)
                     .environment(\.hasFoldRegion, true)
                     .environment(\.scenePhase, .active)

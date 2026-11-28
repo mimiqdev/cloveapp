@@ -1489,7 +1489,6 @@ struct CompareFlowTests {
             let vertical: UIUserInterfaceSizeClass
             let idiom: UIUserInterfaceIdiom
             let isDuoExpanded: Bool
-            let usesSystemToolbar: Bool
             let usesVerticalToolbar: Bool
             let expectsCustomTopBar: Bool
         }
@@ -1499,13 +1498,13 @@ struct CompareFlowTests {
                 name: "iPad Landscape",
                 size: CGSize(width: 1024, height: 768),
                 horizontal: .regular, vertical: .regular, idiom: .pad,
-                isDuoExpanded: false, usesSystemToolbar: false, usesVerticalToolbar: false,
+                isDuoExpanded: false, usesVerticalToolbar: false,
                 expectsCustomTopBar: true),
             SurfaceCase(
                 name: "iPhone Landscape",
                 size: CGSize(width: 852, height: 393),
                 horizontal: .compact, vertical: .compact, idiom: .phone,
-                isDuoExpanded: false, usesSystemToolbar: false, usesVerticalToolbar: false,
+                isDuoExpanded: false, usesVerticalToolbar: false,
                 expectsCustomTopBar: true),
         ]
 
@@ -1527,7 +1526,6 @@ struct CompareFlowTests {
                         .environment(store)
                         .environment(\.cloveUserInterfaceIdiom, surface.idiom)
                         .environment(\.isDuoExpanded, surface.isDuoExpanded)
-                        .environment(\.usesSystemBrowsingToolbar, surface.usesSystemToolbar)
                         .environment(\.usesVerticalBrowsingToolbar, surface.usesVerticalToolbar)
                         .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                             headerFrames.frames = $0

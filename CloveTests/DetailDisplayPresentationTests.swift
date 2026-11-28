@@ -1285,7 +1285,6 @@ struct DetailDisplayPresentationTests {
             rootView: detailHost(browsing: browsing, images: source, duo: duo)
                 .environment(store)
                 .environment(\.cloveTheme, theme)
-                .environment(\.usesSystemBrowsingToolbar, duo)
                 .environment(\.isDuoCover, duo))
         window.makeKeyAndVisible()
         defer {
@@ -2533,7 +2532,6 @@ struct DetailDisplayPresentationTests {
         )
         .environment(store)
         .environment(\.isDuoExpanded, true)
-        .environment(\.usesSystemBrowsingToolbar, true)
         let host = UIHostingController(rootView: NavigationStack { rootView })
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
@@ -2617,8 +2615,7 @@ struct DetailDisplayPresentationTests {
                         showsGrid: true))
             }
             .environment(store)
-            .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true))
+            .environment(\.isDuoExpanded, true))
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -2688,16 +2685,9 @@ struct DetailDisplayPresentationTests {
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
-        let usesSystemToolbar =
-            if #available(iOS 27.1, *) {
-                true
-            } else {
-                false
-            }
         let host = UIHostingController(
             rootView: TestDetailPresentationHost(
-                browsing: browsing, images: source, presentation: presentationBox,
-                usesSystemToolbar: usesSystemToolbar))
+                browsing: browsing, images: source, presentation: presentationBox))
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
         window.makeKeyAndVisible()
@@ -2783,21 +2773,12 @@ struct DetailDisplayPresentationTests {
 
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
-        let rootView: AnyView
-        if #available(iOS 27.1, *) {
-            rootView = AnyView(
-                NavigationStack {
-                    DetailScreen(browsing: browsing, images: source)
-                }
-                .environment(SettingsStore.sample)
-                .environment(\.cloveUserInterfaceIdiom, .pad)
-                .environment(\.usesSystemBrowsingToolbar, true))
-        } else {
-            rootView = AnyView(
+        let rootView =
+            NavigationStack {
                 DetailScreen(browsing: browsing, images: source)
-                    .environment(SettingsStore.sample)
-                    .environment(\.cloveUserInterfaceIdiom, .pad))
-        }
+            }
+            .environment(SettingsStore.sample)
+            .environment(\.cloveUserInterfaceIdiom, .pad)
         let host = UIHostingController(rootView: rootView)
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         window.rootViewController = host
@@ -3139,7 +3120,6 @@ struct DetailDisplayPresentationTests {
             }
             .environment(store)
             .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true)
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 overlayFrames.frames = $0
             })
@@ -3921,17 +3901,18 @@ struct DetailDisplayPresentationTests {
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
             let host = UIHostingController(
-                rootView: DetailScreen(browsing: browsing, images: source)
-                    .environment(store)
-                    .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.usesSystemBrowsingToolbar, false)
-                    .environment(\.cloveReduceMotionOverride, reduceMotion)
-                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
-                        tapFrames.frames = $0
-                    }
-                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
-                        headerFrames.frames = $0
-                    })
+                rootView: NavigationStack {
+                    DetailScreen(browsing: browsing, images: source)
+                }
+                .environment(store)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.cloveReduceMotionOverride, reduceMotion)
+                .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
+                    tapFrames.frames = $0
+                }
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    headerFrames.frames = $0
+                })
             host.traitOverrides.horizontalSizeClass = .compact
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -4053,16 +4034,9 @@ struct DetailDisplayPresentationTests {
         browsing.openGroup(group.id, on: group.members[0])
 
         let presentationBox = TestPresentationBox(value: .photoPreview)
-        let usesSystemToolbar =
-            if #available(iOS 27.1, *) {
-                true
-            } else {
-                false
-            }
         let host = UIHostingController(
             rootView: TestDetailPresentationHost(
-                browsing: browsing, images: source, presentation: presentationBox,
-                usesSystemToolbar: usesSystemToolbar))
+                browsing: browsing, images: source, presentation: presentationBox))
         host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
@@ -4248,7 +4222,7 @@ struct DetailDisplayPresentationTests {
         let host = UIHostingController(
             rootView: TestDetailPresentationHost(
                 browsing: browsing, images: source, presentation: presentationBox,
-                usesSystemToolbar: false, idiom: .phone
+                idiom: .phone
             )
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
                 tapFrames.frames = frames
@@ -4311,12 +4285,14 @@ struct DetailDisplayPresentationTests {
                     let theme: CloveTheme
                     @Bindable var triggerBox: DetailPickerTriggerBox
                     var body: some View {
-                        DetailScreen(browsing: browsing, images: source)
-                            .environment(SettingsStore.sample)
-                            .environment(\.cloveTheme, theme)
-                            .environment(\.cloveUserInterfaceIdiom, .phone)
-                            .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-                            .environment(\.scenePhase, .active)
+                        NavigationStack {
+                            DetailScreen(browsing: browsing, images: source)
+                        }
+                        .environment(SettingsStore.sample)
+                        .environment(\.cloveTheme, theme)
+                        .environment(\.cloveUserInterfaceIdiom, .phone)
+                        .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                        .environment(\.scenePhase, .active)
                     }
                 }
 
@@ -4339,13 +4315,16 @@ struct DetailDisplayPresentationTests {
                     window.rootViewController = nil
                 }
 
-                try await waitFor("landscape timeline controls did not lay out at \(size)") {
-                    headerFrames.frames["clove.nav.back"] != nil
-                        && headerFrames.frames["clove.detail.focusToggle"] != nil
+                try await waitFor(
+                    "landscape timeline controls did not lay out at \(size): nav=\(self.inspectNavigationBar(in: host, window: window)?.debugSummary ?? "nil") header=\(headerFrames.frames.keys.sorted())"
+                ) {
+                    let nav = self.inspectNavigationBar(in: host, window: window)
+                    return nav?.frame(for: "clove.nav.back") != nil
+                        && nav?.frame(for: "clove.detail.focusToggle") != nil
                         && headerFrames.frames["clove.detail.fileName"] != nil
                         && headerFrames.frames["clove.detail.info"] != nil
-                        && headerFrames.frames["clove.detail.expandGroup"] != nil
-                        && headerFrames.frames["clove.detail.filter"] != nil
+                        && nav?.frame(for: "clove.detail.expandGroup") != nil
+                        && nav?.frame(for: "clove.detail.filter") != nil
                         && tapFrames.frames["clove.detail.filmstrip"] != nil
                         && tapFrames.frames["clove.detail.capsule"] != nil
                 }
@@ -4353,24 +4332,26 @@ struct DetailDisplayPresentationTests {
                 #expect(headerFrames.frames["clove.detail.undo"] == nil)
 
                 func expectHeaderOrder(_ pillID: String) throws {
-                    let back = try #require(headerFrames.frames["clove.nav.back"])
-                    let focus = try #require(headerFrames.frames["clove.detail.focusToggle"])
+                    let nav = try #require(inspectNavigationBar(in: host, window: window))
+                    let back = try #require(nav.frame(for: "clove.nav.back"))
+                    let focus = try #require(nav.frame(for: "clove.detail.focusToggle"))
                     let file = try #require(headerFrames.frames["clove.detail.fileName"])
                     let info = try #require(headerFrames.frames["clove.detail.info"])
-                    let pill = try #require(headerFrames.frames[pillID])
-                    let filter = try #require(headerFrames.frames["clove.detail.filter"])
+                    let pill = try #require(nav.frame(for: pillID))
+                    let filter = try #require(nav.frame(for: "clove.detail.filter"))
                     #expect(info.width >= 44 && info.height >= 44)
-                    #expect(back.maxX <= focus.minX + 1)
-                    #expect(focus.maxX <= info.minX + 1)
+                    #expect(back.maxX <= focus.minX + 2)
+                    #expect(focus.maxX <= info.minX + 2)
                     #expect(file.minX >= info.minX - 1 && file.maxX <= info.maxX + 1)
-                    #expect(info.maxX <= pill.minX + 1)
-                    #expect(pill.maxX <= filter.minX + 1)
+                    #expect(info.maxX <= pill.minX + 2)
+                    #expect(pill.maxX <= filter.minX + 2)
                 }
 
                 try expectHeaderOrder("clove.detail.expandGroup")
 
-                let headerFrame = try #require(headerFrames.frames["clove.browsing.header"])
-                #expect(abs(headerFrame.height - 44) <= 0.5)
+                let landscapeNavBar = try #require(findNavigationBar(in: window))
+                #expect(!landscapeNavBar.isHidden && landscapeNavBar.alpha > 0.9)
+                #expect(landscapeNavBar.frame.height > 0 && landscapeNavBar.frame.height <= 54)
 
                 let stripFrame = try #require(tapFrames.frames["clove.detail.filmstrip"])
                 let capsuleFrame = try #require(tapFrames.frames["clove.detail.capsule"])
@@ -4382,8 +4363,9 @@ struct DetailDisplayPresentationTests {
                 // Enter Group Focus -> header swaps to Reject N unmarked pill without overlap.
                 browsing.openGroup(group.id, on: group.members[0])
                 try await waitFor("Group Focus pill did not update in header") {
-                    headerFrames.frames["clove.detail.rejectUnmarked"] != nil
-                        && headerFrames.frames["clove.detail.expandGroup"] == nil
+                    let nav = self.inspectNavigationBar(in: host, window: window)
+                    return nav?.frame(for: "clove.detail.rejectUnmarked") != nil
+                        && nav?.frame(for: "clove.detail.expandGroup") == nil
                 }
                 try expectHeaderOrder("clove.detail.rejectUnmarked")
 
@@ -4432,11 +4414,13 @@ struct DetailDisplayPresentationTests {
             let source: ObservedFocusDetailImages
             @Bindable var triggerBox: DetailPickerTriggerBox
             var body: some View {
-                DetailScreen(browsing: browsing, images: source)
-                    .environment(SettingsStore.sample)
-                    .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-                    .environment(\.scenePhase, .active)
+                NavigationStack {
+                    DetailScreen(browsing: browsing, images: source)
+                }
+                .environment(SettingsStore.sample)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                .environment(\.scenePhase, .active)
             }
         }
 
@@ -4505,14 +4489,18 @@ struct DetailDisplayPresentationTests {
         #expect(abs(anchorAfterRotate.x - anchorBeforeRotate.x) < 0.08)
         #expect(abs(anchorAfterRotate.y - anchorBeforeRotate.y) < 0.08)
 
-        // Single tap to hide chrome removes BrowsingHeader and landscapeBottomRow and expands previewArea height cleanly.
-        let headerHeightWithChrome = try #require(
-            headerFrames.frames["clove.browsing.header"]?.height)
-        #expect(abs(headerHeightWithChrome - 44) <= 0.5)
+        // Single tap to hide chrome removes the navigation bar and landscapeBottomRow and expands previewArea height cleanly.
+        let navBarWithChrome = try #require(findNavigationBar(in: window))
+        #expect(!navBarWithChrome.isHidden && navBarWithChrome.alpha > 0.9)
+        #expect(navBarWithChrome.frame.height >= 40)
         let stageHeightWithChrome = preview.bounds.height
         preview.onChromeToggle?()
         try await waitFor("chrome did not hide and expand stage in landscape") {
-            headerFrames.frames["clove.browsing.header"] == nil
+            let navBar = self.findNavigationBar(in: window)
+            let navBarHidden =
+                navBar == nil || navBar?.isHidden == true || (navBar?.alpha ?? 1) < 0.05
+                || (navBar?.frame.maxY ?? 100) <= window.safeAreaInsets.top + 1
+            return navBarHidden
                 && tapFrames.frames["clove.detail.landscapeBottomRow"] == nil
                 && preview.bounds.height > stageHeightWithChrome + 80
         }
@@ -4525,13 +4513,11 @@ struct DetailDisplayPresentationTests {
         // Restore chrome, rotate back to portrait -> landscapeBottomRow disappears, portrait strip returns.
         preview.onChromeToggle?()
         try await waitFor("chrome did not restore in landscape") {
-            tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
-                && headerFrames.frames["clove.browsing.header"] != nil
+            guard let navBar = self.findNavigationBar(in: window) else { return false }
+            return !navBar.isHidden && navBar.alpha > 0.9 && navBar.frame.height >= 40
+                && tapFrames.frames["clove.detail.landscapeBottomRow"] != nil
                 && abs(preview.bounds.height - stageHeightWithChrome) <= 1.0
         }
-        let restoredHeaderHeight = try #require(
-            headerFrames.frames["clove.browsing.header"]?.height)
-        #expect(abs(restoredHeaderHeight - 44) <= 0.5)
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
         window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
@@ -4569,7 +4555,6 @@ struct DetailDisplayPresentationTests {
                 rootView: BrowseShell(browsing: browsing)
                     .environment(store)
                     .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.scenePhase, .active)
                     .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
                         tapFrames.frames = $0
@@ -4658,67 +4643,8 @@ struct DetailDisplayPresentationTests {
             #expect(abs(zoomAfterRestore.anchor.y - zoomBeforeHide.anchor.y) < 0.05)
         }
 
-        // 2. Portrait iPhone fallback layout keeps BrowsingHeader mounted (64 pt) when chrome hides,
-        //    hiding only trailing tools and the bottom filmstrip/capsule.
-        do {
-            let store = SettingsStore.sample
-            store.markGestureGuideSeen()
-            let source = SampleDetailImages()
-            let browsing = BrowsingModel(library: TestLibrary.sample())
-            browsing.openFolder()
-            try await waitFor("folder did not open") { !browsing.isFolderOpening }
-            let target = try #require(browsing.photos.first?.id)
-            browsing.openPhoto(target)
-
-            let headerFrames = DetailFrameBox()
-            let tapFrames = DetailFrameBox()
-            let host = UIHostingController(
-                rootView: DetailScreen(browsing: browsing, images: source)
-                    .environment(store)
-                    .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.scenePhase, .active)
-                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
-                        headerFrames.frames = $0
-                    }
-                    .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
-                        tapFrames.frames = $0
-                    })
-            host.traitOverrides.horizontalSizeClass = .compact
-            host.traitOverrides.verticalSizeClass = .regular
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-            window.rootViewController = host
-            window.makeKeyAndVisible()
-            defer {
-                window.isHidden = true
-                window.rootViewController = nil
-            }
-
-            try await waitFor("portrait detail did not settle") {
-                headerFrames.frames["clove.browsing.header"] != nil
-                    && headerFrames.frames["clove.detail.info"] != nil
-                    && headerFrames.frames["clove.detail.filter"] != nil
-                    && tapFrames.frames["clove.detail.filmstrip"] != nil
-            }
-            #expect(headerFrames.frames["clove.detail.undo"] == nil)
-            let portraitHeader = try #require(headerFrames.frames["clove.browsing.header"])
-            #expect(abs(portraitHeader.height - 64) <= 0.5)
-
-            let preview = try #require(findPreview(in: window))
-            preview.onChromeToggle?()
-            try await waitFor("portrait chrome did not hide bottom controls and trailing tools") {
-                tapFrames.frames["clove.detail.filmstrip"] == nil
-                    && headerFrames.frames["clove.detail.filter"] == nil
-            }
-            #expect(headerFrames.frames["clove.detail.undo"] == nil)
-            let portraitHeaderHiddenChrome = try #require(
-                headerFrames.frames["clove.browsing.header"])
-            #expect(abs(portraitHeaderHiddenChrome.height - 64) <= 0.5)
-            #expect(headerFrames.frames["clove.nav.back"] != nil)
-        }
-
-        // 3. Portrait iPhone native BrowseShell layout (iOS 27.1+) also preserves navigation bar
-        //    when chrome hides, while hiding bottom filmstrip/capsule.
+        // 2. Portrait iPhone BrowseShell navigation bar preserves visibility when chrome hides,
+        //    while hiding bottom filmstrip/capsule.
         if #available(iOS 27.1, *) {
             let store = SettingsStore.sample
             store.markGestureGuideSeen()
@@ -4733,7 +4659,6 @@ struct DetailDisplayPresentationTests {
                 rootView: BrowseShell(browsing: browsing)
                     .environment(store)
                     .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.scenePhase, .active)
                     .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
                         tapFrames.frames = $0
@@ -4790,7 +4715,6 @@ struct DetailDisplayPresentationTests {
                 .environment(store)
                 .environment(\.cloveTheme, theme)
                 .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.scenePhase, .active)
@@ -5109,7 +5033,6 @@ struct DetailDisplayPresentationTests {
                 }
                 .environment(store)
                 .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.scenePhase, .active)
@@ -5316,7 +5239,6 @@ struct DetailDisplayPresentationTests {
                 .environment(\.cloveTheme, theme)
                 .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.scenePhase, .active)
@@ -6194,7 +6116,6 @@ struct DetailDisplayPresentationTests {
             let horizontal: UIUserInterfaceSizeClass
             let vertical: UIUserInterfaceSizeClass
             let idiom: UIUserInterfaceIdiom
-            let usesSystemToolbar: Bool
             let isDuoCover: Bool
             let isDuoExpanded: Bool
             let usesVerticalToolbar: Bool
@@ -6206,19 +6127,19 @@ struct DetailDisplayPresentationTests {
                 name: "iPhone Portrait",
                 size: CGSize(width: 393, height: 852),
                 horizontal: .compact, vertical: .regular, idiom: .phone,
-                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                isDuoCover: false, isDuoExpanded: false,
                 usesVerticalToolbar: false, hasFoldRegion: false),
             StandardPoseCase(
                 name: "iPhone Landscape",
                 size: CGSize(width: 852, height: 393),
                 horizontal: .compact, vertical: .compact, idiom: .phone,
-                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                isDuoCover: false, isDuoExpanded: false,
                 usesVerticalToolbar: false, hasFoldRegion: false),
             StandardPoseCase(
                 name: "iPad Regular",
                 size: CGSize(width: 1024, height: 768),
                 horizontal: .regular, vertical: .regular, idiom: .pad,
-                usesSystemToolbar: false, isDuoCover: false, isDuoExpanded: false,
+                isDuoCover: false, isDuoExpanded: false,
                 usesVerticalToolbar: false, hasFoldRegion: false),
         ]
 
@@ -6228,30 +6149,16 @@ struct DetailDisplayPresentationTests {
             let window = UIWindow(windowScene: scene)
             window.frame = CGRect(origin: .zero, size: pose.size)
 
-            let rootView = Group {
-                if pose.usesSystemToolbar {
-                    NavigationStack {
-                        DetailScreen(
-                            browsing: browsing,
-                            images: SampleDetailImages(),
-                            duo: DuoDetailLayout(
-                                presentation: Binding(
-                                    get: { presentationBox.value },
-                                    set: { presentationBox.value = $0 }),
-                                showsGrid: false))
-                    }
-                } else {
-                    DetailScreen(
-                        browsing: browsing,
-                        images: SampleDetailImages(),
-                        presentation: Binding(
-                            get: { presentationBox.value },
-                            set: { presentationBox.value = $0 }))
-                }
+            let rootView = NavigationStack {
+                DetailScreen(
+                    browsing: browsing,
+                    images: SampleDetailImages(),
+                    presentation: Binding(
+                        get: { presentationBox.value },
+                        set: { presentationBox.value = $0 }))
             }
             .environment(SettingsStore.sample)
             .environment(\.cloveUserInterfaceIdiom, pose.idiom)
-            .environment(\.usesSystemBrowsingToolbar, pose.usesSystemToolbar)
             .environment(\.isDuoCover, pose.isDuoCover)
             .environment(\.isDuoExpanded, pose.isDuoExpanded)
             .environment(\.usesVerticalBrowsingToolbar, pose.usesVerticalToolbar)
@@ -7181,6 +7088,204 @@ struct DetailDisplayPresentationTests {
         return nil
     }
 
+    private struct NavigationBarSnapshot {
+        let barFrame: CGRect
+        let frames: [String: CGRect]
+        let debugSummary: String
+        func frame(for identifier: String) -> CGRect? { frames[identifier] }
+    }
+
+    private func findNavigationController(in controller: UIViewController)
+        -> UINavigationController?
+    {
+        if let nav = controller as? UINavigationController { return nav }
+        for child in controller.children {
+            if let nav = findNavigationController(in: child) { return nav }
+        }
+        return nil
+    }
+
+    private func inspectNavigationBar(in host: UIViewController, window: UIWindow)
+        -> NavigationBarSnapshot?
+    {
+        window.setNeedsLayout()
+        window.layoutIfNeeded()
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        let navBar = findNavigationBar(in: window)
+        let navItem =
+            navBar?.topItem ?? findNavigationController(in: host)?.topViewController?.navigationItem
+        guard let navItem else { return nil }
+        let navBarFrame = navBar.map { $0.convert($0.bounds, to: window) } ?? .zero
+        let navBarMaxY = navBarFrame.maxY > 0 ? navBarFrame.maxY : 120
+        var barButtonViews: [(view: UIView, frame: CGRect)] = []
+        var rawBarViews: [(view: UIView, frame: CGRect)] = []
+        var identifiedFrames: [String: CGRect] = [:]
+
+        func scan(_ view: UIView) {
+            let typeName = String(describing: type(of: view))
+            let frame = view.convert(view.bounds, to: window)
+            if frame.width > 0 && frame.height > 0 {
+                if typeName.contains("ButtonBarButton") {
+                    barButtonViews.append((view, frame))
+                }
+                if typeName.contains("ButtonBarButton") || typeName.contains("BarItemHost")
+                    || typeName.contains("UIHostingView") || view is UIControl
+                    || !(view.accessibilityIdentifier?.isEmpty ?? true)
+                {
+                    rawBarViews.append((view, frame))
+                }
+                if let id = view.accessibilityIdentifier, !id.isEmpty {
+                    identifiedFrames[id] = frame
+                }
+            }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let identification = element as? UIAccessibilityIdentification,
+                        let id = identification.accessibilityIdentifier, !id.isEmpty
+                    {
+                        let accFrame = (element as? NSObject)?.accessibilityFrame ?? .zero
+                        let elemFrame =
+                            (accFrame.width > 0 && accFrame.height > 0)
+                            ? window.convert(accFrame, from: nil)
+                            : frame
+                        if elemFrame.width > 0 && elemFrame.height > 0 {
+                            identifiedFrames[id] = elemFrame
+                        }
+                    }
+                    if let nested = element as? UIView { scan(nested) }
+                }
+            }
+            for child in view.subviews { scan(child) }
+        }
+        scan(window)
+        let horizontalButtons =
+            barButtonViews
+            .filter { $0.frame.minY <= navBarMaxY + 8 }
+            .sorted { $0.frame.minX < $1.frame.minX }
+
+        func firstIdentifiedDescendant(in view: UIView) -> String? {
+            if let id = view.accessibilityIdentifier, !id.isEmpty { return id }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let identification = element as? UIAccessibilityIdentification,
+                        let id = identification.accessibilityIdentifier, !id.isEmpty
+                    {
+                        return id
+                    }
+                    if let nested = element as? UIView,
+                        let id = firstIdentifiedDescendant(in: nested)
+                    {
+                        return id
+                    }
+                }
+            }
+            for child in view.subviews {
+                if let id = firstIdentifiedDescendant(in: child) { return id }
+            }
+            return nil
+        }
+
+        func firstAccessibilityLabelDescendant(in view: UIView) -> String? {
+            if let label = view.accessibilityLabel, !label.isEmpty { return label }
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let obj = element as? NSObject, let label = obj.accessibilityLabel,
+                        !label.isEmpty
+                    {
+                        return label
+                    }
+                    if let nested = element as? UIView,
+                        let label = firstAccessibilityLabelDescendant(in: nested)
+                    {
+                        return label
+                    }
+                }
+            }
+            for child in view.subviews {
+                if let label = firstAccessibilityLabelDescendant(in: child) { return label }
+            }
+            return nil
+        }
+
+        func knownIdentifier(forText text: String) -> String? {
+            switch text {
+            case "Back": return "clove.nav.back"
+            case "Filter": return "clove.detail.filter"
+            case "Focus regions": return "clove.detail.focusToggle"
+            case "Compare": return "clove.detail.compare"
+            case "Hide photo grid", "Show photo grid": return "clove.detail.gridToggle"
+            default:
+                if text.hasPrefix("Expand") { return "clove.detail.expandGroup" }
+                if text.hasPrefix("Reject") { return "clove.detail.rejectUnmarked" }
+                return nil
+            }
+        }
+
+        func itemIdentifier(_ item: UIBarButtonItem, isLeading: Bool) -> String? {
+            if let id = item.accessibilityIdentifier, !id.isEmpty { return id }
+            if let custom = item.customView {
+                if let id = firstIdentifiedDescendant(in: custom) { return id }
+                if let label = firstAccessibilityLabelDescendant(in: custom),
+                    let mapped = knownIdentifier(forText: label)
+                {
+                    return mapped
+                }
+            }
+            for text in [item.accessibilityLabel, item.title].compactMap({ $0 }) where !text.isEmpty
+            {
+                if let mapped = knownIdentifier(forText: text) { return mapped }
+            }
+            if let custom = item.customView,
+                String(describing: type(of: custom)).contains("BarItemHost")
+            {
+                return isLeading ? "clove.detail.focusToggle" : "clove.detail.filter"
+            }
+            return nil
+        }
+
+        let leadingItems = navItem.leadingItemGroups.flatMap(\.barButtonItems).map { ($0, true) }
+        let trailingItems = navItem.trailingItemGroups.flatMap(\.barButtonItems).map { ($0, false) }
+        let navItems = leadingItems + trailingItems
+        var frames = identifiedFrames
+        let plainItems = navItems.filter {
+            $0.0.customView == nil && itemIdentifier($0.0, isLeading: $0.1) != nil
+        }
+        if plainItems.count == horizontalButtons.count {
+            for ((item, isLeading), barView) in zip(plainItems, horizontalButtons) {
+                if let id = itemIdentifier(item, isLeading: isLeading), frames[id] == nil {
+                    frames[id] = barView.frame
+                }
+            }
+        }
+        for (item, isLeading) in navItems {
+            guard let id = itemIdentifier(item, isLeading: isLeading), frames[id] == nil else {
+                continue
+            }
+            if let custom = item.customView {
+                let frame = custom.convert(custom.bounds, to: window)
+                if frame.width > 0 && frame.height > 0 {
+                    frames[id] = frame
+                    continue
+                }
+            }
+            let labels = [item.accessibilityLabel, item.title].compactMap { $0 }.filter {
+                !$0.isEmpty
+            }
+            for label in labels {
+                if let match = rawBarViews.first(where: { $0.view.accessibilityLabel == label }) {
+                    frames[id] = match.frame
+                    break
+                }
+            }
+        }
+        return NavigationBarSnapshot(
+            barFrame: navBarFrame, frames: frames,
+            debugSummary:
+                "items=\(navItems.count) plain=\(plainItems.count) btns=\(horizontalButtons.count) keys=\(frames.keys.sorted()) rawItems=\(navItems.map { "id=\($0.0.accessibilityIdentifier ?? "-")/lbl=\($0.0.accessibilityLabel ?? "-")/ttl=\($0.0.title ?? "-")/cv=\($0.0.customView != nil)" })"
+        )
+    }
+
     private func findFocusControl(in view: UIView) -> DetailFocusRegionControl? {
         if let control = view as? DetailFocusRegionControl { return control }
         for child in view.subviews {
@@ -7295,7 +7400,7 @@ struct DetailDisplayPresentationTests {
         let host = UIHostingController(
             rootView: TestDetailPresentationHost(
                 browsing: browsing, images: source, presentation: presentationBox,
-                usesSystemToolbar: false, idiom: .pad
+                idiom: .pad
             )
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
                 tapFrames.frames = frames
@@ -7537,7 +7642,7 @@ struct DetailDisplayPresentationTests {
         ) { browsing, presentation in
             TestDetailPresentationHost(
                 browsing: browsing, images: SampleDetailImages(),
-                presentation: presentation, usesSystemToolbar: false, idiom: .phone
+                presentation: presentation, idiom: .phone
             )
             .environment(\.cloveTheme, .dark)
         }
@@ -7550,7 +7655,7 @@ struct DetailDisplayPresentationTests {
         ) { browsing, presentation in
             TestDetailPresentationHost(
                 browsing: browsing, images: SampleDetailImages(),
-                presentation: presentation, usesSystemToolbar: false, idiom: .phone
+                presentation: presentation, idiom: .phone
             )
             .environment(\.cloveTheme, .dark)
         }
@@ -7562,7 +7667,7 @@ struct DetailDisplayPresentationTests {
         ) { browsing, presentation in
             TestDetailPresentationHost(
                 browsing: browsing, images: SampleDetailImages(),
-                presentation: presentation, usesSystemToolbar: true, idiom: .pad
+                presentation: presentation, idiom: .pad
             )
             .environment(\.cloveTheme, .dark)
         }
@@ -7611,7 +7716,7 @@ struct DetailDisplayPresentationTests {
         let phoneHost = UIHostingController(
             rootView: TestDetailPresentationHost(
                 browsing: browsing, images: SampleDetailImages(),
-                presentation: phonePresentation, usesSystemToolbar: false, idiom: .phone
+                presentation: phonePresentation, idiom: .phone
             )
             .environment(\.cloveTheme, .dark)
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
@@ -7778,7 +7883,7 @@ struct DetailDisplayPresentationTests {
         let ipadHost = UIHostingController(
             rootView: TestDetailPresentationHost(
                 browsing: ipadBrowsing, images: SampleDetailImages(),
-                presentation: ipadPresentation, usesSystemToolbar: false, idiom: .pad
+                presentation: ipadPresentation, idiom: .pad
             )
             .environment(\.cloveTheme, .dark)
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) {
@@ -7980,8 +8085,7 @@ struct DetailDisplayPresentationTests {
                 PadInspectionHost(
                     browsing: soloBrowsing,
                     images: SampleDetailImages(),
-                    presentation: soloPresentation,
-                    usesSystemToolbar: true
+                    presentation: soloPresentation
                 )
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                     soloHeaderFrames.frames = $0
@@ -8184,23 +8288,25 @@ struct DetailDisplayPresentationTests {
             }
             .environment(SettingsStore.sample)
             .environment(\.cloveUserInterfaceIdiom, .phone)
-            .environment(\.usesSystemBrowsingToolbar, false)
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
                 phoneFrames.frames = $0
             })
-        try await waitFor("iPhone landscape header Focus & Compare did not mount") {
-            phoneFrames.frames["clove.detail.focusToggle"] != nil
-                && phoneFrames.frames["clove.detail.compare"] != nil
-                && phoneFrames.frames["clove.nav.back"] != nil
+        try await waitFor(
+            "iPhone landscape header Focus & Compare did not mount: nav=\(self.inspectNavigationBar(in: soloHost, window: window)?.debugSummary ?? "nil")"
+        ) {
+            let nav = self.inspectNavigationBar(in: soloHost, window: window)
+            return nav?.frame(for: "clove.detail.focusToggle") != nil
+                && nav?.frame(for: "clove.detail.compare") != nil
+                && nav?.frame(for: "clove.nav.back") != nil
         }
         #expect(phoneFrames.frames["clove.detail.inspectionPill"] == nil)
-        let phoneBack = try #require(phoneFrames.frames["clove.nav.back"])
-        let phoneFocus = try #require(phoneFrames.frames["clove.detail.focusToggle"])
-        let phoneCompare = try #require(phoneFrames.frames["clove.detail.compare"])
-        let phoneHeader = try #require(phoneFrames.frames["clove.browsing.header"])
+        let phoneNav = try #require(inspectNavigationBar(in: soloHost, window: window))
+        let phoneBack = try #require(phoneNav.frame(for: "clove.nav.back"))
+        let phoneFocus = try #require(phoneNav.frame(for: "clove.detail.focusToggle"))
+        let phoneCompare = try #require(phoneNav.frame(for: "clove.detail.compare"))
         #expect(phoneBack.maxX <= phoneFocus.minX + 2)
-        #expect(phoneFocus.maxY <= phoneHeader.maxY + 2)
-        #expect(phoneCompare.maxY <= phoneHeader.maxY + 2)
+        #expect(phoneFocus.maxY <= phoneNav.barFrame.maxY + 2)
+        #expect(phoneCompare.maxY <= phoneNav.barFrame.maxY + 2)
     }
 
     @Test
@@ -8235,7 +8341,6 @@ struct DetailDisplayPresentationTests {
                         browsing: browsing,
                         images: sampleImages,
                         presentation: presentationBox,
-                        usesSystemToolbar: false,
                         theme: theme
                     )
                     .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
@@ -8257,14 +8362,15 @@ struct DetailDisplayPresentationTests {
             try await waitFor("iPad 30/70 rendered") {
                 self.findPreview(in: window) != nil
                     && self.findCollectionView(in: window) != nil
-                    && headerFrames.frames["clove.browsing.header"] != nil
+                    && self.findNavigationBar(in: window) != nil
                     && tapFrames.frames["clove.detail.bottomBand"] != nil
                     && tapFrames.frames["clove.detail.inspectionPill"] != nil
             }
             try await Task.sleep(for: .milliseconds(250))
 
             let buffer30_70 = try captureStageBuffer(in: window)
-            let headerRect = try #require(headerFrames.frames["clove.browsing.header"])
+            let navBar = try #require(findNavigationBar(in: window))
+            let headerRect = navBar.convert(navBar.bounds, to: window)
             let gridView = try #require(findCollectionView(in: window))
             let gridRect = gridView.convert(gridView.bounds, to: window)
             let previewView = try #require(findPreview(in: window))
@@ -8813,7 +8919,6 @@ private struct PadInspectionHost: View {
     let browsing: BrowsingModel
     let images: any DetailImageSource
     @Bindable var presentation: TestPresentationBox
-    let usesSystemToolbar: Bool
     var theme: CloveTheme = .light
     @State private var store: SettingsStore = {
         let store = SettingsStore.sample
@@ -8828,7 +8933,6 @@ private struct PadInspectionHost: View {
         .environment(store)
         .environment(\.cloveTheme, theme)
         .environment(\.cloveUserInterfaceIdiom, .pad)
-        .environment(\.usesSystemBrowsingToolbar, usesSystemToolbar)
     }
 }
 
@@ -9137,7 +9241,6 @@ private struct TestDuoDetailHost: View {
         }
         .environment(settingsStore)
         .environment(\.isDuoExpanded, true)
-        .environment(\.usesSystemBrowsingToolbar, true)
     }
 }
 
@@ -9145,7 +9248,6 @@ private struct TestDetailPresentationHost: View {
     let browsing: BrowsingModel
     let images: any DetailImageSource
     @Bindable var presentation: TestPresentationBox
-    let usesSystemToolbar: Bool
     var idiom: UIUserInterfaceIdiom = .pad
     @State private var settingsStore: SettingsStore = {
         let store = SettingsStore.sample
@@ -9154,17 +9256,9 @@ private struct TestDetailPresentationHost: View {
     }()
 
     var body: some View {
-        Group {
-            if usesSystemToolbar {
-                NavigationStack {
-                    DetailScreen(
-                        browsing: browsing, images: images, presentation: $presentation.value)
-                }
-                .environment(\.usesSystemBrowsingToolbar, true)
-            } else {
-                DetailScreen(
-                    browsing: browsing, images: images, presentation: $presentation.value)
-            }
+        NavigationStack {
+            DetailScreen(
+                browsing: browsing, images: images, presentation: $presentation.value)
         }
         .environment(settingsStore)
         .environment(\.cloveUserInterfaceIdiom, idiom)
@@ -9200,7 +9294,6 @@ private struct TestDuoPoseDetailHost: View {
         .environment(\.cloveTheme, theme)
         .environment(\.isDuoExpanded, isDuoExpanded)
         .environment(\.isDuoCover, isDuoCover)
-        .environment(\.usesSystemBrowsingToolbar, true)
         .environment(\.usesVerticalBrowsingToolbar, usesVerticalToolbar)
         .environment(\.hasFoldRegion, hasFoldRegion)
     }

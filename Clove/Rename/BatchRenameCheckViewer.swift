@@ -9,6 +9,7 @@ struct BatchRenameCheckViewer: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @Environment(\.appLanguage) private var language
+    @Environment(\.cloveTheme) private var theme
     @State private var current: PhotoIdentity?
     @State private var pixels: RenameCheckImages
     @State private var scale: CGFloat = 1
@@ -37,19 +38,7 @@ struct BatchRenameCheckViewer: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            BrowsingHeader(
-                title: photo.fileName, titleIdentifier: "clove.rename.viewer.name",
-                back: { dismiss() }
-            ) {
-                Text(
-                    AppLocalization.format(
-                        "%lld of %lld · swipe for the next in this order", language: language,
-                        Int64(index + 1), Int64(flow.order.count))
-                )
-                .accessibilityIdentifier("clove.rename.viewer.position")
-            } tools: {
-            }
+        NavigationStack {
             DetailZoomView(
                 image: shown?.image ?? placeholder,
                 fullResolutionPixels: shown?.fullResolutionPixels, command: command,
@@ -81,6 +70,36 @@ struct BatchRenameCheckViewer: View {
             } action: {
                 size = $0
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background {
+                Rectangle()
+                    .fill(Color.clove.bg.stage)
+                    .ignoresSafeArea()
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbarColorScheme(theme.appearance.colorScheme, for: .navigationBar)
+            .duoVerticalToolbarBehavior()
+            .toolbar {
+                BrowsingToolbar(
+                    back: { dismiss() }, undo: {}, canUndo: false,
+                    showsUndo: false,
+                    showsNavigationTools: false,
+                    showsTools: false,
+                    showsBottom: false
+                ) {
+                    EmptyView()
+                } marks: {
+                    Optional<ToolbarItem<Void, EmptyView>>.none
+                } bottom: {
+                    EmptyView()
+                }
+                ToolbarItem(placement: .principal) {
+                    viewerToolbarTitle
+                }
+                .horizontalOnlyAxisIfAvailable()
+            }
         }
         .foregroundStyle(Color.clove.text.primary)
         .background(Color.clove.bg.stage)
@@ -94,6 +113,26 @@ struct BatchRenameCheckViewer: View {
             if let nativeAnchor, scale > DetailFitScale.tolerance { zoomToNative(at: nativeAnchor) }
         }
         .onDisappear { pixels.close() }
+    }
+
+    private var viewerToolbarTitle: some View {
+        VStack(spacing: 0) {
+            Text(photo.fileName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.clove.text.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .accessibilityIdentifier("clove.rename.viewer.name")
+            Text(
+                AppLocalization.format(
+                    "%lld of %lld · swipe for the next in this order", language: language,
+                    Int64(index + 1), Int64(flow.order.count))
+            )
+            .font(.caption)
+            .foregroundStyle(Color.clove.text.secondary)
+            .lineLimit(1)
+            .accessibilityIdentifier("clove.rename.viewer.position")
+        }
     }
 
     private var window: DetailPhotoWindow {

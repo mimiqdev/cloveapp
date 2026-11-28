@@ -12,7 +12,6 @@ struct BrowseShell: View {
     @Environment(\.cloveUserInterfaceIdiom) private var overrideUserInterfaceIdiom
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
-    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appLanguage) private var language
 
@@ -132,7 +131,7 @@ struct BrowseShell: View {
                 .toolbar(.hidden, for: .navigationBar)
         } detail: {
             GridScreen(browsing: browsing, thumbnails: browsing.thumbnails)
-                .toolbar(usesSystemToolbar ? .visible : .hidden, for: .navigationBar)
+                .toolbar(.visible, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
         .environment(
@@ -144,14 +143,9 @@ struct BrowseShell: View {
     private func screen(for destination: BrowseDestination) -> some View {
         switch destination {
         case .detail:
-            let detail = DetailScreen(browsing: browsing)
+            DetailScreen(browsing: browsing)
                 .navigationTitle("")
                 .navigationBarBackButtonHidden()
-            if usesSystemToolbar {
-                detail
-            } else {
-                detail.toolbarVisibility(.hidden, for: .navigationBar)
-            }
         case .settings:
             SettingsScreen(
                 navigation: settingsNavigation, availableWidth: availableWidth
@@ -159,7 +153,7 @@ struct BrowseShell: View {
                 browsing.back()
             }
             .browsingChrome(
-                title: title, browsing: browsing, usesSystemBar: usesSystemToolbar,
+                title: title, browsing: browsing,
                 hidesSettingsBar: isWideSettings,
                 language: language
             )
@@ -203,14 +197,14 @@ struct BrowseShell: View {
 extension View {
     /// Applies navigation title, compact Done action, and bar visibility for Settings.
     func browsingChrome(
-        title: String, browsing: BrowsingModel, usesSystemBar: Bool = false,
+        title: String, browsing: BrowsingModel,
         hidesSettingsBar: Bool = false, language: ResolvedAppLanguage = .english
     )
         -> some View
     {
         modifier(
             BrowsingChromeModifier(
-                title: title, browsing: browsing, usesSystemBar: usesSystemBar,
+                title: title, browsing: browsing,
                 hidesSettingsBar: hidesSettingsBar, language: language))
     }
 }
@@ -218,15 +212,11 @@ extension View {
 private struct BrowsingChromeModifier: ViewModifier {
     let title: String
     let browsing: BrowsingModel
-    let usesSystemBar: Bool
     let hidesSettingsBar: Bool
     let language: ResolvedAppLanguage
 
     private var barVisibility: Visibility {
-        let hidesBar =
-            (browsing.state.route == .settings && hidesSettingsBar)
-            || !usesSystemBar
-        return hidesBar ? .hidden : .visible
+        (browsing.state.route == .settings && hidesSettingsBar) ? .hidden : .visible
     }
 
     func body(content: Content) -> some View {

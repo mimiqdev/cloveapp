@@ -22,7 +22,6 @@ private struct SystemBrowsingLayout: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .environment(\.usesSystemBrowsingToolbar, true)
             .environment(\.usesVerticalBrowsingToolbar, edge != nil)
             .environment(\.hasFoldRegion, hasFoldRegion)
             .environment(\.isDuoExpanded, (edge != nil || hasFoldRegion) && sizeClass == .regular)
@@ -37,7 +36,6 @@ private struct SystemBrowsingLayout: ViewModifier {
 
 extension EnvironmentValues {
     @Entry var cloveUserInterfaceIdiom: UIUserInterfaceIdiom? = nil
-    @Entry var usesSystemBrowsingToolbar = false
     @Entry var usesVerticalBrowsingToolbar = false
     @Entry var hasFoldRegion = false
     @Entry var isDuoExpanded = false
@@ -52,7 +50,6 @@ struct DuoDetailLayout {
 
 /// One set of semantic toolbar groups for both axes. The navigation container owns
 /// placement, chrome, spacing, overflow, and safe areas, including the cover's camera.
-@available(iOS 27.1, *)
 struct BrowsingToolbar<
     NavigationTools: View,
     HorizontalLeadingTools: View,
@@ -74,7 +71,6 @@ struct BrowsingToolbar<
     var showsHorizontalTools = false
     var showsTools = true
     var showsBottom = true
-    @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @Environment(\.appLanguage) private var language
     @ViewBuilder var navigationTools: NavigationTools
     @ViewBuilder var horizontalLeadingTools: HorizontalLeadingTools
@@ -127,31 +123,18 @@ struct BrowsingToolbar<
     }
 
     var body: some ToolbarContent {
-        if usesVerticalBar {
-            if showsHorizontalLeadingTools {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    horizontalLeadingTools
-                }
-                .axisBehavior(.horizontalOnly)
-            }
-            if showsBack {
-                ToolbarItem(placement: .cancellationAction) {
-                    backButton
-                }
-                .axisBehavior(.verticalPreferred)
-            }
-            if showsStandaloneDockTool {
-                ToolbarItem(placement: .topBarTrailing) {
-                    standaloneDockTool
-                }
-                .axisBehavior(.verticalPreferred)
-                if showsTools {
-                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                }
-            }
-        } else if showsBack || showsStandaloneDockTool || showsNavigationTools {
+        if #available(iOS 27.1, *) {
+            AxisAwareBrowsingToolbar(toolbar: self)
+        } else {
+            horizontalBody
+        }
+    }
+
+    @ToolbarContentBuilder
+    fileprivate var horizontalBody: some ToolbarContent {
+        if showsBack || showsStandaloneDockTool || showsNavigationTools {
             ToolbarItemGroup(placement: .topBarLeading) {
-                if showsBack { backButton }
+                if showsBack { backButton(usesVerticalBar: false) }
                 if showsStandaloneDockTool { standaloneDockTool }
                 if showsNavigationTools { navigationTools }
             }
@@ -160,36 +143,25 @@ struct BrowsingToolbar<
             ToolbarItemGroup(placement: .topBarTrailing) {
                 horizontalTools
             }
-            .axisBehavior(.horizontalOnly)
+            .horizontalOnlyAxisIfAvailable()
         }
         if showsTools {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 tools
             }
-            .axisBehavior(.verticalPreferred)
+            .verticalPreferredAxisIfAvailable()
         }
         marks
-        if usesVerticalBar {
-            if showsUndo || showsBottom {
-                ToolbarSpacer(.flexible, placement: .bottomBar)
-                ToolbarItemGroup(placement: .bottomBar) {
-                    if showsUndo { undoButton }
-                    if showsBottom { bottom }
-                }
-                .axisBehavior(.verticalPreferred)
-            }
-        } else if showsUndo || showsBottom {
+        if showsUndo || showsBottom {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if showsUndo { undoButton }
+                if showsUndo { undoButton(usesVerticalBar: false) }
                 if showsBottom { bottom }
             }
         }
     }
 
-    private var usesVerticalBar: Bool { verticalEdge != nil }
-
     @ViewBuilder
-    private var backButton: some View {
+    fileprivate func backButton(usesVerticalBar: Bool) -> some View {
         if !usesVerticalBar, let backTitle, !backTitle.isEmpty {
             Button(action: back) {
                 HStack(spacing: 4) {
@@ -211,13 +183,122 @@ struct BrowsingToolbar<
         }
     }
 
-    private var undoButton: some View {
+    fileprivate func undoButton(usesVerticalBar: Bool) -> some View {
         Button(
             AppLocalization.string("Undo", language: language), systemImage: "arrow.uturn.backward",
             action: undo
         )
         .disabled(!canUndo)
         .accessibilityIdentifier(usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo")
+    }
+}
+
+@available(iOS 27.1, *)
+private struct AxisAwareBrowsingToolbar<
+    NavigationTools: View,
+    HorizontalLeadingTools: View,
+    StandaloneDockTool: View,
+    HorizontalTools: View,
+    Tools: View,
+    Marks: ToolbarContent,
+    Bottom: View
+>: ToolbarContent {
+    let toolbar:
+        BrowsingToolbar<
+            NavigationTools, HorizontalLeadingTools, StandaloneDockTool, HorizontalTools, Tools,
+            Marks,
+            Bottom
+        >
+    @Environment(\.toolbarVerticalEdge) private var verticalEdge
+
+    var body: some ToolbarContent {
+        if verticalEdge != nil {
+            if toolbar.showsHorizontalLeadingTools {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    toolbar.horizontalLeadingTools
+                }
+                .axisBehavior(.horizontalOnly)
+            }
+            if toolbar.showsBack {
+                ToolbarItem(placement: .cancellationAction) {
+                    toolbar.backButton(usesVerticalBar: true)
+                }
+                .axisBehavior(.verticalPreferred)
+            }
+            if toolbar.showsStandaloneDockTool {
+                ToolbarItem(placement: .topBarTrailing) {
+                    toolbar.standaloneDockTool
+                }
+                .axisBehavior(.verticalPreferred)
+                if toolbar.showsTools {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+            }
+            if toolbar.showsHorizontalTools {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    toolbar.horizontalTools
+                }
+                .axisBehavior(.horizontalOnly)
+            }
+            if toolbar.showsTools {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    toolbar.tools
+                }
+                .axisBehavior(.verticalPreferred)
+            }
+            toolbar.marks
+            if toolbar.showsUndo || toolbar.showsBottom {
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+                ToolbarItemGroup(placement: .bottomBar) {
+                    if toolbar.showsUndo { toolbar.undoButton(usesVerticalBar: true) }
+                    if toolbar.showsBottom { toolbar.bottom }
+                }
+                .axisBehavior(.verticalPreferred)
+            }
+        } else {
+            toolbar.horizontalBody
+        }
+    }
+}
+
+extension ToolbarContent {
+    @ToolbarContentBuilder
+    func horizontalOnlyAxisIfAvailable() -> some ToolbarContent {
+        if #available(iOS 27.1, *) {
+            axisBehavior(.horizontalOnly)
+        } else {
+            self
+        }
+    }
+
+    @ToolbarContentBuilder
+    func verticalPreferredAxisIfAvailable() -> some ToolbarContent {
+        if #available(iOS 27.1, *) {
+            axisBehavior(.verticalPreferred)
+        } else {
+            self
+        }
+    }
+
+    @ToolbarContentBuilder
+    func hiddenSharedToolbarBackgroundIfAvailable() -> some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func duoVerticalToolbarBehavior() -> some View {
+        if #available(iOS 27.1, *) {
+            toolbarVerticalBehavior(.automatic)
+                .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
+        } else {
+            self
+        }
     }
 }
 

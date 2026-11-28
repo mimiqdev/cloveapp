@@ -28,7 +28,6 @@ struct GridScreen: View {
     @State private var hasOpenedPhoto: Bool
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
-    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.hasFoldRegion) private var hasFoldRegion
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -461,80 +460,74 @@ struct GridScreen: View {
     }
 
     @ViewBuilder private var surface: some View {
-        if usesSystemToolbar, #available(iOS 27.1, *) {
-            if usesDock && browsing.state.route == .detail {
-                DetailScreen(
-                    browsing: browsing,
-                    duo: DuoDetailLayout(
-                        presentation: $presentation,
-                        showsGrid: isDuoExpanded))
-            } else {
-                grid
-                    .toolbar {
-                        BrowsingToolbar(
-                            back: { browsing.back() }, undo: { browsing.undoLastMark() },
-                            canUndo: browsing.canUndoMark,
-                            showsBack: !isRegular && (usesVerticalGridDock || !isSelecting),
-                            showsUndo: isDuoExpanded && usesVerticalToolbar,
-                            showsNavigationTools: isSelecting,
-                            showsHorizontalLeadingTools: isSelecting,
-                            showsStandaloneDockTool: isDuoCover && !isSelecting && showsMoveRejects,
-                            showsHorizontalTools: isDuoCover,
-                            showsTools: !isDuoCover,
-                            showsBottom: usesVerticalGridDock
-                        ) {
-                            if isSelecting {
-                                systemSelectAllButton
-                            }
-                        } horizontalLeadingTools: {
-                            if isSelecting {
-                                systemSelectAllButton
-                            }
-                        } standaloneDockTool: {
-                            if isDuoCover && !isSelecting && showsMoveRejects {
-                                moveRejectsToolbarButton
-                            }
-                        } horizontalTools: {
-                            if isDuoCover {
-                                coverHorizontalTools
-                            }
-                        } tools: {
-                            if !isDuoCover {
-                                headerTools
-                            }
-                        } marks: {
-                            Optional<ToolbarItem<Void, EmptyView>>.none
-                        } bottom: {
-                            if isDuoCover {
-                                filterButton
-                            } else if isDuoExpanded && usesVerticalToolbar {
-                                dockBottom
-                            }
-                        }
-                        if Self.usesLeadingRegularHeader(
-                            isRegular: isRegular, isSelecting: isSelecting)
-                        {
-                            ToolbarItem(placement: .topBarLeading) {
-                                ToolbarTitleBoundingLayout(maxWidth: regularHeaderMaxTitleWidth) {
-                                    regularGridHeaderTitle
-                                }
-                            }
-                            .sharedBackgroundVisibility(.hidden)
-                        } else {
-                            ToolbarItem(placement: .principal) {
-                                compactOrSelectingToolbarTitle
-                            }
-                            .axisBehavior(.horizontalOnly)
-                        }
-                    }
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbarVerticalBehavior(.automatic)
-                    .toolbarVerticalCompressionBehavior(.prefersToolbarItems)
-                    .toolbarVisibility(.visible, for: .navigationBar)
-            }
+        if #available(iOS 27.1, *), usesDock && browsing.state.route == .detail {
+            DetailScreen(
+                browsing: browsing,
+                duo: DuoDetailLayout(
+                    presentation: $presentation,
+                    showsGrid: isDuoExpanded))
         } else {
             grid
-                .toolbarVisibility(.hidden, for: .navigationBar)
+                .toolbar {
+                    BrowsingToolbar(
+                        back: { browsing.back() }, undo: { browsing.undoLastMark() },
+                        canUndo: browsing.canUndoMark,
+                        showsBack: !isRegular && (usesVerticalGridDock || !isSelecting),
+                        showsUndo: isDuoExpanded && usesVerticalToolbar,
+                        showsNavigationTools: isSelecting,
+                        showsHorizontalLeadingTools: isSelecting,
+                        showsStandaloneDockTool: isDuoCover && !isSelecting && showsMoveRejects,
+                        showsHorizontalTools: isDuoCover,
+                        showsTools: !isDuoCover,
+                        showsBottom: usesVerticalGridDock
+                    ) {
+                        if isSelecting {
+                            systemSelectAllButton
+                        }
+                    } horizontalLeadingTools: {
+                        if isSelecting {
+                            systemSelectAllButton
+                        }
+                    } standaloneDockTool: {
+                        if isDuoCover && !isSelecting && showsMoveRejects {
+                            moveRejectsToolbarButton
+                        }
+                    } horizontalTools: {
+                        if isDuoCover {
+                            coverHorizontalTools
+                        }
+                    } tools: {
+                        if !isDuoCover {
+                            headerTools
+                        }
+                    } marks: {
+                        Optional<ToolbarItem<Void, EmptyView>>.none
+                    } bottom: {
+                        if isDuoCover {
+                            filterButton
+                        } else if isDuoExpanded && usesVerticalToolbar {
+                            dockBottom
+                        }
+                    }
+                    if Self.usesLeadingRegularHeader(
+                        isRegular: isRegular, isSelecting: isSelecting)
+                    {
+                        ToolbarItem(placement: .topBarLeading) {
+                            ToolbarTitleBoundingLayout(maxWidth: regularHeaderMaxTitleWidth) {
+                                regularGridHeaderTitle
+                            }
+                        }
+                        .hiddenSharedToolbarBackgroundIfAvailable()
+                    } else {
+                        ToolbarItem(placement: .principal) {
+                            compactOrSelectingToolbarTitle
+                        }
+                        .horizontalOnlyAxisIfAvailable()
+                    }
+                }
+                .navigationBarTitleDisplayMode(.inline)
+                .duoVerticalToolbarBehavior()
+                .toolbarVisibility(.visible, for: .navigationBar)
         }
     }
 
@@ -554,6 +547,7 @@ struct GridScreen: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .accessibilityIdentifier("clove.grid.title")
+                .reportHeaderControlFrame("clove.grid.title")
             HStack(spacing: 0) {
                 Text(subtitle)
                     .lineLimit(1)
@@ -569,7 +563,7 @@ struct GridScreen: View {
     }
 
     private var compactOrSelectingToolbarTitle: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(spacing: 0) {
             HStack(spacing: 0) {
                 Text(
                     isSelecting
@@ -582,7 +576,11 @@ struct GridScreen: View {
                 )
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .accessibilityIdentifier(
+                    isSelecting ? "clove.grid.batch.count" : "clove.grid.title"
+                )
+                .reportHeaderControlFrame(
                     isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
                 if !isRegular && !isSelecting {
                     FolderPreparationIndicator(
@@ -615,7 +613,6 @@ struct GridScreen: View {
 
     private var grid: some View {
         VStack(spacing: 0) {
-            if !usesSystemToolbar { header }
             ProgressLine(progress: gridProgressLine.progress, tone: gridProgressLine.tone)
             gridContent
                 .overlay(alignment: .top) {
@@ -688,108 +685,6 @@ struct GridScreen: View {
         }
     }
 
-    @ViewBuilder private var header: some View {
-        if isRegular {
-            HStack(spacing: 8) {
-                if isSelecting {
-                    selectAllButton
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(
-                        isSelecting
-                            ? AppLocalization.format(
-                                "%lld selected", language: language,
-                                Int64(browsing.batchTargets.count))
-                            : browsing.localizedFilterTitle(language: language)
-                    )
-                    .font(isSelecting ? .subheadline.weight(.semibold) : .title3.bold())
-                    .lineLimit(1)
-                    .accessibilityIdentifier(
-                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title"
-                    )
-                    .reportHeaderControlFrame(
-                        isSelecting ? "clove.grid.batch.count" : "clove.grid.title")
-                    HStack(spacing: 0) {
-                        if let hiddenSelectedSubtitle {
-                            Text(hiddenSelectedSubtitle)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
-                                .accessibilityIdentifier("clove.grid.batch.hiddenCount")
-                                .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
-                        } else {
-                            Text(subtitle)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("clove.grid.subtitle")
-                        }
-                        SaveStatusIndicator(
-                            browsing: browsing, identifierPrefix: "clove.grid.saveState")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(Color.clove.text.secondary)
-                }
-                Spacer(minLength: 0)
-                headerTools
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 64)
-            .foregroundStyle(Color.clove.text.primary)
-        } else {
-            compactHeader
-        }
-    }
-
-    private var compactHeader: some View {
-        BrowsingHeader(
-            title: isSelecting
-                ? AppLocalization.format(
-                    "%lld selected", language: language, Int64(browsing.batchTargets.count))
-                : browsing.localizedFolderTitle(language: language),
-            titleIdentifier: isSelecting ? "clove.grid.batch.count" : "clove.grid.title",
-            showsBack: !isSelecting,
-            usesInlineFlow: isOrdinaryPhoneLandscape || isSelecting,
-            height: isOrdinaryPhoneLandscape ? 44 : 64,
-            back: { browsing.back() }
-        ) {
-            HStack(spacing: 0) {
-                if let hiddenSelectedSubtitle {
-                    Text(hiddenSelectedSubtitle)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .accessibilityIdentifier("clove.grid.batch.hiddenCount")
-                        .reportHeaderControlFrame("clove.grid.batch.hiddenCount")
-                } else {
-                    Text(subtitle)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("clove.grid.subtitle")
-                }
-                SaveStatusIndicator(
-                    browsing: browsing, identifierPrefix: "clove.grid.saveState")
-            }
-        } titleAccessory: {
-            if !isSelecting {
-                FolderPreparationIndicator(
-                    browsing: browsing,
-                    identifierPrefix: "clove.grid.preparation")
-            }
-        } leadingTools: {
-            if isSelecting {
-                selectAllButton
-            } else if isDuoCover && showsMoveRejects {
-                GlassIconButton(
-                    label: AppLocalization.string("Move rejects", language: language),
-                    symbol: "tray.and.arrow.down",
-                    size: .phone,
-                    identifier: "clove.grid.moveRejects"
-                ) {
-                    presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
-                }
-                .reportHeaderControlFrame("clove.grid.moveRejects")
-            }
-        } tools: {
-            headerTools
-        }
-    }
-
     private var selectAllTitle: String {
         AppLocalization.string(
             browsing.showsAllVisibleSelected ? "Deselect All" : "Select All",
@@ -814,30 +709,6 @@ struct GridScreen: View {
         .accessibilityIdentifier("clove.grid.selectAll")
     }
 
-    private var selectAllButton: some View {
-        Button {
-            toggleSelectAllVisible()
-        } label: {
-            Text(selectAllTitle)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .foregroundStyle(
-                    browsing.photos.isEmpty
-                        ? Color.clove.text.secondary : Color.clove.text.primary
-                )
-                .opacity(browsing.photos.isEmpty ? 0.45 : 1)
-                .padding(.horizontal, isRegular ? 14 : 12)
-                .frame(height: isRegular ? 40 : 44)
-                .cloveGlass(in: Capsule())
-        }
-        .buttonStyle(.cloveGlassPress)
-        .disabled(browsing.photos.isEmpty)
-        .accessibilityLabel(selectAllTitle)
-        .accessibilityIdentifier("clove.grid.selectAll")
-        .reportHeaderControlFrame("clove.grid.selectAll")
-    }
-
     @ViewBuilder private var systemSelectionToolbarTools: some View {
         Button(
             AppLocalization.string("Done", language: language),
@@ -859,47 +730,13 @@ struct GridScreen: View {
 
     @ViewBuilder private var headerTools: some View {
         if !isRegular {
-            if usesSystemToolbar {
-                filterButton
-            } else {
-                filterButton
-                    .reportHeaderControlFrame("clove.grid.filter")
-            }
+            filterButton
         }
-        if isSelecting && usesSystemToolbar {
+        if isSelecting {
             systemSelectionToolbarTools
-        } else if isSelecting {
-            Button {
-                browsing.clearSelection()
-                selectsEmpty = false
-            } label: {
-                Text(AppLocalization.string("Done", language: language))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .foregroundStyle(Color.clove.accent)
-                    .padding(.horizontal, isRegular ? 16 : 12)
-                    .frame(height: isRegular ? 40 : 44)
-                    .cloveGlass(in: Capsule())
-            }
-            .buttonStyle(.cloveGlassPress)
-            .accessibilityLabel(AppLocalization.string("Done", language: language))
-            .accessibilityIdentifier("clove.grid.batch.done")
-            .reportHeaderControlFrame("clove.grid.batch.done")
         } else {
             if isRegular, showsMoveRejects {
-                if usesSystemToolbar {
-                    moveRejectsToolbarButton
-                } else {
-                    GlassIconButton(
-                        label: AppLocalization.string("Move rejects", language: language),
-                        symbol: "tray.and.arrow.down", size: .pad,
-                        identifier: "clove.grid.moveRejects"
-                    ) {
-                        presentSheet(.moveFlow(MoveRejectsFlow(browsing: browsing)))
-                    }
-                    .reportHeaderControlFrame("clove.grid.moveRejects")
-                }
+                moveRejectsToolbarButton
             }
             moreMenu
         }
@@ -908,7 +745,6 @@ struct GridScreen: View {
     private var filterButton: some View {
         PhotoFilterButton(
             browsing: browsing,
-            controlSize: isRegular ? .pad : .phone,
             identifierPrefix: "clove.grid.filter",
             onMoreFilters: canPresentMetadataFilters ? { presentSheet(.metadataFilters) } : nil
         )
@@ -952,15 +788,7 @@ struct GridScreen: View {
                 .accessibilityIdentifier("clove.nav.settings")
             }
         } label: {
-            if usesSystemToolbar {
-                Label(AppLocalization.string("More", language: language), systemImage: "ellipsis")
-            } else {
-                Image(systemName: "ellipsis")
-                    .font(.title3)
-                    .foregroundStyle(Color.clove.text.primary)
-                    .frame(width: isRegular ? 40 : 44, height: isRegular ? 40 : 44)
-                    .cloveGlass(in: Circle())
-            }
+            Label(AppLocalization.string("More", language: language), systemImage: "ellipsis")
         }
         .accessibilityLabel(AppLocalization.string("More", language: language))
         .accessibilityIdentifier("clove.grid.more")

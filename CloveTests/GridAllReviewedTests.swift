@@ -426,16 +426,17 @@ struct GridAllReviewedTests {
             let triggerBox: AllReviewedTriggerBox
 
             var body: some View {
-                GridScreen(browsing: model, thumbnails: model.thumbnails)
-                    .environment(store)
-                    .environment(\.appLanguage, .english)
-                    .environment(\.cloveUserInterfaceIdiom, .phone)
-                    .environment(\.cloveTheme, .light)
-                    .environment(\.usesSystemBrowsingToolbar, false)
-                    .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
-                        framesBox.frames = $0
-                    }
+                NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.appLanguage, .english)
+                .environment(\.cloveUserInterfaceIdiom, .phone)
+                .environment(\.cloveTheme, .light)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
+                }
             }
         }
 
@@ -582,96 +583,78 @@ struct GridAllReviewedTests {
                 folder: folder, stem: "p2", seconds: 2, marks: PhotoMarks(rating: .rejected)),
         ]
 
-        for usesSystemToolbar in [false, true] {
-            let library = TestLibrary(photos: photos, groups: [])
-            let model = BrowsingModel(library: library, similarGroupsEnabled: false)
-            model.openFolder()
-            try await waitFor("folder did not finish opening") { !model.isFolderOpening }
+        let library = TestLibrary(photos: photos, groups: [])
+        let model = BrowsingModel(library: library, similarGroupsEnabled: false)
+        model.openFolder()
+        try await waitFor("folder did not finish opening") { !model.isFolderOpening }
 
-            let store = SettingsStore.sample
-            store.update { $0.moveRejectsEnabled = true }
-            let framesBox = AllReviewedFrameStore()
-            let triggerBox = AllReviewedTriggerBox()
+        let store = SettingsStore.sample
+        store.update { $0.moveRejectsEnabled = true }
+        let framesBox = AllReviewedFrameStore()
+        let triggerBox = AllReviewedTriggerBox()
 
-            struct RegularGridHost: View {
-                let model: BrowsingModel
-                let store: SettingsStore
-                let usesSystemToolbar: Bool
-                let framesBox: AllReviewedFrameStore
-                let triggerBox: AllReviewedTriggerBox
+        struct RegularGridHost: View {
+            let model: BrowsingModel
+            let store: SettingsStore
+            let framesBox: AllReviewedFrameStore
+            let triggerBox: AllReviewedTriggerBox
 
-                var body: some View {
-                    Group {
-                        if usesSystemToolbar {
-                            NavigationStack {
-                                GridScreen(browsing: model, thumbnails: model.thumbnails)
-                            }
-                        } else {
-                            GridScreen(browsing: model, thumbnails: model.thumbnails)
-                        }
-                    }
-                    .environment(store)
-                    .environment(\.appLanguage, .english)
-                    .environment(\.cloveUserInterfaceIdiom, .pad)
-                    .environment(\.cloveTheme, .dark)
-                    .environment(\.usesSystemBrowsingToolbar, usesSystemToolbar)
-                    .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
-                        framesBox.frames = $0
-                    }
+            var body: some View {
+                NavigationStack {
+                    GridScreen(browsing: model, thumbnails: model.thumbnails)
+                }
+                .environment(store)
+                .environment(\.appLanguage, .english)
+                .environment(\.cloveUserInterfaceIdiom, .pad)
+                .environment(\.cloveTheme, .dark)
+                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) {
+                    framesBox.frames = $0
                 }
             }
+        }
 
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
-            let host = UIHostingController(
-                rootView: RegularGridHost(
-                    model: model, store: store, usesSystemToolbar: usesSystemToolbar,
-                    framesBox: framesBox, triggerBox: triggerBox))
-            host.traitOverrides.horizontalSizeClass = .regular
-            window.rootViewController = host
-            window.makeKeyAndVisible()
-            defer {
-                window.isHidden = true
-                window.rootViewController = nil
-            }
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let host = UIHostingController(
+            rootView: RegularGridHost(
+                model: model, store: store, framesBox: framesBox, triggerBox: triggerBox))
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
 
-            // Under All filter, iPad toolbar exposes Move Rejects control.
-            try await waitFor("iPad Move Rejects toolbar control did not mount") {
-                host.view.setNeedsLayout()
-                host.view.layoutIfNeeded()
-                return self.findCollectionView(in: window) != nil
-                    && self.hasRegularMoveRejectsControl(
-                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
-                        window: window)
-            }
+        // Under All filter, iPad toolbar exposes Move Rejects control.
+        try await waitFor("iPad Move Rejects toolbar control did not mount") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            return self.findCollectionView(in: window) != nil
+                && self.hasSystemToolbarMoveRejectsItem(in: host, window: window)
+        }
 
-            // Switching to empty Unmarked shows all-reviewed and suppresses iPad toolbar Move Rejects.
-            model.setFilter(.unmarked)
-            try await waitFor("iPad all-reviewed state did not suppress toolbar move rejects") {
-                host.view.setNeedsLayout()
-                host.view.layoutIfNeeded()
-                return framesBox.frames["clove.grid.allReviewed"] != nil
-                    && framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
-                    && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
-                    && !self.hasRegularMoveRejectsControl(
-                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
-                        window: window)
-            }
+        // Switching to empty Unmarked shows all-reviewed and suppresses iPad toolbar Move Rejects.
+        model.setFilter(.unmarked)
+        try await waitFor("iPad all-reviewed state did not suppress toolbar move rejects") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            return framesBox.frames["clove.grid.allReviewed"] != nil
+                && framesBox.frames["clove.grid.allReviewed.moveRejects"] != nil
+                && framesBox.frames["clove.grid.allReviewed.showAll"] != nil
+                && !self.hasSystemToolbarMoveRejectsItem(in: host, window: window)
+        }
 
-            // Invoking Show all photos clears filter back to All and restores toolbar Move Rejects.
-            triggerBox.sendTrigger("clove.grid.allReviewed.showAll")
-            try await waitFor("iPad Show all photos did not restore grid and toolbar Move Rejects")
-            {
-                host.view.setNeedsLayout()
-                host.view.layoutIfNeeded()
-                return model.state.filter == .all
-                    && self.findCollectionView(in: window) != nil
-                    && framesBox.frames["clove.grid.allReviewed"] == nil
-                    && self.hasRegularMoveRejectsControl(
-                        usesSystemToolbar: usesSystemToolbar, frames: framesBox.frames, in: host,
-                        window: window)
-            }
+        // Invoking Show all photos clears filter back to All and restores toolbar Move Rejects.
+        triggerBox.sendTrigger("clove.grid.allReviewed.showAll")
+        try await waitFor("iPad Show all photos did not restore grid and toolbar Move Rejects") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            return model.state.filter == .all
+                && self.findCollectionView(in: window) != nil
+                && framesBox.frames["clove.grid.allReviewed"] == nil
+                && self.hasSystemToolbarMoveRejectsItem(in: host, window: window)
         }
     }
 
@@ -823,18 +806,6 @@ struct GridAllReviewedTests {
                     hasUTCOffset: true)),
             marks: marks,
             metadata: metadata)
-    }
-
-    private func hasRegularMoveRejectsControl(
-        usesSystemToolbar: Bool,
-        frames: [String: CGRect],
-        in host: UIViewController,
-        window: UIWindow
-    ) -> Bool {
-        if usesSystemToolbar {
-            return hasSystemToolbarMoveRejectsItem(in: host, window: window)
-        }
-        return frames["clove.grid.moveRejects"] != nil
     }
 
     private func hasSystemToolbarMoveRejectsItem(in host: UIViewController, window: UIWindow)
