@@ -1,26 +1,21 @@
 import CloveCore
 import SwiftUI
+import UIKit
 
-/// Shared Filter toolbar button and popover menu reused by Grid and Detail across all devices.
-///
-/// Reuses ``GridFilterSheetHandoff`` so tapping `"More filters"` inside the popover dismisses the
-/// popover without animation and presents ``MetadataFilterSheet`` once dismissal completes.
-struct PhotoFilterPopoverButton: View {
+/// Shared Filter toolbar menu reused by Grid and Detail across all devices.
+struct PhotoFilterButton: View {
     let browsing: BrowsingModel
     var controlSize: ControlSize = .phone
     var identifierPrefix = "clove.grid.filter"
-    @Binding var filterHandoff: GridFilterSheetHandoff
-    let canPresentMetadataFilters: Bool
-    var popoverTrigger: Int = 0
-    let onCancelPendingMetadataFilters: () -> Void
-    let onCompleteMetadataFiltersHandoff: () -> Void
+    var onMoreFilters: (() -> Void)? = nil
 
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
-    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
-    @Environment(\.tapPickerTriggerRequest) private var tapPickerTriggerRequest
-    @State private var isAnchorReady = false
-    @State private var isPopoverContentMounted = false
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.self) private var environment
+
+    private static let standardLabels = LabelColour.allCases.filter { !$0.isExtended }
 
     private var hasFilter: Bool { browsing.hasActiveFilter }
 
@@ -32,305 +27,218 @@ struct PhotoFilterPopoverButton: View {
     var body: some View {
         let filterLabel = AppLocalization.string("Filter", language: language)
         let activeValue = AppLocalization.string(hasFilter ? "On" : "Off", language: language)
-        if usesSystemToolbar, #available(iOS 27.1, *) {
-            SystemToolbarFilterButton(
-                filterLabel: filterLabel,
-                activeValue: activeValue,
-                hasFilter: hasFilter,
-                identifierPrefix: identifierPrefix,
-                isPresented: popoverBinding,
-                onTap: handleTap,
-                onAnchorAppear: handleAnchorAppear,
-                onAnchorDisappear: handleAnchorDisappear,
-                popoverTrigger: popoverTrigger,
-                onTrigger: handlePopoverTrigger
-            ) {
-                popoverContent
+        Menu {
+            filterMenuContent
+        } label: {
+            if usesSystemToolbar {
+                Label(filterLabel, systemImage: "line.3.horizontal.decrease")
+                    .accessibilityLabel(filterLabel)
+                    .accessibilityValue(activeValue)
+                    .accessibilityAddTraits(hasFilter ? .isSelected : [])
+            } else {
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(fallbackSymbolFont)
+                    .foregroundStyle(GlassIconButton.symbolColour(isActive: hasFilter, in: theme))
+                    .frame(width: fallbackDiameter, height: fallbackDiameter)
+                    .contentShape(Circle())
+                    .cloveGlass(in: Circle())
             }
-        } else {
-            GlassIconButton(
-                label: filterLabel,
-                symbol: "line.3.horizontal.decrease",
-                isActive: hasFilter,
-                size: controlSize,
-                identifier: identifierPrefix,
-                action: handleTap
-            )
-            .popover(
-                isPresented: popoverBinding,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                popoverContent
-            }
-            .onChange(of: popoverTrigger) { _, _ in
-                handlePopoverTrigger()
-            }
-            .onAppear(perform: handleAnchorAppear)
-            .onDisappear(perform: handleAnchorDisappear)
         }
+        .menuOrder(.fixed)
+        .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
+        .help(filterLabel)
+        .accessibilityLabel(filterLabel)
+        .accessibilityValue(activeValue)
+        .accessibilityAddTraits(hasFilter ? .isSelected : [])
+        .accessibilityIdentifier(identifierPrefix)
     }
 
-    private var popoverBinding: Binding<Bool> {
-        Binding(
-            get: { filterHandoff.showsFilters && isAnchorReady && scenePhase == .active },
-            set: { presented in
-                if presented {
-                    onCancelPendingMetadataFilters()
-                }
-                filterHandoff.setFiltersPresented(presented)
-            })
+    private var fallbackDiameter: CGFloat {
+        GlassIconButton.diameter(for: controlSize)
     }
 
-    private var popoverContent: some View {
-        filterMenu
-            .environment(\.tapPickerTriggerRequest, tapPickerTriggerRequest)
-            .presentationCompactAdaptation(.popover)
-            .onAppear {
-                isPopoverContentMounted = true
-            }
-            .onDisappear {
-                isPopoverContentMounted = false
-                if filterHandoff.showsFilters {
-                    filterHandoff.setFiltersPresented(false)
-                }
-                onCompleteMetadataFiltersHandoff()
-            }
-            .onChange(of: tapPickerTriggerRequest) { _, request in
-                if request?.id == "\(identifierPrefix).more",
-                    isPopoverContentMounted,
-                    canPresentMetadataFilters,
-                    browsing.metadataFilterOptions.hasAnyDimension
-                        || !browsing.metadataFilter.isEmpty
-                {
-                    triggerMoreFilters()
-                }
-            }
-    }
-
-    private func triggerMoreFilters() {
-        guard filterHandoff.showsFilters, isAnchorReady, isPopoverContentMounted,
-            scenePhase == .active
-        else { return }
-        onCancelPendingMetadataFilters()
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            filterHandoff.requestMetadataFiltersFromPopover(folder: browsing.state.folder)
-        }
-    }
-
-    private func handleTap() {
-        let isCurrentlyPresented =
-            filterHandoff.showsFilters
-            && isAnchorReady
-            && isPopoverContentMounted
-            && scenePhase == .active
-        isAnchorReady = true
-        onCancelPendingMetadataFilters()
-        filterHandoff.setFiltersPresented(!isCurrentlyPresented)
-    }
-
-    private func handleAnchorAppear() {
-        isAnchorReady = true
-    }
-
-    private func handleAnchorDisappear() {
-        isAnchorReady = false
-        filterHandoff.setFiltersPresented(false)
-    }
-
-    private func handlePopoverTrigger() {
-        if isAnchorReady, scenePhase == .active {
-            onCancelPendingMetadataFilters()
-            filterHandoff.setFiltersPresented(true)
+    private var fallbackSymbolFont: Font {
+        switch controlSize {
+        case .phone: .title3
+        case .pad: .body
+        case .duo: .callout
         }
     }
 
     @ViewBuilder
-    private var filterMenu: some View {
+    private var filterMenuContent: some View {
         let counts = browsing.sidebarCounts
-        VStack(spacing: 0) {
-            filterRow(
-                AppLocalization.string("All", language: language), count: counts.all, filter: .all,
+
+        Section {
+            statusRow(
+                AppLocalization.string("All", language: language),
+                count: counts.all,
+                filter: .all,
                 identifier: "all")
-            filterRow(
-                AppLocalization.string("Unmarked", language: language), count: counts.unmarked,
-                filter: .unmarked, identifier: "unmarked")
-            filterRow(
-                AppLocalization.string("Rejected", language: language), count: counts.rejected,
-                filter: .rejected, identifier: "rejected")
-            Divider().overlay(Color.clove.separator)
-            HStack {
-                Text(AppLocalization.string("Rating ≥", language: language))
-                Spacer()
-                FilterStarRow(rating: minimumRating, identifier: "\(identifierPrefix).stars") {
-                    rating in
-                    browsing.setFilter(rating == .unrated ? .all : .ratedAtLeast(rating))
-                    filterHandoff.setFiltersPresented(false)
+            statusRow(
+                AppLocalization.string("Unmarked", language: language),
+                count: counts.unmarked,
+                filter: .unmarked,
+                identifier: "unmarked")
+            statusRow(
+                AppLocalization.string("Rejected", language: language),
+                count: counts.rejected,
+                filter: .rejected,
+                identifier: "rejected")
+        }
+
+        Section(AppLocalization.string("Rating ≥", language: language)) {
+            ControlGroup {
+                ForEach(EnabledRatings.all.levels, id: \.rawValue) { level in
+                    let stars = level.starCount ?? 0
+                    let isSelected = browsing.labelFilter == nil && minimumRating == level
+                    let title = AppLocalization.format("★%lld+", language: language, Int64(stars))
+                    Toggle(
+                        isOn: Binding(
+                            get: { isSelected },
+                            set: { _ in
+                                browsing.setFilter(isSelected ? .all : .ratedAtLeast(level))
+                            }
+                        )
+                    ) {
+                        Label {
+                            Text(title)
+                        } icon: {
+                            Image(uiImage: ratingChipImage(title: title, selected: isSelected))
+                        }
+                    }
+                    .accessibilityLabel(AppLocalization.starCount(stars, language: language))
+                    .accessibilityIdentifier("\(identifierPrefix).stars.\(level.rawValue)")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            HStack(spacing: 12) {
-                Text(AppLocalization.string("Label", language: language))
-                Spacer()
-                ForEach(LabelColour.allCases.filter { !$0.isExtended }, id: \.self) { label in
-                    Button {
-                        browsing.setLabelFilter(label)
-                        filterHandoff.setFiltersPresented(false)
-                    } label: {
-                        Circle().fill(Color.clove.label.colour(for: label))
-                            .frame(width: 16, height: 16)
-                            .frame(height: 32)
+            .controlGroupStyle(.palette)
+        }
+
+        Section(AppLocalization.string("Label", language: language)) {
+            ControlGroup {
+                ForEach(Self.standardLabels, id: \.self) { label in
+                    let isSelected = browsing.labelFilter == label
+                    let labelTitle = AppLocalization.colourName(label, language: language)
+                    Toggle(
+                        isOn: Binding(
+                            get: { isSelected },
+                            set: { _ in
+                                if isSelected {
+                                    browsing.setFilter(.all)
+                                } else {
+                                    browsing.setLabelFilter(label)
+                                }
+                            }
+                        )
+                    ) {
+                        Label {
+                            Text(labelTitle)
+                        } icon: {
+                            Image(uiImage: labelDotImage(for: label, selected: isSelected))
+                        }
                     }
                     .accessibilityLabel(
-                        AppLocalization.format(
-                            "Label, %@", language: language,
-                            AppLocalization.colourName(label, language: language))
+                        AppLocalization.format("Label, %@", language: language, labelTitle)
                     )
                     .accessibilityIdentifier(
                         "\(identifierPrefix).label.\(label.rawValue.lowercased())")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            if canPresentMetadataFilters,
-                browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty
-            {
-                Divider().overlay(Color.clove.separator)
-                Button {
-                    triggerMoreFilters()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "slider.horizontal.3")
-                            .frame(width: 16)
-                            .foregroundStyle(
-                                browsing.metadataFilter.isEmpty
-                                    ? Color.clove.text.secondary : Color.clove.accent)
-                        Text(AppLocalization.string("More filters", language: language))
-                        Spacer()
-                        if !browsing.metadataFilter.isEmpty {
-                            Text(
-                                browsing.metadataFilter.activeCount.formatted(
-                                    .number.locale(language.locale))
-                            )
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Color.clove.accent, in: Capsule())
-                            .accessibilityIdentifier("\(identifierPrefix).more.badge")
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.clove.text.secondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 42)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("\(identifierPrefix).more")
+            .controlGroupStyle(.palette)
+        }
+
+        if let onMoreFilters,
+            browsing.metadataFilterOptions.hasAnyDimension || !browsing.metadataFilter.isEmpty
+        {
+            Section {
+                moreFiltersButton(action: onMoreFilters)
+                    .tint(
+                        browsing.metadataFilter.isEmpty
+                            ? Color.clove.text.primary : Color.clove.accent
+                    )
+                    .accessibilityIdentifier("\(identifierPrefix).more")
             }
         }
-        .font(.subheadline)
-        .foregroundStyle(Color.clove.text.primary)
-        .frame(width: 280)
-        .background(Color.clove.surface.sheet)
     }
 
-    private func filterRow(_ name: String, count: Int, filter: PhotoFilter, identifier: String)
-        -> some View
-    {
-        Button {
-            browsing.setFilter(filter)
-            filterHandoff.setFiltersPresented(false)
-        } label: {
-            HStack {
-                Image(systemName: "checkmark")
-                    .opacity(
-                        browsing.state.filter == filter && browsing.labelFilter == nil ? 1 : 0
-                    )
-                    .frame(width: 16)
-                Text(name)
-                Spacer()
-                Text(count.formatted(.number.locale(language.locale)))
-                    .foregroundStyle(Color.clove.text.secondary)
+    @ViewBuilder
+    private func moreFiltersButton(action: @escaping () -> Void) -> some View {
+        let title = AppLocalization.string("More filters", language: language)
+        if browsing.metadataFilter.isEmpty {
+            Button(action: action) {
+                Label(title, systemImage: "slider.horizontal.3")
             }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 40)
-            .contentShape(Rectangle())
+        } else {
+            let activeText = AppLocalization.format(
+                "%lld filters", language: language,
+                Int64(browsing.metadataFilter.activeCount))
+            Button(action: action) {
+                Text(title)
+                Text(activeText)
+                Image(systemName: "slider.horizontal.3")
+            }
         }
-        .buttonStyle(.plain)
+    }
+
+    private func statusRow(
+        _ name: String, count: Int, filter: PhotoFilter, identifier: String
+    ) -> some View {
+        let isSelected = browsing.state.filter == filter && browsing.labelFilter == nil
+        let countText = count.formatted(.number.locale(language.locale))
+        return Toggle(
+            isOn: Binding(
+                get: { isSelected },
+                set: { _ in browsing.setFilter(filter) }
+            )
+        ) {
+            Text(name)
+            Text(countText)
+        }
         .accessibilityIdentifier("\(identifierPrefix).\(identifier)")
     }
 
-    /// Runs the deferred yield before presenting ``MetadataFilterSheet`` after popover dismissal.
-    @MainActor
-    static func scheduleMetadataFiltersHandoff(
-        handoffTask: inout Task<Void, Never>?,
-        canPresent: @escaping @MainActor () -> Bool,
-        consume: @escaping @MainActor () -> Bool,
-        present: @escaping @MainActor () -> Void,
-        clearTask: @escaping @MainActor () -> Void
-    ) {
-        guard canPresent() else { return }
-        handoffTask?.cancel()
-        handoffTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            if consume() {
-                present()
-            }
-            clearTask()
+    private func ratingChipImage(title: String, selected: Bool) -> UIImage {
+        let size = CGSize(width: 38, height: 28)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = displayScale
+        format.opaque = false
+        let textColor =
+            selected
+            ? UIColor(Color.clove.accent.resolve(in: environment))
+            : UIColor(Color.clove.text.primary.resolve(in: environment))
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 13, weight: selected ? .bold : .semibold),
+                .foregroundColor: textColor,
+            ]
+            let attributed = NSAttributedString(string: title, attributes: attributes)
+            let textSize = attributed.size()
+            let textOrigin = CGPoint(
+                x: (size.width - textSize.width) / 2,
+                y: (size.height - textSize.height) / 2)
+            attributed.draw(at: textOrigin)
         }
-    }
-}
-
-@available(iOS 27.1, *)
-private struct SystemToolbarFilterButton<PopoverContent: View>: View {
-    let filterLabel: String
-    let activeValue: String
-    let hasFilter: Bool
-    let identifierPrefix: String
-    @Binding var isPresented: Bool
-    let onTap: () -> Void
-    let onAnchorAppear: () -> Void
-    let onAnchorDisappear: () -> Void
-    let popoverTrigger: Int
-    let onTrigger: () -> Void
-    @ViewBuilder let popoverContent: () -> PopoverContent
-
-    @Environment(\.toolbarVerticalEdge) private var verticalEdge
-
-    private var arrowEdge: Edge {
-        switch verticalEdge {
-        case .leading: .leading
-        case .trailing: .trailing
-        default: .top
-        }
+        .withRenderingMode(.alwaysOriginal)
     }
 
-    var body: some View {
-        Button(filterLabel, systemImage: "line.3.horizontal.decrease", action: onTap)
-            .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
-            .help(filterLabel)
-            .accessibilityLabel(filterLabel)
-            .accessibilityValue(activeValue)
-            .accessibilityAddTraits(hasFilter ? .isSelected : [])
-            .accessibilityIdentifier(identifierPrefix)
-            .popover(
-                isPresented: $isPresented,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: arrowEdge
-            ) {
-                popoverContent()
+    private func labelDotImage(for label: LabelColour, selected: Bool) -> UIImage {
+        let size = CGSize(width: 22, height: 22)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = displayScale
+        format.opaque = false
+        let dotColor = UIColor(Color.clove.label.colour(for: label).resolve(in: environment))
+        let ringColor = UIColor(Color.clove.text.primary.resolve(in: environment))
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let cg = context.cgContext
+            let dotRect = CGRect(x: 4, y: 4, width: 14, height: 14)
+            cg.setFillColor(dotColor.cgColor)
+            cg.fillEllipse(in: dotRect)
+            if selected {
+                cg.setStrokeColor(ringColor.cgColor)
+                cg.setLineWidth(1.75)
+                cg.strokeEllipse(in: CGRect(x: 1.25, y: 1.25, width: 19.5, height: 19.5))
             }
-            .onChange(of: popoverTrigger) { _, _ in
-                onTrigger()
-            }
-            .onAppear(perform: onAnchorAppear)
-            .onDisappear(perform: onAnchorDisappear)
+        }
+        .withRenderingMode(.alwaysOriginal)
     }
 }
