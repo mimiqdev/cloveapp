@@ -128,6 +128,15 @@ extension CloveFlowTests {
             sheet.waitForExistence(timeout: 5),
             "MetadataFilterSheet did not appear from Filter menu in Select mode")
         let keywordOption = element(app, "clove.grid.metadataFilter.keyword.Coast")
+        let filterList = sheet.collectionViews.firstMatch
+        for _ in 0..<5 {
+            if keywordOption.exists && keywordOption.isHittable { break }
+            if filterList.exists {
+                filterList.swipeUp()
+            } else {
+                sheet.swipeUp()
+            }
+        }
         XCTAssertTrue(keywordOption.waitForExistence(timeout: 5))
         keywordOption.tap()
         doneButton.tap()
