@@ -258,7 +258,7 @@ extension CloveFlowTests {
             let filterButton = element(app, "clove.grid.filter")
             XCTAssertTrue(filterButton.waitForExistence(timeout: 5))
             filterButton.tap()
-            element(app, "clove.grid.filter.rejected").tap()
+            filterMenuItem(app, "Rejected").tap()
 
             XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
             let hiddenCount = element(app, "clove.grid.batch.hiddenCount")
@@ -290,7 +290,7 @@ extension CloveFlowTests {
 
             // Switching filter back to All restores all 3 selected photos.
             filterButton.tap()
-            element(app, "clove.grid.filter.all").tap()
+            filterMenuItem(app, "All").tap()
             XCTAssertEqual(element(app, "clove.grid.batch.count").label, "3 selected")
             XCTAssertFalse(element(app, "clove.grid.batch.hiddenCount").exists)
         }

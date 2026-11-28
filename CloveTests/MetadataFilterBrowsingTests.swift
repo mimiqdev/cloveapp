@@ -599,7 +599,7 @@ struct MetadataFilterBrowsingTests {
         #expect(model.metadataFilterOptions.keywords.isEmpty)
     }
 
-    @Test func filterPopoverAndMetadataSheetRenderFromCachedCountsAndOptions() async throws {
+    @Test func filterMenuAndMetadataSheetRenderFromCachedCountsAndOptions() async throws {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let library = TestLibrary.forLaunch(environment: [
@@ -612,15 +612,11 @@ struct MetadataFilterBrowsingTests {
 
         struct HostView: View {
             let browsing: BrowsingModel
-            @State private var handoff = GridFilterSheetHandoff()
             var body: some View {
                 VStack {
-                    PhotoFilterPopoverButton(
+                    PhotoFilterButton(
                         browsing: browsing,
-                        filterHandoff: $handoff,
-                        canPresentMetadataFilters: true,
-                        onCancelPendingMetadataFilters: {},
-                        onCompleteMetadataFiltersHandoff: {})
+                        onMoreFilters: {})
                     MetadataFilterSheet(browsing: browsing)
                 }
                 .environment(\.cloveTheme, .light)
@@ -692,6 +688,52 @@ struct MetadataFilterBrowsingTests {
                 #expect(rendered.size.width > 0 && rendered.size.height > 0)
             }
         }
+    }
+
+    @MainActor
+    @Test func testLibraryMetadataSamplesExposeAllFilterDimensions() {
+        let library = TestLibrary.forLaunch(environment: [
+            TestLibrary.launchVariable: "1",
+            TestLibrary.metadataSamplesVariable: "1",
+        ])
+        let model = BrowsingModel(library: library)
+        model.openFolder()
+
+        let options = model.metadataFilterOptions
+        #expect(options.hasAnyDimension)
+        #expect(options.cameras.map(\.value) == ["ILCE-1M2", "ILCE-7M4"])
+        #expect(
+            options.lenses.map(\.value) == [
+                "FE 24-70mm F2.8 GM II", "FE 35mm F1.4 GM", "FE 85mm F1.4 GM",
+            ])
+        #expect(options.focalLengths.map(\.value) == [.wide, .standard, .shortTelephoto])
+        #expect(options.keywords.map(\.value) == ["Coast", "Portrait"])
+    }
+
+    @MainActor
+    @Test func gridScreenAndDetailMarkingAllowMetadataFiltersInDuoExpandedCoverAndPadDetail() {
+        // Ordinary phone Grid and Compact iPad Grid allow "More filters"; Regular iPad Grid uses sidebar.
+        #expect(
+            GridScreen.allowsMetadataFilters(
+                isRegular: false, usesDock: false, route: .grid))
+        #expect(
+            !GridScreen.allowsMetadataFilters(
+                isRegular: true, usesDock: false, route: .grid))
+        // Expanded Duo Grid & Duo Cover Grid always allow "More filters" even when Expanded Duo is .regular.
+        #expect(
+            GridScreen.allowsMetadataFilters(
+                isRegular: true, usesDock: true, route: .grid))
+        #expect(
+            GridScreen.allowsMetadataFilters(
+                isRegular: false, usesDock: true, route: .grid))
+        // GridScreen's own filterButton does not present when route is .detail (Detail owns its sheet).
+        #expect(
+            !GridScreen.allowsMetadataFilters(
+                isRegular: false, usesDock: true, route: .detail))
+
+        // DetailMarkingView allows "More filters" across Phone, iPad, Duo Cover, and Expanded Duo unless comparing.
+        #expect(DetailMarkingView.allowsMetadataFilters(isComparing: false))
+        #expect(!DetailMarkingView.allowsMetadataFilters(isComparing: true))
     }
 
     private func assertCachedStateMatchesPlacedPhotos(_ model: BrowsingModel) {

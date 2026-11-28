@@ -483,71 +483,6 @@ struct BrowsingLayoutTests {
         }
     }
 
-    @Test func preparationAndFilterPopoversSurviveDetailAndSnapshotTransitions() async throws {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let library = TestLibrary.forLaunch(
-            environment: [
-                TestLibrary.launchVariable: "1",
-                TestLibrary.preparationVariable: "preparing",
-            ])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        let photo = try #require(model.photos.first?.id)
-        let duoBox = TestDuoEnvironmentBox()
-
-        struct HostView: View {
-            let model: BrowsingModel
-            let duoBox: TestDuoEnvironmentBox
-            var body: some View {
-                NavigationStack {
-                    GridScreen(
-                        browsing: model,
-                        thumbnails: model.thumbnails,
-                        filterPopoverTrigger: duoBox.filterPopoverTrigger)
-                }
-                .environment(SettingsStore.sample)
-                .environment(\.usesSystemBrowsingToolbar, duoBox.usesSystemToolbar)
-                .environment(\.usesVerticalBrowsingToolbar, duoBox.usesVertical)
-                .environment(\.hasFoldRegion, duoBox.hasFoldRegion)
-                .environment(\.isDuoExpanded, duoBox.isDuoExpanded)
-                .environment(\.isDuoCover, duoBox.isDuoCover)
-                .environment(\.scenePhase, duoBox.scenePhase)
-            }
-        }
-
-        let host = UIHostingController(rootView: HostView(model: model, duoBox: duoBox))
-        host.traitOverrides.horizontalSizeClass = .regular
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 900, height: 600)
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        try await Task.sleep(for: .milliseconds(80))
-        window.layoutIfNeeded()
-        duoBox.filterPopoverTrigger += 1
-        try await waitFor("grid filter popover presented") {
-            self.topPresentedViewController(from: host) != nil
-        }
-        duoBox.isDuoExpanded = false
-        duoBox.usesVertical = false
-        duoBox.hasFoldRegion = false
-        model.openPhoto(photo)
-        duoBox.scenePhase = .inactive
-        UIView.performWithoutAnimation {
-            host.view.setNeedsLayout()
-            host.view.layoutIfNeeded()
-            _ = window.snapshotView(afterScreenUpdates: true)
-        }
-        try await waitFor("grid filter popover dismissed on route/snapshot change") {
-            self.topPresentedViewController(from: host) == nil
-        }
-    }
-
     @Test func ordinaryPhoneLandscapeGridAdaptsColumnsAndPreservesScrollAnchorAcrossRotation()
         async throws
     {
@@ -702,62 +637,6 @@ struct BrowsingLayoutTests {
         let firstCell = grid.layoutAttributesForItem(at: IndexPath(item: 0, section: 0))
         if let firstCell, let fourthCell {
             #expect(fourthCell.frame.minY > firstCell.frame.maxY)
-        }
-    }
-
-    @Test func gridFilterPopoverDismissesOnOrientationChange() async throws {
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let model = BrowsingModel(library: TestLibrary.sample())
-        model.openFolder()
-        let box = TestDuoEnvironmentBox()
-        box.isDuoExpanded = false
-        box.usesVertical = false
-        box.hasFoldRegion = false
-
-        struct HostView: View {
-            let model: BrowsingModel
-            let box: TestDuoEnvironmentBox
-            var body: some View {
-                NavigationStack {
-                    GridScreen(
-                        browsing: model,
-                        thumbnails: model.thumbnails,
-                        filterPopoverTrigger: box.filterPopoverTrigger)
-                }
-                .environment(SettingsStore.sample)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.usesSystemBrowsingToolbar, true)
-                .environment(\.scenePhase, .active)
-            }
-        }
-
-        let host = UIHostingController(rootView: HostView(model: model, box: box))
-        host.traitOverrides.horizontalSizeClass = .compact
-        host.traitOverrides.verticalSizeClass = .regular
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 430, height: 932)
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        try await Task.sleep(for: .milliseconds(80))
-        window.layoutIfNeeded()
-        box.filterPopoverTrigger += 1
-        try await waitFor("grid filter popover presented") {
-            self.topPresentedViewController(from: host) != nil
-        }
-
-        host.traitOverrides.horizontalSizeClass = .regular
-        host.traitOverrides.verticalSizeClass = .compact
-        window.frame = CGRect(x: 0, y: 0, width: 932, height: 430)
-        host.view.setNeedsLayout()
-        host.view.layoutIfNeeded()
-        try await waitFor("grid filter popover dismissed on orientation change") {
-            self.topPresentedViewController(from: host) == nil
         }
     }
 
@@ -2520,9 +2399,7 @@ struct BrowsingLayoutTests {
         }
     }
 
-    @Test func filterPopoverAnchorsToToolbarButtonAndReopensReliablyAcrossDismissCycles()
-        async throws
-    {
+    @Test func filterMenuMountsNativeBarMenuAcrossSystemToolbarLayouts() async throws {
         guard #available(iOS 27.1, *) else { return }
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -2628,500 +2505,39 @@ struct BrowsingLayoutTests {
                     identifier: entry.expectedFilterID, in: host, window: window)
             }
 
-            let snapshot = inspectToolbarState(in: host, window: window)
-            let filterFrame = try #require(
-                snapshot.frame(for: entry.expectedFilterID),
-                Comment(rawValue: "\(entry.name) missing filterFrame in \(snapshot.description)"))
-
-            // Open -> verify anchoring -> dismiss -> re-open across 3 cycles, including filter change.
-            for cycle in 1...3 {
-                try triggerToolbarButton(
-                    identifier: entry.expectedFilterID, expectedFrame: filterFrame, in: host,
-                    window: window)
-                try await waitFor("\(entry.name) popover did not present on cycle \(cycle)") {
-                    guard let vc = self.topPresentedViewController(from: host) else {
-                        return false
-                    }
-                    return !vc.isBeingPresented && !vc.isBeingDismissed
-                        && vc.transitionCoordinator == nil
-                }
-
-                let presented = try #require(topPresentedViewController(from: host))
-                presented.view.setNeedsLayout()
-                presented.view.layoutIfNeeded()
-                window.layoutIfNeeded()
-
-                let popoverController = presented.popoverPresentationController
-                let presentedFrame = presented.view.convert(presented.view.bounds, to: window)
-                let sceneBounds = scene.coordinateSpace.bounds
-                let effectiveWidth = min(entry.size.width, sceneBounds.width)
-
-                #expect(
-                    popoverController != nil,
-                    Comment(
-                        rawValue: "\(entry.name) did not present as UIPopoverPresentationController"
-                    ))
-                let hasSource =
-                    popoverController?.sourceItem != nil
-                    || popoverController?.barButtonItem != nil
-                    || popoverController?.sourceView != nil
-                #expect(
-                    hasSource,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) popover lost sourceItem/barButtonItem/sourceView"))
-                #expect(
-                    presentedFrame.width >= 200 && presentedFrame.height >= 200,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) popover laid out empty frame \(presentedFrame)"))
-                #expect(
-                    presentedFrame.maxX > effectiveWidth * 0.5,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) popover anchored on leading side (\(presentedFrame)) instead of trailing filter button (\(filterFrame))"
-                    ))
-                if filterFrame.maxX <= sceneBounds.width + 1 {
-                    #expect(
-                        presentedFrame.maxX > filterFrame.minX,
-                        Comment(
-                            rawValue:
-                                "\(entry.name) popover (\(presentedFrame)) did not anchor beside filter button (\(filterFrame))"
-                        ))
-                    #expect(
-                        abs(presentedFrame.minY - filterFrame.minY) <= 120,
-                        Comment(
-                            rawValue:
-                                "\(entry.name) popover Y (\(presentedFrame.minY)) drifted far from filter button (\(filterFrame.minY))"
-                        ))
-                }
-                #expect(
-                    !(presentedFrame.minX < 20 && presentedFrame.minY < 60),
-                    Comment(
-                        rawValue:
-                            "\(entry.name) popover anchored at top-left (0,0): \(presentedFrame)"))
-
-                if cycle == 2 {
-                    model.setFilter(.unmarked)
-                    try await Task.sleep(for: .milliseconds(50))
-                }
-
-                await withCheckedContinuation { continuation in
-                    presented.dismiss(animated: false) {
-                        continuation.resume()
-                    }
-                }
-                try await waitFor("\(entry.name) popover did not dismiss on cycle \(cycle)") {
-                    self.topPresentedViewController(from: host) == nil
-                        && host.transitionCoordinator == nil
-                }
-                try await Task.sleep(for: .milliseconds(60))
-            }
+            let barItem = toolbarBarButtonItem(
+                identifier: entry.expectedFilterID, in: host, window: window)
+            let filterItem = try #require(
+                barItem,
+                Comment(
+                    rawValue:
+                        "\(entry.name) missing UIBarButtonItem for \(entry.expectedFilterID): \(describeToolbarState(in: host, window: window))"
+                ))
+            #expect(
+                filterItem.menu != nil,
+                Comment(rawValue: "\(entry.name) Filter bar item did not attach a native UIMenu"))
+            #expect(
+                topPresentedViewController(from: host) == nil,
+                Comment(rawValue: "\(entry.name) unexpectedly presented a custom popover"))
         }
     }
 
-    @Test func moreFiltersPopoverToSheetHandoffLatencyAndReopenAcrossLayouts() async throws {
-        guard #available(iOS 27.1, *) else { return }
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let library = TestLibrary.forLaunch(environment: [
-            TestLibrary.launchVariable: "1",
-            TestLibrary.metadataSamplesVariable: "1",
-        ])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        try await waitFor("folder did not open") { !model.isFolderOpening }
-        let photo = try #require(model.photos.first?.id)
-        let store = SettingsStore.sample
-        store.markGestureGuideSeen()
-
-        enum LayoutKind {
-            case phoneHorizontalGrid
-            case expandedDuoGrid
-            case phoneHorizontalDetail
-            case duoCoverDetail
-            case expandedDuoDetail
-            case iPadDetail
+    private func toolbarBarButtonItem(
+        identifier: String, in host: UIViewController, window: UIWindow
+    ) -> UIBarButtonItem? {
+        let navBar = findNavigationBar(in: window)
+        let navItem =
+            navBar?.topItem ?? findNavigationController(in: host)?.topViewController?.navigationItem
+        let topVC = findNavigationController(in: host)?.topViewController
+        let allItems =
+            (navItem?.leadingItemGroups.flatMap(\.barButtonItems) ?? [])
+            + (navItem?.trailingItemGroups.flatMap(\.barButtonItems) ?? [])
+            + (topVC?.toolbarItems ?? [])
+        return allItems.first {
+            $0.accessibilityIdentifier == identifier
+                || ((identifier == "clove.detail.filter" || identifier == "clove.grid.filter")
+                    && ($0.title == "Filter" || $0.accessibilityLabel == "Filter"))
         }
-
-        let cases:
-            [(
-                name: String, kind: LayoutKind, size: CGSize, idiom: UIUserInterfaceIdiom,
-                horizontal: UIUserInterfaceSizeClass, isDuoExpanded: Bool, isDuoCover: Bool,
-                usesSystemToolbar: Bool, usesVerticalToolbar: Bool, hasFoldRegion: Bool,
-                expectedFilterID: String
-            )] = [
-                (
-                    "phoneHorizontalGrid", .phoneHorizontalGrid, CGSize(width: 393, height: 852),
-                    .phone, .compact, false, false, true, false, false, "clove.grid.filter"
-                ),
-                (
-                    "phoneFallbackGrid", .phoneHorizontalGrid, CGSize(width: 393, height: 852),
-                    .phone, .compact, false, false, false, false, false, "clove.grid.filter"
-                ),
-                (
-                    "expandedDuoGrid", .expandedDuoGrid, CGSize(width: 951, height: 669),
-                    .phone, .regular, true, false, true, true, true, "clove.grid.filter"
-                ),
-                (
-                    "phoneHorizontalDetail", .phoneHorizontalDetail,
-                    CGSize(width: 393, height: 852),
-                    .phone, .compact, false, false, true, false, false, "clove.detail.filter"
-                ),
-                (
-                    "duoCoverDetail", .duoCoverDetail, CGSize(width: 466, height: 678),
-                    .phone, .compact, false, true, true, true, false, "clove.detail.filter"
-                ),
-                (
-                    "expandedDuoDetail", .expandedDuoDetail, CGSize(width: 951, height: 669),
-                    .phone, .regular, true, false, true, true, true, "clove.detail.filter"
-                ),
-                (
-                    "iPadDetail", .iPadDetail, CGSize(width: 1024, height: 768),
-                    .pad, .regular, false, false, true, false, false, "clove.detail.filter"
-                ),
-            ]
-
-        for entry in cases {
-            model.clearAllFilters()
-            if entry.kind == .phoneHorizontalGrid || entry.kind == .expandedDuoGrid {
-                if model.state.route != .grid { model.back() }
-            } else {
-                model.openPhoto(photo)
-            }
-
-            let window = UIWindow(windowScene: scene)
-            window.frame = CGRect(origin: .zero, size: entry.size)
-            let triggerBox = TestPickerTriggerBox()
-            let duoBox = TestDuoEnvironmentBox()
-            let headerFrames = TestHeaderFramesBox()
-            struct HostView: View {
-                let kind: LayoutKind
-                let model: BrowsingModel
-                let store: SettingsStore
-                let idiom: UIUserInterfaceIdiom
-                let isDuoExpanded: Bool
-                let isDuoCover: Bool
-                let usesSystemToolbar: Bool
-                let usesVerticalToolbar: Bool
-                let hasFoldRegion: Bool
-                let triggerBox: TestPickerTriggerBox
-                let duoBox: TestDuoEnvironmentBox
-                let headerFrames: TestHeaderFramesBox
-
-                var body: some View {
-                    NavigationStack {
-                        if kind == .phoneHorizontalDetail || kind == .iPadDetail {
-                            DetailScreen(browsing: model)
-                        } else {
-                            GridScreen(
-                                browsing: model,
-                                thumbnails: model.thumbnails,
-                                filterPopoverTrigger: duoBox.filterPopoverTrigger,
-                                initialPresentation: .focus)
-                        }
-                    }
-                    .environment(store)
-                    .environment(\.cloveUserInterfaceIdiom, idiom)
-                    .environment(\.isDuoExpanded, isDuoExpanded)
-                    .environment(\.isDuoCover, isDuoCover)
-                    .environment(\.usesSystemBrowsingToolbar, usesSystemToolbar)
-                    .environment(\.usesVerticalBrowsingToolbar, usesVerticalToolbar)
-                    .environment(\.hasFoldRegion, hasFoldRegion)
-                    .environment(\.scenePhase, duoBox.scenePhase)
-                    .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-                    .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                        headerFrames.frames = frames
-                    }
-                }
-            }
-            let host = UIHostingController(
-                rootView: HostView(
-                    kind: entry.kind,
-                    model: model,
-                    store: store,
-                    idiom: entry.idiom,
-                    isDuoExpanded: entry.isDuoExpanded,
-                    isDuoCover: entry.isDuoCover,
-                    usesSystemToolbar: entry.usesSystemToolbar,
-                    usesVerticalToolbar: entry.usesVerticalToolbar,
-                    hasFoldRegion: entry.hasFoldRegion,
-                    triggerBox: triggerBox,
-                    duoBox: duoBox,
-                    headerFrames: headerFrames))
-            host.traitOverrides.horizontalSizeClass = entry.horizontal
-            window.rootViewController = host
-            window.makeKeyAndVisible()
-            defer {
-                window.isHidden = true
-                window.rootViewController = nil
-            }
-
-            try await waitFor("\(entry.name) filter item did not mount") {
-                if entry.usesSystemToolbar {
-                    return self.hasToolbarItem(
-                        identifier: entry.expectedFilterID, in: host, window: window)
-                }
-                return headerFrames.frames[entry.expectedFilterID] != nil
-            }
-            let filterFrame: CGRect
-            if entry.usesSystemToolbar {
-                let snapshot = inspectToolbarState(in: host, window: window)
-                filterFrame = try #require(snapshot.frame(for: entry.expectedFilterID))
-            } else {
-                filterFrame = try #require(headerFrames.frames[entry.expectedFilterID])
-            }
-
-            // 1. Open Filter popover (and test two handoff cycles on the first layout to compare cold vs warm sheet presentation).
-            let cycles = entry.name == "phoneHorizontalGrid" ? 2 : 1
-            for cycle in 1...cycles {
-                if entry.usesSystemToolbar {
-                    try triggerToolbarButton(
-                        identifier: entry.expectedFilterID, expectedFrame: filterFrame, in: host,
-                        window: window)
-                } else {
-                    duoBox.filterPopoverTrigger += 1
-                }
-                try await waitFor("\(entry.name) popover did not present (cycle \(cycle))") {
-                    guard let vc = self.topPresentedViewController(from: host) else { return false }
-                    return !vc.isBeingPresented && !vc.isBeingDismissed
-                        && vc.transitionCoordinator == nil
-                }
-                let popoverVC = try #require(topPresentedViewController(from: host))
-                #expect(popoverVC.popoverPresentationController != nil)
-                popoverVC.view.setNeedsLayout()
-                popoverVC.view.layoutIfNeeded()
-                try await Task.sleep(for: .milliseconds(40))
-
-                // 2. Tap "More filters" inside popover and measure wall-clock latency until popover dismisses and sheet begins presenting.
-                let moreButtonID = "\(entry.expectedFilterID).more"
-                let tapStart = ContinuousClock.now
-                triggerBox.sendTrigger(moreButtonID)
-
-                var popoverDismissedMs: Double?
-                var sheetVC: UIViewController?
-                let deadline = tapStart + .seconds(2)
-                while ContinuousClock.now < deadline {
-                    let current = topPresentedViewController(from: host)
-                    if popoverDismissedMs == nil,
-                        popoverVC.presentingViewController == nil || current !== popoverVC
-                    {
-                        let d = ContinuousClock.now - tapStart
-                        popoverDismissedMs =
-                            Double(d.components.seconds) * 1000
-                            + Double(d.components.attoseconds) / 1e15
-                    }
-                    if let current,
-                        current !== popoverVC,
-                        current.sheetPresentationController != nil
-                    {
-                        sheetVC = current
-                        break
-                    }
-                    try await Task.sleep(for: .milliseconds(5))
-                }
-                let elapsed = ContinuousClock.now - tapStart
-                let elapsedMs =
-                    Double(elapsed.components.seconds) * 1000
-                    + Double(elapsed.components.attoseconds) / 1e15
-                let dismissMs = try #require(
-                    popoverDismissedMs,
-                    Comment(rawValue: "\(entry.name) popover did not dismiss"))
-                #expect(
-                    dismissMs < 150,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) cycle \(cycle) popover dismissal stalled for \(dismissMs) ms"
-                    ))
-                let presentedSheet = try #require(
-                    sheetVC,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) MetadataFilterSheet did not present after More filters"))
-                let maxSheetDelayMs: Double =
-                    (entry.name == "phoneHorizontalGrid" && cycle == 1) ? 250 : 200
-                #expect(
-                    elapsedMs < maxSheetDelayMs,
-                    Comment(
-                        rawValue:
-                            "\(entry.name) cycle \(cycle) sheet handoff took \(elapsedMs) ms"
-                    ))
-
-                try await waitFor("\(entry.name) MetadataFilterSheet did not finish presenting") {
-                    !presentedSheet.isBeingPresented && presentedSheet.transitionCoordinator == nil
-                }
-
-                // 3. Dismiss MetadataFilterSheet, tap Filter again, and verify anchored popover re-opens cleanly.
-                await withCheckedContinuation { continuation in
-                    presentedSheet.dismiss(animated: false) {
-                        continuation.resume()
-                    }
-                }
-                try await waitFor("\(entry.name) MetadataFilterSheet did not dismiss") {
-                    self.topPresentedViewController(from: host) == nil
-                        && host.transitionCoordinator == nil
-                }
-                try await Task.sleep(for: .milliseconds(60))
-            }
-
-            if entry.usesSystemToolbar {
-                try triggerToolbarButton(
-                    identifier: entry.expectedFilterID, expectedFrame: filterFrame, in: host,
-                    window: window)
-            } else {
-                duoBox.filterPopoverTrigger += 1
-            }
-            try await waitFor("\(entry.name) popover did not reopen after sheet") {
-                guard let vc = self.topPresentedViewController(from: host) else { return false }
-                return !vc.isBeingPresented && !vc.isBeingDismissed
-                    && vc.transitionCoordinator == nil
-            }
-            let reopened = try #require(topPresentedViewController(from: host))
-            reopened.view.setNeedsLayout()
-            reopened.view.layoutIfNeeded()
-            window.layoutIfNeeded()
-
-            let popoverController = reopened.popoverPresentationController
-            #expect(popoverController != nil)
-            let hasSource =
-                popoverController?.sourceItem != nil
-                || popoverController?.barButtonItem != nil
-                || popoverController?.sourceView != nil
-            #expect(hasSource)
-            let reopenedFrame = reopened.view.convert(reopened.view.bounds, to: window)
-            let sceneBounds = scene.coordinateSpace.bounds
-            let effectiveWidth = min(entry.size.width, sceneBounds.width)
-            #expect(reopenedFrame.width >= 200 && reopenedFrame.height >= 200)
-            #expect(reopenedFrame.maxX > effectiveWidth * 0.5)
-            if filterFrame.maxX <= sceneBounds.width + 1 {
-                #expect(reopenedFrame.maxX > filterFrame.minX)
-                #expect(abs(reopenedFrame.minY - filterFrame.minY) <= 120)
-            }
-            #expect(!(reopenedFrame.minX < 20 && reopenedFrame.minY < 60))
-
-            await withCheckedContinuation { continuation in
-                reopened.dismiss(animated: false) {
-                    continuation.resume()
-                }
-            }
-            try await waitFor("\(entry.name) reopened popover did not dismiss") {
-                self.topPresentedViewController(from: host) == nil
-                    && host.transitionCoordinator == nil
-            }
-            try await Task.sleep(for: .milliseconds(40))
-        }
-    }
-
-    @Test func moreFiltersHandoffCancelsOnSceneDeactivationAndFolderChange() async throws {
-        guard #available(iOS 27.1, *) else { return }
-        let scene = try #require(
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
-        let library = TestLibrary.forLaunch(environment: [
-            TestLibrary.launchVariable: "1",
-            TestLibrary.metadataSamplesVariable: "1",
-        ])
-        let model = BrowsingModel(library: library)
-        model.openFolder()
-        try await waitFor("folder did not open") { !model.isFolderOpening }
-        let store = SettingsStore.sample
-        store.markGestureGuideSeen()
-
-        let duoBox = TestDuoEnvironmentBox()
-        duoBox.usesSystemToolbar = true
-        duoBox.usesVertical = false
-        duoBox.hasFoldRegion = false
-        duoBox.isDuoExpanded = false
-        duoBox.isDuoCover = false
-        let triggerBox = TestPickerTriggerBox()
-
-        struct HostView: View {
-            let model: BrowsingModel
-            let store: SettingsStore
-            let duoBox: TestDuoEnvironmentBox
-            let triggerBox: TestPickerTriggerBox
-
-            var body: some View {
-                NavigationStack {
-                    GridScreen(
-                        browsing: model,
-                        thumbnails: model.thumbnails,
-                        filterPopoverTrigger: duoBox.filterPopoverTrigger
-                    )
-                    .environment(\.scenePhase, duoBox.scenePhase)
-                }
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.usesSystemBrowsingToolbar, duoBox.usesSystemToolbar)
-                .environment(\.usesVerticalBrowsingToolbar, duoBox.usesVertical)
-                .environment(\.hasFoldRegion, duoBox.hasFoldRegion)
-                .environment(\.isDuoExpanded, duoBox.isDuoExpanded)
-                .environment(\.isDuoCover, duoBox.isDuoCover)
-                .environment(\.scenePhase, duoBox.scenePhase)
-                .environment(\.tapPickerTriggerRequest, triggerBox.trigger)
-            }
-        }
-
-        let host = UIHostingController(
-            rootView: HostView(
-                model: model, store: store, duoBox: duoBox, triggerBox: triggerBox))
-        host.traitOverrides.horizontalSizeClass = .compact
-        let window = UIWindow(windowScene: scene)
-        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        try await waitFor("grid filter item did not mount") {
-            self.hasToolbarItem(identifier: "clove.grid.filter", in: host, window: window)
-        }
-        let snapshot = inspectToolbarState(in: host, window: window)
-        let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
-
-        // 1. Scene deactivation during More filters handoff cancels without presenting a stale sheet.
-        try triggerToolbarButton(
-            identifier: "clove.grid.filter", expectedFrame: filterFrame, in: host, window: window)
-        try await waitFor("filter popover did not present before scene deactivation") {
-            guard let vc = self.topPresentedViewController(from: host) else { return false }
-            return !vc.isBeingPresented && !vc.isBeingDismissed && vc.transitionCoordinator == nil
-        }
-        try await Task.sleep(for: .milliseconds(40))
-        triggerBox.sendTrigger("clove.grid.filter.more")
-        try await Task.sleep(for: .milliseconds(5))
-        duoBox.scenePhase = .inactive
-        UIView.performWithoutAnimation {
-            host.view.setNeedsLayout()
-            host.view.layoutIfNeeded()
-            _ = window.snapshotView(afterScreenUpdates: true)
-        }
-        try await waitFor("filter popover did not dismiss on scene deactivation") {
-            self.topPresentedViewController(from: host) == nil
-                && host.transitionCoordinator == nil
-        }
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(topPresentedViewController(from: host) == nil)
-
-        // 2. Folder close during More filters handoff cancels without presenting a stale sheet.
-        duoBox.scenePhase = .active
-        try await Task.sleep(for: .milliseconds(80))
-        try triggerToolbarButton(
-            identifier: "clove.grid.filter", expectedFrame: filterFrame, in: host, window: window)
-        try await waitFor("filter popover did not reopen after scene reactivation") {
-            guard let vc = self.topPresentedViewController(from: host) else { return false }
-            return !vc.isBeingPresented && !vc.isBeingDismissed && vc.transitionCoordinator == nil
-        }
-        try await Task.sleep(for: .milliseconds(40))
-        triggerBox.sendTrigger("clove.grid.filter.more")
-        try await Task.sleep(for: .milliseconds(5))
-        model.back()
-        try await waitFor("filter popover did not dismiss on folder close") {
-            self.topPresentedViewController(from: host) == nil
-                && host.transitionCoordinator == nil
-        }
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(topPresentedViewController(from: host) == nil)
     }
 
     private func triggerToolbarButton(
@@ -4470,7 +3886,6 @@ private final class TestDuoEnvironmentBox {
     var isDuoExpanded = true
     var isDuoCover = false
     var scenePhase: ScenePhase = .active
-    var filterPopoverTrigger = 0
 }
 
 @MainActor
