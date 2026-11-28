@@ -6,6 +6,7 @@ struct BatchKeywordsSheet: View {
     let browsing: BrowsingModel
     @Environment(SettingsStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
     @FocusState private var isInputFocused: Bool
     @State private var inputText = ""
@@ -47,34 +48,28 @@ struct BatchKeywordsSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        selectionSummary
-                        inputSection
-                        if isStagedConfirmation {
-                            if !stagedKeywords.isEmpty {
-                                stagedSection
-                            }
-                            if !suggestions.isEmpty {
-                                suggestionsSection(
-                                    title: AppLocalization.string("Recent", language: language))
-                            }
-                        } else {
-                            if !commonKeywords.isEmpty || !mixedKeywords.isEmpty {
-                                commonSection
-                            }
-                            if !suggestions.isEmpty {
-                                suggestionsSection(
-                                    title: AppLocalization.string(
-                                        "Suggestions", language: language))
-                            }
-                        }
+            List {
+                inputSection
+                if isStagedConfirmation {
+                    if !suggestions.isEmpty {
+                        suggestionsSection(
+                            title: AppLocalization.string("Recent", language: language))
                     }
-                    .padding(20)
+                } else {
+                    if !commonKeywords.isEmpty || !mixedKeywords.isEmpty {
+                        commonSection
+                    }
+                    if !suggestions.isEmpty {
+                        suggestionsSection(
+                            title: AppLocalization.string("Suggestions", language: language))
+                    }
                 }
-                .scrollDismissesKeyboard(.interactively)
-
+            }
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(12)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if isStagedConfirmation {
                     stagedConfirmFooter
                 }
@@ -107,6 +102,7 @@ struct BatchKeywordsSheet: View {
                 }
             }
         }
+        .tint(theme.tokens.accent.color)
         .background(Color.clove.surface.sheet)
         .presentationBackground(Color.clove.surface.sheet)
         .presentationDetents([.medium, .large])
@@ -135,12 +131,13 @@ struct BatchKeywordsSheet: View {
             }
         }
         .font(.subheadline.weight(.medium))
+        .textCase(nil)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("clove.keywords.summary")
     }
 
     private var inputSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        Section {
             HStack(spacing: 10) {
                 TextField(
                     AppLocalization.string(
@@ -152,7 +149,6 @@ struct BatchKeywordsSheet: View {
                 .submitLabel(.done)
                 .focused($isInputFocused)
                 .onSubmit { submitEnteredKeywords() }
-                .frame(minHeight: 44)
                 .accessibilityIdentifier("clove.keywords.input")
 
                 Button {
@@ -161,120 +157,90 @@ struct BatchKeywordsSheet: View {
                     Text(AppLocalization.string("Add", language: language))
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 34)
-                        .foregroundStyle(.white)
-                        .background(Color.clove.accent, in: Capsule())
-                        .opacity(canSubmitEntered ? 1 : 0.4)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .tint(theme.tokens.accent.color)
                 .disabled(!canSubmitEntered)
                 .accessibilityIdentifier("clove.keywords.apply")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
-
-            Text(
-                AppLocalization.string(
-                    "Separate multiple keywords with commas.", language: language)
-            )
-            .font(.caption)
-            .foregroundStyle(Color.clove.text.secondary)
-            .padding(.horizontal, 4)
-        }
-    }
-
-    private var commonSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !commonKeywords.isEmpty {
-                sectionTitle(AppLocalization.string("On all selected", language: language))
-                KeywordChipLayout(spacing: 8) {
-                    ForEach(commonKeywords, id: \.self) { keyword in
-                        Button {
-                            removeCommonKeyword(keyword)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(keyword)
-                                    .lineLimit(1)
-                                Image(systemName: "xmark.circle.fill")
-                                    .imageScale(.small)
-                                    .foregroundStyle(Color.clove.text.secondary)
-                            }
-                            .font(.subheadline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .frame(minHeight: 36)
-                            .foregroundStyle(Color.clove.text.primary)
-                            .background(Color.clove.surface.card, in: Capsule())
-                            .overlay(Capsule().strokeBorder(Color.clove.separator, lineWidth: 1))
-                            .contentShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canOperate)
-                        .opacity(canOperate ? 1 : 0.4)
-                        .accessibilityLabel(
-                            AppLocalization.format("Remove %@", language: language, keyword)
-                        )
-                        .accessibilityIdentifier("clove.keywords.remove.\(keyword)")
-                    }
-                }
-            }
-            if !mixedKeywords.isEmpty {
+        } header: {
+            selectionSummary
+        } footer: {
+            VStack(alignment: .leading, spacing: 12) {
                 Text(
-                    AppLocalization.format(
-                        "Also on some selected: %@", language: language,
-                        mixedKeywords.joined(separator: ", "))
+                    AppLocalization.string(
+                        "Separate multiple keywords with commas.", language: language)
                 )
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.secondary)
-                .padding(.horizontal, 4)
-                .accessibilityIdentifier("clove.keywords.mixed")
+
+                if isStagedConfirmation && !stagedKeywords.isEmpty {
+                    chipFlow {
+                        ForEach(stagedKeywords, id: \.self) { keyword in
+                            removableChip(
+                                keyword,
+                                identifier: "clove.keywords.staged.\(keyword)"
+                            ) {
+                                unstageKeyword(keyword)
+                            }
+                        }
+                    }
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .contain)
         }
+        .listRowBackground(theme.tokens.card.color)
     }
 
-    private var stagedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            KeywordChipLayout(spacing: 8) {
-                ForEach(stagedKeywords, id: \.self) { keyword in
-                    Button {
-                        unstageKeyword(keyword)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(keyword)
-                                .lineLimit(1)
-                            Image(systemName: "xmark.circle.fill")
-                                .imageScale(.small)
-                                .foregroundStyle(Color.clove.text.secondary)
+    @ViewBuilder
+    private var commonSection: some View {
+        if !commonKeywords.isEmpty || !mixedKeywords.isEmpty {
+            chipRow {
+                if !commonKeywords.isEmpty {
+                    sectionHeader(
+                        AppLocalization.string("On all selected", language: language))
+                    chipFlow {
+                        ForEach(commonKeywords, id: \.self) { keyword in
+                            removableChip(
+                                keyword,
+                                identifier: "clove.keywords.remove.\(keyword)"
+                            ) {
+                                removeCommonKeyword(keyword)
+                            }
                         }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .frame(minHeight: 36)
-                        .foregroundStyle(Color.clove.text.primary)
-                        .background(Color.clove.surface.card, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.clove.separator, lineWidth: 1))
-                        .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canOperate)
-                    .opacity(canOperate ? 1 : 0.4)
-                    .accessibilityLabel(
-                        AppLocalization.format("Remove %@", language: language, keyword)
-                    )
-                    .accessibilityIdentifier("clove.keywords.staged.\(keyword)")
+                }
+                if !mixedKeywords.isEmpty {
+                    mixedKeywordsText
+                        .padding(.top, commonKeywords.isEmpty ? 0 : 4)
                 }
             }
         }
     }
 
+    private var mixedKeywordsText: some View {
+        Text(
+            AppLocalization.format(
+                "Also on some selected: %@", language: language,
+                mixedKeywords.joined(separator: ", "))
+        )
+        .font(.caption)
+        .foregroundStyle(Color.clove.text.secondary)
+        .accessibilityIdentifier("clove.keywords.mixed")
+    }
+
     private func suggestionsSection(title: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(title)
-            KeywordChipLayout(spacing: 8) {
+        chipRow {
+            sectionHeader(title)
+            chipFlow {
                 ForEach(suggestions, id: \.self) { keyword in
-                    Button {
+                    keywordChip(
+                        accessibilityLabel: AppLocalization.format(
+                            "Add %@", language: language, keyword),
+                        identifier: "clove.keywords.suggestion.\(keyword)"
+                    ) {
                         if isStagedConfirmation {
                             stageKeywords([keyword])
                         } else {
@@ -288,25 +254,80 @@ struct BatchKeywordsSheet: View {
                             Text(keyword)
                                 .lineLimit(1)
                         }
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .frame(minHeight: 36)
-                        .foregroundStyle(Color.clove.text.primary)
-                        .background(Color.clove.surface.card, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Color.clove.separator, lineWidth: 1))
-                        .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!canOperate)
-                    .opacity(canOperate ? 1 : 0.4)
-                    .accessibilityLabel(
-                        AppLocalization.format("Add %@", language: language, keyword)
-                    )
-                    .accessibilityIdentifier("clove.keywords.suggestion.\(keyword)")
                 }
             }
         }
+    }
+
+    private func chipRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .contain)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    private func chipFlow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        KeywordChipLayout(spacing: 8) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func removableChip(
+        _ keyword: String,
+        identifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        keywordChip(
+            accessibilityLabel: AppLocalization.format("Remove %@", language: language, keyword),
+            identifier: identifier,
+            action: action
+        ) {
+            HStack(spacing: 6) {
+                Text(keyword)
+                    .lineLimit(1)
+                Image(systemName: "xmark.circle.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(Color.clove.text.secondary)
+            }
+        }
+    }
+
+    private func keywordChip<Label: View>(
+        accessibilityLabel: String,
+        identifier: String,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) -> some View {
+        Button(action: action) {
+            label()
+                .font(.subheadline)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(minHeight: 36)
+                .foregroundStyle(Color.clove.text.primary)
+                .background(Color.clove.surface.card, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.clove.separator, lineWidth: 1))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!canOperate)
+        .opacity(canOperate ? 1 : 0.4)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(Color.clove.text.secondary)
     }
 
     private var stagedConfirmFooter: some View {
@@ -317,25 +338,18 @@ struct BatchKeywordsSheet: View {
             } label: {
                 Text(Self.confirmTitle(targetCount: targets.count, language: language))
                     .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .foregroundStyle(.white)
-                    .background(Color.clove.accent, in: Capsule())
-                    .opacity(canConfirmStaged ? 1 : 0.4)
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(theme.tokens.accent.color)
             .disabled(!canConfirmStaged)
             .accessibilityIdentifier("clove.keywords.confirm")
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
         .background(Color.clove.surface.sheet)
-    }
-
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption.weight(.medium))
-            .foregroundStyle(Color.clove.text.secondary)
-            .padding(.horizontal, 4)
     }
 
     private func submitEnteredKeywords() {

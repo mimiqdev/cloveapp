@@ -5,6 +5,8 @@ struct BatchRenameNameSheet: View {
     @Bindable var flow: BatchRenameFlow
     let completion: () -> Void
     @Environment(SettingsStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
     @FocusState private var editing: Bool
     @State private var startText: String
@@ -34,39 +36,54 @@ struct BatchRenameNameSheet: View {
                 "Rename %lld photos", language: language, Int64(totalCount))
     }
 
+    private var navigationTitleText: String {
+        flow.isRunning
+            ? AppLocalization.format(
+                "Renaming %lld photos…", language: language, Int64(flow.order.count))
+            : AppLocalization.format(
+                "Rename %lld photos", language: language, Int64(flow.order.count))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(
-                    flow.isRunning
-                        ? AppLocalization.format(
-                            "Renaming %lld photos…", language: language, Int64(flow.order.count))
-                        : AppLocalization.format(
-                            "Rename %lld photos", language: language, Int64(flow.order.count))
-                )
-                .font(.title3.bold())
-                Text(Self.subtitleText(language: language))
-                    .font(.footnote)
-                    .foregroundStyle(Color.clove.text.secondary)
-                    .accessibilityIdentifier("clove.rename.subtitle")
-                    .reportHeaderControlFrame("clove.rename.subtitle")
+        NavigationStack {
+            List {
+                fieldsSection
+                destinationSection
+                previewSection
             }
-            .padding(.top, 8)
-            .onTapGesture { editing = false }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    fields
-                    destination
-                    preview
+            .listStyle(.insetGrouped)
+            .environment(\.defaultMinListRowHeight, 34)
+            .listSectionSpacing(8)
+            .scrollContentBackground(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .disabled(flow.isRunning)
+            .opacity(flow.isRunning ? 0.4 : 1)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                footer
+            }
+            .foregroundStyle(Color.clove.text.primary)
+            .background(Color.clove.surface.sheet)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(AppLocalization.string("Cancel", language: language)) {
+                        editing = false
+                        dismiss()
+                    }
+                    .foregroundStyle(Color.clove.accent)
+                    .disabled(flow.isRunning)
+                    .accessibilityIdentifier("clove.rename.nameSheet.cancel")
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .disabled(flow.isRunning)
-                .opacity(flow.isRunning ? 0.4 : 1)
+                ToolbarItem(placement: .principal) {
+                    Text(navigationTitleText)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                        .onTapGesture { editing = false }
+                }
             }
-            footer
         }
-        .padding(20)
-        .foregroundStyle(Color.clove.text.primary)
+        .tint(theme.tokens.accent.color)
         .background(Color.clove.surface.sheet)
         .presentationBackground(Color.clove.surface.sheet)
         .presentationDetents([.large])
@@ -89,33 +106,31 @@ struct BatchRenameNameSheet: View {
         }
     }
 
-    private var fields: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(AppLocalization.string("Prefix", language: language))
+    private var fieldsSection: some View {
+        Section {
+            LabeledContent(AppLocalization.string("Prefix", language: language)) {
                 TextField(
                     AppLocalization.string("e.g. Wedding_", language: language),
                     text: $flow.options.prefix
                 )
                 .multilineTextAlignment(.trailing)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
                 .focused($editing)
                 .accessibilityIdentifier("clove.rename.prefix")
             }
-            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .reportHeaderControlFrame("clove.rename.prefix")
-            Divider()
+
             Toggle(
                 AppLocalization.string("Add capture date", language: language),
                 isOn: $flow.options.addsCaptureDate
             )
-            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .accessibilityIdentifier("clove.rename.captureDate")
             .reportHeaderControlFrame("clove.rename.captureDate")
-            Divider()
-            HStack {
-                Text(AppLocalization.string("Separator", language: language))
-                Spacer()
+
+            LabeledContent(AppLocalization.string("Separator", language: language)) {
                 Picker(
                     AppLocalization.string("Separator", language: language),
                     selection: $flow.options.separator
@@ -130,9 +145,9 @@ struct BatchRenameNameSheet: View {
                 .fixedSize()
                 .accessibilityIdentifier("clove.rename.separator")
             }
-            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .reportHeaderControlFrame("clove.rename.separator")
-            Divider()
+
             HStack(spacing: 8) {
                 Text(AppLocalization.string("Start number", language: language))
                 Spacer()
@@ -174,95 +189,114 @@ struct BatchRenameNameSheet: View {
                 .labelsHidden()
                 .accessibilityIdentifier("clove.rename.start")
             }
-            .frame(minHeight: 44)
-            Divider()
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+
             Stepper(value: $flow.options.digits, in: 1...255) {
                 HStack {
                     Text(AppLocalization.string("Digits", language: language))
                     Spacer()
                     Text("\(flow.options.digits)")
+                        .monospacedDigit()
                 }
             }
-            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .accessibilityIdentifier("clove.rename.digits")
             .reportHeaderControlFrame("clove.rename.digits")
+        } header: {
+            Text(Self.subtitleText(language: language))
+                .font(.footnote)
+                .foregroundStyle(Color.clove.text.secondary)
+                .textCase(nil)
+                .accessibilityIdentifier("clove.rename.subtitle")
+                .reportHeaderControlFrame("clove.rename.subtitle")
         }
-        .padding(.horizontal, 16)
-        .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
+        .listRowBackground(theme.tokens.card.color)
     }
 
-    private var destination: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle(AppLocalization.string("Where", language: language))
-            VStack(spacing: 0) {
-                whereChoice(
-                    AppLocalization.string("Keep in place", language: language), moves: false,
-                    identifier: "inPlace")
-                Divider()
-                whereChoice(
-                    AppLocalization.string("Move to a new folder", language: language), moves: true,
-                    identifier: "newFolder")
-                if flow.options.movesToFolder {
-                    Divider()
-                    TextField(
-                        AppLocalization.string("Folder name", language: language),
-                        text: $flow.options.folderName
-                    )
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($editing).frame(minHeight: 44)
-                    .accessibilityIdentifier("clove.rename.folderName")
-                }
+    private var destinationSection: some View {
+        Section(AppLocalization.string("Where", language: language)) {
+            whereChoice(
+                AppLocalization.string("Keep in place", language: language), moves: false,
+                identifier: "inPlace")
+            whereChoice(
+                AppLocalization.string("Move to a new folder", language: language), moves: true,
+                identifier: "newFolder")
+            if flow.options.movesToFolder {
+                TextField(
+                    AppLocalization.string("Folder name", language: language),
+                    text: $flow.options.folderName
+                )
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($editing)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .accessibilityIdentifier("clove.rename.folderName")
             }
-            .padding(.horizontal, 16)
-            .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
         }
+        .listRowBackground(theme.tokens.card.color)
     }
 
     private func whereChoice(_ label: String, moves: Bool, identifier: String) -> some View {
-        Button {
+        let isSelected = flow.options.movesToFolder == moves
+        return Button {
             flow.options.movesToFolder = moves
         } label: {
             HStack {
                 Text(label).foregroundStyle(Color.clove.text.primary)
                 Spacer()
-                if flow.options.movesToFolder == moves { Image(systemName: "checkmark") }
-            }.frame(minHeight: 44).contentShape(Rectangle())
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color.clove.accent)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(minHeight: 32)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(flow.options.movesToFolder == moves ? [.isSelected] : [])
+        .tint(Color.clove.text.primary)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
         .accessibilityIdentifier("clove.rename.where.\(identifier)")
     }
 
-    private var preview: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            sectionTitle(AppLocalization.string("Preview · in this order", language: language))
+    private var previewSection: some View {
+        Section {
             if let plan = flow.preview {
-                VStack(spacing: 0) {
-                    ForEach(Array(plan.rows.enumerated()), id: \.element.id) { index, row in
-                        previewRow(row, position: index + 1)
-                        if index < plan.rows.count - 1 { Divider().padding(.leading, 44) }
-                    }
+                ForEach(Array(plan.rows.enumerated()), id: \.element.id) { index, row in
+                    previewRow(row, position: index + 1)
                 }
-                .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
             } else {
-                ProgressView(AppLocalization.string("Preparing preview…", language: language))
-                    .frame(maxWidth: .infinity).padding()
+                HStack {
+                    Spacer()
+                    ProgressView(AppLocalization.string("Preparing preview…", language: language))
+                    Spacer()
+                }
+                .padding(.vertical, 8)
             }
+        } header: {
+            Text(AppLocalization.string("Preview · in this order", language: language))
+        } footer: {
             Text(Self.previewNoteText(language: language))
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.secondary)
-                .padding(.horizontal, 16)
                 .accessibilityIdentifier("clove.rename.previewNote")
                 .reportHeaderControlFrame("clove.rename.previewNote")
         }
+        .listRowBackground(theme.tokens.card.color)
     }
 
     private func previewRow(_ row: BatchRenameRow, position: Int) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Text("\(position)").font(.caption).foregroundStyle(Color.clove.text.secondary)
-                .frame(width: 16).padding(.top, 3)
+            Text("\(position)")
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.secondary)
+                .monospacedDigit()
+                .frame(width: 16)
+                .padding(.top, 3)
             VStack(alignment: .leading, spacing: 3) {
-                Text(row.newStem).font(.subheadline.weight(.semibold))
+                Text(row.newStem)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(
                         row.problems.isEmpty ? Color.clove.text.primary : Color.clove.reject)
                 if !row.problems.isEmpty {
@@ -270,7 +304,8 @@ struct BatchRenameNameSheet: View {
                         row.problems.map { $0.explanation(language: language) }.joined(
                             separator: " ")
                     )
-                    .font(.caption).foregroundStyle(Color.clove.reject)
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.reject)
                 } else if row.replacement != nil {
                     Text(
                         AppLocalization.string(
@@ -278,14 +313,17 @@ struct BatchRenameNameSheet: View {
                     )
                     .font(.caption)
                 } else {
-                    Text(oldName(row)).font(.caption).foregroundStyle(Color.clove.text.secondary)
+                    Text(oldName(row))
+                        .font(.caption)
+                        .foregroundStyle(Color.clove.text.secondary)
                 }
                 Text(
                     row.destinationRelativeFolder.isEmpty
                         ? AppLocalization.string("This folder", language: language)
                         : row.destinationRelativeFolder
                 )
-                .font(.caption2).foregroundStyle(Color.clove.text.secondary)
+                .font(.caption2)
+                .foregroundStyle(Color.clove.text.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if !row.problems.isEmpty || row.replacement != nil {
@@ -299,7 +337,7 @@ struct BatchRenameNameSheet: View {
                             language: language))
             }
         }
-        .padding(12)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("clove.rename.preview.\(row.id.stem)")
     }
@@ -310,82 +348,85 @@ struct BatchRenameNameSheet: View {
         return ([set.primary.url.lastPathComponent] + companions).joined(separator: " + ")
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title.uppercased()).font(.caption).foregroundStyle(Color.clove.text.secondary)
-            .padding(.horizontal, 16)
-    }
-
     private var footer: some View {
-        VStack(spacing: 8) {
-            if let message = flow.message {
-                Text(AppLocalization.string(message, language: language))
-                    .font(.footnote).foregroundStyle(Color.clove.reject)
-                    .accessibilityIdentifier("clove.rename.failure")
-            }
-            let replacements = flow.preview?.replacementCount ?? 0
-            let undoWarning = Text(
-                replacements > 0
-                    ? AppLocalization.format(
-                        "Renaming can't be undone. Replaced files move to %@.",
-                        language: language, store.settings.rejectsFolderName.rawValue)
-                    : AppLocalization.string("Renaming can't be undone.", language: language)
-            )
-            .font(.caption)
-            .foregroundStyle(Color.clove.text.secondary)
-            .multilineTextAlignment(.center)
-            .accessibilityIdentifier("clove.rename.warning")
-            .reportHeaderControlFrame("clove.rename.warning")
+        VStack(spacing: 0) {
+            Divider().overlay(Color.clove.separator)
+            VStack(spacing: 8) {
+                if let message = flow.message {
+                    Text(AppLocalization.string(message, language: language))
+                        .font(.footnote)
+                        .foregroundStyle(Color.clove.reject)
+                        .accessibilityIdentifier("clove.rename.failure")
+                }
+                let replacements = flow.preview?.replacementCount ?? 0
+                let undoWarning = Text(
+                    replacements > 0
+                        ? AppLocalization.format(
+                            "Renaming can't be undone. Replaced files move to %@.",
+                            language: language, store.settings.rejectsFolderName.rawValue)
+                        : AppLocalization.string("Renaming can't be undone.", language: language)
+                )
+                .font(.caption)
+                .foregroundStyle(Color.clove.text.secondary)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("clove.rename.warning")
+                .reportHeaderControlFrame("clove.rename.warning")
 
-            if flow.isRunning {
-                Text(
-                    AppLocalization.format(
-                        "Renaming %lld of %lld…", language: language,
-                        Int64(min(flow.finishedCount + 1, flow.order.count)),
-                        Int64(flow.order.count))
-                )
-                .font(.footnote)
-                .accessibilityIdentifier("clove.rename.progress")
-                .reportHeaderControlFrame("clove.rename.progress")
-                undoWarning
-                ProgressView(
-                    value: Double(flow.finishedCount), total: Double(max(flow.order.count, 1))
-                )
-                .tint(Color.clove.accent)
-                .accessibilityIdentifier("clove.rename.progressBar")
-                .reportHeaderControlFrame("clove.rename.progressBar")
-            } else {
-                if replacements > 0 {
+                if flow.isRunning {
                     Text(
                         AppLocalization.format(
-                            "%lld name is already used in the destination.", language: language,
-                            Int64(replacements))
+                            "Renaming %lld of %lld…", language: language,
+                            Int64(min(flow.finishedCount + 1, flow.order.count)),
+                            Int64(flow.order.count))
                     )
-                    .font(.caption)
-                    .accessibilityIdentifier("clove.rename.replacementCount")
-                }
-                undoWarning
-                Button {
-                    editing = false
-                    Task { await flow.rename(completion: completion) }
-                } label: {
-                    Text(
-                        Self.confirmTitle(
-                            totalCount: flow.order.count,
-                            replacementCount: replacements,
-                            language: language)
+                    .font(.footnote)
+                    .accessibilityIdentifier("clove.rename.progress")
+                    .reportHeaderControlFrame("clove.rename.progress")
+                    undoWarning
+                    ProgressView(
+                        value: Double(flow.finishedCount), total: Double(max(flow.order.count, 1))
                     )
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .foregroundStyle(.white)
-                    .background(Color.clove.accent, in: Capsule())
-                    .opacity(flow.canRename ? 1 : 0.4)
+                    .tint(theme.tokens.accent.color)
+                    .accessibilityIdentifier("clove.rename.progressBar")
+                    .reportHeaderControlFrame("clove.rename.progressBar")
+                } else {
+                    if replacements > 0 {
+                        Text(
+                            AppLocalization.format(
+                                "%lld name is already used in the destination.", language: language,
+                                Int64(replacements))
+                        )
+                        .font(.caption)
+                        .accessibilityIdentifier("clove.rename.replacementCount")
+                    }
+                    undoWarning
+                    Button {
+                        editing = false
+                        Task { await flow.rename(completion: completion) }
+                    } label: {
+                        Text(
+                            Self.confirmTitle(
+                                totalCount: flow.order.count,
+                                replacementCount: replacements,
+                                language: language)
+                        )
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .tint(theme.tokens.accent.color)
+                    .disabled(!flow.canRename)
+                    .accessibilityIdentifier("clove.rename.confirm")
+                    .reportHeaderControlFrame("clove.rename.confirm")
                 }
-                .buttonStyle(.plain)
-                .disabled(!flow.canRename)
-                .accessibilityIdentifier("clove.rename.confirm")
-                .reportHeaderControlFrame("clove.rename.confirm")
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
         }
         .frame(maxWidth: .infinity)
+        .background(Color.clove.surface.sheet)
     }
 }
