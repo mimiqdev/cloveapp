@@ -224,7 +224,7 @@ struct MetadataFilterSheet: View {
             .padding(.vertical, subtitle == nil ? 0 : 2)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .tint(Color.clove.text.primary)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier(identifier)
     }
