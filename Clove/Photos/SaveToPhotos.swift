@@ -175,16 +175,21 @@ struct SaveToPhotosConfirmationSheet: View {
     var hiddenSelectedCount = 0
     let onConfirm: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
 
     static func confirmTitle(eligibleCount: Int, language: ResolvedAppLanguage) -> String {
         AppLocalization.format("Save %lld Photos", language: language, Int64(eligibleCount))
     }
 
+    private var showsRawOnlyNote: Bool {
+        plan.eligibleCount == 0 && plan.skippedRawCount > 0
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(spacing: 0) {
+            List {
+                Section {
                     summaryRow(
                         title: AppLocalization.string("Ready to save", language: language),
                         count: plan.eligibleCount,
@@ -192,7 +197,6 @@ struct SaveToPhotosConfirmationSheet: View {
                         identifier: "clove.photos.sheet.ready"
                     )
                     if plan.skippedRawCount > 0 {
-                        Divider().overlay(Color.clove.separator)
                         summaryRow(
                             title: AppLocalization.string("RAW only · skipped", language: language),
                             count: plan.skippedRawCount,
@@ -200,51 +204,37 @@ struct SaveToPhotosConfirmationSheet: View {
                             identifier: "clove.photos.sheet.skipped"
                         )
                     }
+                } footer: {
+                    if showsRawOnlyNote || hiddenSelectedCount > 0 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if showsRawOnlyNote {
+                                Text(
+                                    AppLocalization.string(
+                                        "Selected photos are RAW-only. Clove saves existing JPEG and HEIF files without re-encoding RAW.",
+                                        language: language)
+                                )
+                                .accessibilityIdentifier("clove.photos.sheet.rawOnlyNote")
+                            }
+                            if hiddenSelectedCount > 0 {
+                                Text(
+                                    AppLocalization.format(
+                                        "%lld hidden by filter", language: language,
+                                        Int64(hiddenSelectedCount))
+                                )
+                                .accessibilityIdentifier("clove.photos.sheet.hiddenNote")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Color.clove.text.secondary)
+                    }
                 }
-                .padding(.horizontal, 16)
-                .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
-
-                if plan.eligibleCount == 0 && plan.skippedRawCount > 0 {
-                    Text(
-                        AppLocalization.string(
-                            "Selected photos are RAW-only. Clove saves existing JPEG and HEIF files without re-encoding RAW.",
-                            language: language)
-                    )
-                    .font(.caption)
-                    .foregroundStyle(Color.clove.text.secondary)
-                    .padding(.horizontal, 4)
-                    .accessibilityIdentifier("clove.photos.sheet.rawOnlyNote")
-                }
-
-                if hiddenSelectedCount > 0 {
-                    Text(
-                        AppLocalization.format(
-                            "%lld hidden by filter", language: language, Int64(hiddenSelectedCount))
-                    )
-                    .font(.caption)
-                    .foregroundStyle(Color.clove.text.secondary)
-                    .padding(.horizontal, 4)
-                    .accessibilityIdentifier("clove.photos.sheet.hiddenNote")
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    dismiss()
-                    onConfirm()
-                } label: {
-                    Text(Self.confirmTitle(eligibleCount: plan.eligibleCount, language: language))
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .foregroundStyle(.white)
-                        .background(Color.clove.accent, in: Capsule())
-                        .opacity(plan.eligibleCount > 0 ? 1 : 0.4)
-                }
-                .buttonStyle(.plain)
-                .disabled(plan.eligibleCount == 0)
-                .accessibilityIdentifier("clove.photos.sheet.confirm")
+                .listRowBackground(theme.tokens.card.color)
             }
-            .padding(20)
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                confirmFooter
+            }
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
             .navigationTitle(AppLocalization.string("Save to Photos", language: language))
@@ -259,6 +249,7 @@ struct SaveToPhotosConfirmationSheet: View {
                 }
             }
         }
+        .tint(theme.tokens.accent.color)
         .background(Color.clove.surface.sheet)
         .presentationBackground(Color.clove.surface.sheet)
         .presentationDetents([.medium])
@@ -266,6 +257,29 @@ struct SaveToPhotosConfirmationSheet: View {
         .presentationSizing(.form)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("clove.photos.sheet")
+    }
+
+    private var confirmFooter: some View {
+        VStack(spacing: 0) {
+            Divider().overlay(Color.clove.separator)
+            Button {
+                dismiss()
+                onConfirm()
+            } label: {
+                Text(Self.confirmTitle(eligibleCount: plan.eligibleCount, language: language))
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(theme.tokens.accent.color)
+            .disabled(plan.eligibleCount == 0)
+            .accessibilityIdentifier("clove.photos.sheet.confirm")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+        }
+        .background(Color.clove.surface.sheet)
     }
 
     private func summaryRow(
@@ -287,7 +301,6 @@ struct SaveToPhotosConfirmationSheet: View {
                 .monospacedDigit()
         }
         .font(.subheadline)
-        .frame(minHeight: 46)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(identifier)
     }
