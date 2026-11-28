@@ -1196,6 +1196,195 @@ struct FolderPreparationPresentationTests {
         }
     }
 
+    @Test func popoverDetailsFitsContentAcrossStatesWithoutCollapsingOrExcessSpace() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = GroupingPresentationStubLibrary(initialPhaseIdle: false)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("stub folder opened for popover sizing test") {
+            browsing.preparationStatus.totalPhotos == 12
+        }
+
+        let envBox = PreparationEnvironmentBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 900, height: 800)
+        window.traitOverrides.horizontalSizeClass = .regular
+        let host = makePreparationHost(browsing: browsing, envBox: envBox)
+        host.traitOverrides.horizontalSizeClass = .regular
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let enumeratingStatus = FolderPreparationStatus(
+            folder: library.folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: true,
+            isPartialScan: false,
+            waitingReason: nil,
+            totalPhotos: 0,
+            analysis: FolderPreparationTaskCounts(),
+            previews: FolderPreparationTaskCounts(),
+            readyForBothCount: 0,
+            bothSettledCount: 0,
+            issues: [])
+        library.emit(.preparation(enumeratingStatus))
+        try await waitFor("enumerating status applied") {
+            browsing.preparationStatus.phase == .enumeratingUnknown
+        }
+
+        try await Task.sleep(for: .milliseconds(80))
+        window.layoutIfNeeded()
+        envBox.presentTrigger += 1
+        try await waitFor("preparation popover presented") {
+            self.topPresentedViewController(from: host) != nil
+        }
+        let presented = try #require(topPresentedViewController(from: host))
+        try await waitFor("popover list settled to enumerating content height") {
+            presented.view.layoutIfNeeded()
+            guard let collectionView = self.findCollectionView(in: presented.view) else {
+                return false
+            }
+            let contentHeight = collectionView.contentSize.height
+            let frameHeight = collectionView.bounds.height
+            return collectionView.bounds.width >= 300
+                && frameHeight >= 180
+                && contentHeight > 0
+                && frameHeight >= contentHeight - 2
+                && frameHeight - contentHeight <= 16
+        }
+
+        let preparingStatus = FolderPreparationStatus(
+            folder: library.folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: nil,
+            totalPhotos: 12,
+            analysis: FolderPreparationTaskCounts(completed: 6),
+            previews: FolderPreparationTaskCounts(completed: 8),
+            readyForBothCount: 5,
+            bothSettledCount: 5,
+            issues: [])
+        library.emit(.preparation(preparingStatus))
+        try await waitFor("preparing status applied") {
+            browsing.preparationStatus.phase == .preparing
+        }
+        try await waitFor("popover list settled to preparing content height") {
+            presented.view.layoutIfNeeded()
+            guard let collectionView = self.findCollectionView(in: presented.view) else {
+                return false
+            }
+            let contentHeight = collectionView.contentSize.height
+            let frameHeight = collectionView.bounds.height
+            return collectionView.bounds.width >= 300
+                && frameHeight >= 200
+                && contentHeight > 0
+                && frameHeight >= contentHeight - 2
+                && frameHeight - contentHeight <= 16
+        }
+        let preparingListHeight = try #require(findCollectionView(in: presented.view)).bounds.height
+
+        // Adding 25 issues grows the popover cleanly and caps its height so it remains scrollable.
+        let manyIssues = (1...25).map { index in
+            FolderPreparationIssue(
+                photo: PhotoIdentity(
+                    folderID: library.folder, relativeFolderPath: "",
+                    stem: String(format: "MMQ%05d", index)),
+                fileName: String(format: "MMQ%05d.ARW", index),
+                task: .analysis,
+                reason: "The RAW render failed.")
+        }
+        let manyIssuesStatus = FolderPreparationStatus(
+            folder: library.folder,
+            folderName: "Coastal light",
+            generation: 1,
+            isEnumerating: false,
+            isPartialScan: false,
+            waitingReason: .memoryPressure,
+            totalPhotos: 36,
+            analysis: FolderPreparationTaskCounts(completed: 11, failed: 25),
+            previews: FolderPreparationTaskCounts(completed: 36),
+            readyForBothCount: 11,
+            bothSettledCount: 36,
+            issues: manyIssues)
+        library.emit(.preparation(manyIssuesStatus))
+        try await waitFor("popover grew and stayed capped for 25 issues") {
+            presented.view.layoutIfNeeded()
+            guard let collectionView = self.findCollectionView(in: presented.view) else {
+                return false
+            }
+            let listHeight = collectionView.bounds.height
+            return listHeight > preparingListHeight + 40
+                && listHeight <= 582
+                && collectionView.contentSize.height > listHeight
+        }
+
+        host.dismiss(animated: false)
+        try await waitFor("popover dismissed at end of sizing test") {
+            self.topPresentedViewController(from: host) == nil
+        }
+    }
+
+    @Test func issuesRetryRowHasFortyFourPointHitTargetAndResolvesIssues() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let library = try #require(
+            TestLibrary.forLaunch(
+                environment: [
+                    TestLibrary.launchVariable: "1",
+                    TestLibrary.preparationVariable: "issues",
+                ]) as? TestLibrary)
+        let browsing = BrowsingModel(library: library)
+        browsing.openFolder()
+        try await waitFor("issues status loaded") {
+            browsing.preparationStatus.phase == .completeWithIssues
+        }
+
+        let frameBox = FrameStoreBox()
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 420, height: 760)
+        let host = UIHostingController(
+            rootView: FolderPreparationDetails(browsing: browsing, showsDoneButton: true)
+                .environment(\.cloveTheme, .light)
+                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                    frameBox.frames = frames
+                })
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        try await waitFor("retry row laid out in issues sheet") {
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            return frameBox.frames["clove.preparation.retry"] != nil
+                && self.findCollectionView(in: window) != nil
+        }
+
+        let retryFrame = try #require(frameBox.frames["clove.preparation.retry"])
+        let collectionView = try #require(findCollectionView(in: window))
+        let cells = findCollectionViewCells(in: collectionView)
+        let retryCell = try #require(
+            cells.first { cell in
+                let cellRect = cell.convert(cell.bounds, to: window)
+                return cellRect.intersects(retryFrame)
+            })
+        let retryCellRect = retryCell.convert(retryCell.bounds, to: window)
+        #expect(retryCellRect.height >= 43.5)
+
+        await browsing.retryPreparationIssues()
+        try await waitFor("issues cleared after retry") {
+            browsing.preparationStatus.phase == .complete
+                && browsing.preparationStatus.issues.isEmpty
+        }
+    }
+
     private func makePreparationHost(
         browsing: BrowsingModel,
         envBox: PreparationEnvironmentBox
@@ -1261,6 +1450,17 @@ struct FolderPreparationPresentationTests {
             if let found = findCollectionView(in: child) { return found }
         }
         return nil
+    }
+
+    private func findCollectionViewCells(in view: UIView) -> [UICollectionViewCell] {
+        var result: [UICollectionViewCell] = []
+        if let cell = view as? UICollectionViewCell {
+            result.append(cell)
+        }
+        for child in view.subviews {
+            result.append(contentsOf: findCollectionViewCells(in: child))
+        }
+        return result
     }
 
     private func findNavigationBar(in view: UIView) -> UINavigationBar? {

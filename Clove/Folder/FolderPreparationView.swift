@@ -835,6 +835,11 @@ struct FolderPreparationDetails: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var measuredPopoverListHeight: CGFloat?
+
+    private static let popoverWidth: CGFloat = 340
+    private static let minPopoverListHeight: CGFloat = 180
 
     private var status: FolderPreparationStatus {
         browsing.preparationStatus
@@ -845,82 +850,57 @@ struct FolderPreparationDetails: View {
             ? browsing.localizedFolderTitle(language: language) : status.folderName
     }
 
+    private var maxPopoverListHeight: CGFloat {
+        verticalSizeClass == .compact ? 300 : 580
+    }
+
+    private var resolvedPopoverListHeight: CGFloat {
+        let target = measuredPopoverListHeight ?? maxPopoverListHeight
+        return min(maxPopoverListHeight, max(Self.minPopoverListHeight, target))
+    }
+
     var body: some View {
         Group {
             if showsDoneButton {
                 NavigationStack {
-                    ScrollView {
-                        detailsContent
-                            .padding(16)
-                    }
-                    .background(Color.clove.surface.sheet)
-                    .navigationTitle(
-                        FolderPreparationAccessibility.detailsHeading(language: language)
-                    )
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            Text(
-                                FolderPreparationAccessibility.detailsHeading(language: language)
-                            )
-                            .font(.headline)
-                            .lineLimit(1)
-                            .accessibilityAddTraits(.isHeader)
-                            .accessibilityIdentifier("clove.preparation.title")
-                            .reportHeaderControlFrame("clove.preparation.title")
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button(AppLocalization.string("Done", language: language)) { dismiss() }
-                                .foregroundStyle(Color.clove.accent)
-                                .accessibilityIdentifier("clove.preparation.done")
-                        }
-                    }
+                    navigableList(doneAction: { dismiss() })
                 }
+                .background(Color.clove.surface.sheet)
+                .presentationBackground(Color.clove.surface.sheet)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
             } else if !embedsNavigationStack {
-                ScrollView {
-                    detailsContent
-                        .padding(16)
-                }
-                .background(Color.clove.surface.sheet)
-                .navigationTitle(
-                    FolderPreparationAccessibility.detailsHeading(language: language)
-                )
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        Text(
-                            FolderPreparationAccessibility.detailsHeading(language: language)
-                        )
+                navigableList(doneAction: onDone)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(FolderPreparationAccessibility.detailsHeading(language: language))
                         .font(.headline)
-                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+                        .padding(.bottom, 4)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("clove.preparation.title")
                         .reportHeaderControlFrame("clove.preparation.title")
-                    }
-                    if let onDone {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button(
-                                AppLocalization.string("Done", language: language), action: onDone
-                            )
-                            .foregroundStyle(Color.clove.accent)
-                            .accessibilityIdentifier("clove.preparation.done")
+
+                    preparationList
+                        .contentMargins(.top, 8, for: .scrollContent)
+                        .frame(height: resolvedPopoverListHeight)
+                        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                            let total =
+                                geometry.contentSize.height + geometry.contentInsets.top
+                                + geometry.contentInsets.bottom
+                            return total > 0 ? ceil(total) : 0
+                        } action: { _, newHeight in
+                            guard newHeight > 0 else { return }
+                            if abs((measuredPopoverListHeight ?? 0) - newHeight) > 0.5 {
+                                measuredPopoverListHeight = newHeight
+                            }
                         }
-                    }
                 }
-            } else {
-                ViewThatFits(in: .vertical) {
-                    detailsContent
-                        .padding(16)
-                    ScrollView {
-                        detailsContent
-                            .padding(16)
-                    }
-                    .frame(maxHeight: 440)
-                }
-                .frame(width: 340)
+                .frame(width: Self.popoverWidth)
                 .background(Color.clove.surface.sheet)
+                .presentationBackground(Color.clove.surface.sheet)
             }
         }
         .foregroundStyle(Color.clove.text.primary)
@@ -928,93 +908,124 @@ struct FolderPreparationDetails: View {
         .accessibilityIdentifier("clove.preparation.details")
     }
 
-    private var detailsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !showsDoneButton && embedsNavigationStack {
-                Text(FolderPreparationAccessibility.detailsHeading(language: language))
+    private func navigableList(doneAction: (() -> Void)?) -> some View {
+        preparationList
+            .navigationTitle(
+                FolderPreparationAccessibility.detailsHeading(language: language)
+            )
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(
+                        FolderPreparationAccessibility.detailsHeading(language: language)
+                    )
                     .font(.headline)
+                    .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("clove.preparation.title")
                     .reportHeaderControlFrame("clove.preparation.title")
+                }
+                if let doneAction {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(
+                            AppLocalization.string("Done", language: language),
+                            action: doneAction
+                        )
+                        .foregroundStyle(Color.clove.accent)
+                        .accessibilityIdentifier("clove.preparation.done")
+                    }
+                }
             }
-            headerCard
-            if let reason = status.waitingReason {
-                waitingBanner(reason)
-            }
-            tasksCard
-            if !status.issues.isEmpty {
-                issuesCard
-            }
-            Text(FolderPreparationAccessibility.reassuranceFooterText(language: language))
-                .font(.footnote)
-                .foregroundStyle(Color.clove.text.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("clove.preparation.footer")
-                .reportHeaderControlFrame("clove.preparation.footer")
-        }
     }
 
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: "folder")
+    private var preparationList: some View {
+        List {
+            headerSection
+            if let reason = status.waitingReason {
+                waitingSection(reason)
+            }
+            tasksSection
+            if !status.issues.isEmpty {
+                issuesSection
+            }
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(12)
+        .scrollContentBackground(.hidden)
+        .background(Color.clove.surface.sheet)
+    }
+
+    private var headerSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "folder")
+                        .foregroundStyle(Color.clove.text.secondary)
+                        .accessibilityHidden(true)
+                    Text(
+                        FolderPreparationAccessibility.headerSummaryText(
+                            folderName: folderDisplayName, status: status, language: language)
+                    )
+                    .font(.headline)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("clove.preparation.folderName")
+                    .reportHeaderControlFrame("clove.preparation.folderName")
+                }
+                if status.isEnumerating && status.totalPhotos > 0 {
+                    Text(
+                        AppLocalization.string(
+                            "Still counting photos in this folder.", language: language)
+                    )
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                } else if status.isPartialScan {
+                    Text(AppLocalization.string("Showing partial folder scan.", language: language))
+                        .font(.caption)
+                        .foregroundStyle(Color.clove.text.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+        }
+        .listRowBackground(theme.tokens.card.color)
+    }
+
+    private func waitingSection(_ reason: FolderPreparationWaitingReason) -> some View {
+        Section {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: FolderPreparationAccessibility.waitingSymbol(for: reason))
+                    .font(.body)
                     .foregroundStyle(Color.clove.text.secondary)
                     .accessibilityHidden(true)
-                Text(
-                    FolderPreparationAccessibility.headerSummaryText(
-                        folderName: folderDisplayName, status: status, language: language)
-                )
-                .font(.headline)
-                .lineLimit(2)
-                .accessibilityIdentifier("clove.preparation.folderName")
-                .reportHeaderControlFrame("clove.preparation.folderName")
-            }
-            if status.isEnumerating && status.totalPhotos > 0 {
-                Text(
-                    AppLocalization.string(
-                        "Still counting photos in this folder.", language: language)
-                )
-                .font(.caption)
-                .foregroundStyle(Color.clove.text.secondary)
-            } else if status.isPartialScan {
-                Text(AppLocalization.string("Showing partial folder scan.", language: language))
-                    .font(.caption)
-                    .foregroundStyle(Color.clove.text.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func waitingBanner(_ reason: FolderPreparationWaitingReason) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: FolderPreparationAccessibility.waitingSymbol(for: reason))
-                .font(.body)
-                .foregroundStyle(Color.clove.text.secondary)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(FolderPreparationAccessibility.waitingTitle(for: reason, language: language))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(
+                        FolderPreparationAccessibility.waitingTitle(
+                            for: reason, language: language)
+                    )
                     .font(.subheadline.weight(.semibold))
-                Text(FolderPreparationAccessibility.waitingDetail(for: reason, language: language))
+                    Text(
+                        FolderPreparationAccessibility.waitingDetail(
+                            for: reason, language: language)
+                    )
                     .font(.caption)
                     .foregroundStyle(Color.clove.text.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("clove.preparation.waiting")
+            .reportHeaderControlFrame("clove.preparation.waiting")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("clove.preparation.waiting")
-        .reportHeaderControlFrame("clove.preparation.waiting")
+        .listRowBackground(theme.tokens.card.color)
     }
 
-    private var tasksCard: some View {
+    private var tasksSection: some View {
         let barTint =
             status.waitingReason != nil
             ? theme.tokens.secondaryText.color
             : theme.tokens.accent.color
-        return VStack(alignment: .leading, spacing: 12) {
+        return Section {
             taskRow(
                 title: FolderPreparationAccessibility.analysisRowTitle(language: language),
                 countText: FolderPreparationAccessibility.analysisCountText(
@@ -1024,8 +1035,10 @@ struct FolderPreparationDetails: View {
                 issueSummary: FolderPreparationAccessibility.taskIssueSummary(
                     status.analysis, language: language),
                 tint: barTint,
-                identifierPrefix: "clove.preparation.analysis")
-            Divider()
+                identifierPrefix: "clove.preparation.analysis"
+            )
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+
             taskRow(
                 title: FolderPreparationAccessibility.previewsRowTitle(language: language),
                 countText: FolderPreparationAccessibility.previewsCountText(
@@ -1035,20 +1048,27 @@ struct FolderPreparationDetails: View {
                 issueSummary: FolderPreparationAccessibility.taskIssueSummary(
                     status.previews, language: language),
                 tint: barTint,
-                identifierPrefix: "clove.preparation.previews")
+                identifierPrefix: "clove.preparation.previews"
+            )
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
+
             if browsing.similarGroupsEnabled {
-                Divider()
                 groupingRow
+                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
             }
-            Divider()
+
             Text(FolderPreparationAccessibility.readyForBothText(for: status, language: language))
                 .font(.footnote)
                 .foregroundStyle(Color.clove.text.secondary)
+                .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
                 .accessibilityIdentifier("clove.preparation.summary")
                 .reportHeaderControlFrame("clove.preparation.summary")
+        } footer: {
+            if status.issues.isEmpty {
+                reassuranceFooter
+            }
         }
-        .padding(14)
-        .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
+        .listRowBackground(theme.tokens.card.color)
     }
 
     private var groupingRow: some View {
@@ -1161,37 +1181,40 @@ struct FolderPreparationDetails: View {
         }
     }
 
-    private var issuesCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Text(AppLocalization.string("Issues", language: language))
-                    .font(.subheadline.weight(.semibold))
-                Text(status.totalIssueCount.formatted(.number.locale(language.locale)))
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(Color.clove.text.secondary)
-                Spacer(minLength: 8)
-                if status.hasRetryableIssues {
-                    Button {
-                        Task { await browsing.retryPreparationIssues() }
-                    } label: {
-                        Label(
-                            FolderPreparationAccessibility.retryButtonTitle(language: language),
-                            systemImage: "arrow.clockwise"
-                        )
-                        .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .tint(theme.tokens.accent.color)
-                    .disabled(!status.canRetryIssues)
-                    .accessibilityLabel(
-                        FolderPreparationAccessibility.retryButtonAccessibilityLabel(
-                            language: language)
+    private var issuesSection: some View {
+        Section {
+            if status.hasRetryableIssues {
+                Button {
+                    Task { await browsing.retryPreparationIssues() }
+                } label: {
+                    Label(
+                        FolderPreparationAccessibility.retryButtonTitle(language: language),
+                        systemImage: "arrow.clockwise"
                     )
-                    .accessibilityIdentifier("clove.preparation.retry")
-                    .reportHeaderControlFrame("clove.preparation.retry")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(
+                        status.canRetryIssues
+                            ? theme.tokens.accent.color
+                            : theme.tokens.secondaryText.color
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .tint(
+                    status.canRetryIssues
+                        ? theme.tokens.accent.color
+                        : theme.tokens.secondaryText.color
+                )
+                .disabled(!status.canRetryIssues)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .accessibilityLabel(
+                    FolderPreparationAccessibility.retryButtonAccessibilityLabel(
+                        language: language)
+                )
+                .accessibilityIdentifier("clove.preparation.retry")
+                .reportHeaderControlFrame("clove.preparation.retry")
             }
+
             ForEach(status.issues) { issue in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -1212,10 +1235,9 @@ struct FolderPreparationDetails: View {
                         .font(.caption)
                         .foregroundStyle(Color.clove.status.failed)
                 }
-                if issue.id != status.issues.last?.id {
-                    Divider()
-                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
+
             if status.totalIssueCount > status.issues.count {
                 Text(
                     AppLocalization.format(
@@ -1224,14 +1246,33 @@ struct FolderPreparationDetails: View {
                 )
                 .font(.caption)
                 .foregroundStyle(Color.clove.text.secondary)
+                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             }
+        } header: {
+            HStack(spacing: 6) {
+                Text(AppLocalization.string("Issues", language: language))
+                Text(status.totalIssueCount.formatted(.number.locale(language.locale)))
+                    .monospacedDigit()
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.clove.text.secondary)
+            .textCase(.uppercase)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("clove.preparation.issues")
+            .reportHeaderControlFrame("clove.preparation.issues")
+        } footer: {
+            reassuranceFooter
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(theme.tokens.card.color, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("clove.preparation.issues")
-        .reportHeaderControlFrame("clove.preparation.issues")
+        .listRowBackground(theme.tokens.card.color)
+    }
+
+    private var reassuranceFooter: some View {
+        Text(FolderPreparationAccessibility.reassuranceFooterText(language: language))
+            .font(.footnote)
+            .foregroundStyle(Color.clove.text.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("clove.preparation.footer")
+            .reportHeaderControlFrame("clove.preparation.footer")
     }
 }
 
