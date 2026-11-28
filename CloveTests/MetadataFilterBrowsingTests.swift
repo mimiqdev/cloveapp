@@ -648,6 +648,52 @@ struct MetadataFilterBrowsingTests {
         assertCachedStateMatchesPlacedPhotos(model)
     }
 
+    @Test func metadataFilterSheetRendersAcrossThemesActiveFiltersAndEmptyState() async throws {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+
+        let emptyLibrary = TestLibrary(photos: [], groups: [])
+        let emptyModel = BrowsingModel(library: emptyLibrary)
+        emptyModel.openFolder()
+
+        let populatedLibrary = TestLibrary.forLaunch(environment: [
+            TestLibrary.launchVariable: "1",
+            TestLibrary.metadataSamplesVariable: "1",
+        ])
+        let populatedModel = BrowsingModel(library: populatedLibrary)
+        populatedModel.openFolder()
+        try await waitUntil { !populatedModel.isFolderOpening }
+        populatedModel.toggleCameraFilter("ILCE-1M2")
+        populatedModel.toggleFocalLengthFilter(.wide)
+        populatedModel.toggleKeywordFilter("Coast")
+
+        for theme in [CloveTheme.light, .dark, .darkroom, .darkroomLight] {
+            for model in [populatedModel, emptyModel] {
+                let host = UIHostingController(
+                    rootView: MetadataFilterSheet(browsing: model)
+                        .environment(\.cloveTheme, theme)
+                        .environment(\.appLanguage, .english))
+                host.overrideUserInterfaceStyle = theme.appearance == .dark ? .dark : .light
+                let window = UIWindow(windowScene: scene)
+                window.frame = CGRect(x: 0, y: 0, width: 393, height: 780)
+                window.rootViewController = host
+                window.makeKeyAndVisible()
+                defer {
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+
+                host.view.setNeedsLayout()
+                host.view.layoutIfNeeded()
+                try await Task.sleep(for: .milliseconds(50))
+                let rendered = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                    window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+                }
+                #expect(rendered.size.width > 0 && rendered.size.height > 0)
+            }
+        }
+    }
+
     private func assertCachedStateMatchesPlacedPhotos(_ model: BrowsingModel) {
         #expect(
             model.metadataFilterOptions == PhotoMetadataFilterOptions(photos: model.allPlacedPhotos)

@@ -10,6 +10,13 @@ struct MetadataFilterSheet: View {
     @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
 
+    private enum DimensionSection {
+        case camera
+        case lens
+        case focalLength
+        case keywords
+    }
+
     var body: some View {
         let options = browsing.metadataFilterOptions
         let activeFilter = browsing.metadataFilter
@@ -27,45 +34,84 @@ struct MetadataFilterSheet: View {
         let keywords = resolvedOptions(options.keywords, active: activeFilter.keyword) { keyword in
             browsing.allPlacedPhotos.count { $0.marks.keywords.contains(keyword) }
         }
-        let hasVisibleContent =
-            !cameras.isEmpty || !lenses.isEmpty || !focalLengths.isEmpty || !keywords.isEmpty
+        let firstSection: DimensionSection? =
+            if !cameras.isEmpty {
+                .camera
+            } else if !lenses.isEmpty {
+                .lens
+            } else if !focalLengths.isEmpty {
+                .focalLength
+            } else if !keywords.isEmpty {
+                .keywords
+            } else {
+                nil
+            }
 
         NavigationStack {
             Group {
-                if hasVisibleContent {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            matchSummary
-                            if !cameras.isEmpty {
-                                listDimensionSection(
-                                    title: AppLocalization.string("Camera", language: language),
-                                    options: cameras,
-                                    selected: activeFilter.camera,
-                                    identifierPrefix: "clove.grid.metadataFilter.camera"
-                                ) { value in
-                                    browsing.toggleCameraFilter(value)
+                if let firstSection {
+                    List {
+                        if !cameras.isEmpty {
+                            dimensionSection(
+                                title: AppLocalization.string("Camera", language: language),
+                                options: cameras,
+                                includesSummary: firstSection == .camera
+                            ) { option in
+                                filterOptionRow(
+                                    title: option.value,
+                                    count: option.count,
+                                    isSelected: activeFilter.camera == option.value,
+                                    identifier: "clove.grid.metadataFilter.camera.\(option.value)"
+                                ) {
+                                    browsing.toggleCameraFilter(option.value)
                                 }
-                            }
-                            if !lenses.isEmpty {
-                                listDimensionSection(
-                                    title: AppLocalization.string("Lens", language: language),
-                                    options: lenses,
-                                    selected: activeFilter.lens,
-                                    identifierPrefix: "clove.grid.metadataFilter.lens"
-                                ) { value in
-                                    browsing.toggleLensFilter(value)
-                                }
-                            }
-                            if !focalLengths.isEmpty {
-                                focalLengthSection(
-                                    focalLengths, selected: activeFilter.focalLength)
-                            }
-                            if !keywords.isEmpty {
-                                keywordsSection(keywords, selected: activeFilter.keyword)
                             }
                         }
-                        .padding(20)
+                        if !lenses.isEmpty {
+                            dimensionSection(
+                                title: AppLocalization.string("Lens", language: language),
+                                options: lenses,
+                                includesSummary: firstSection == .lens
+                            ) { option in
+                                filterOptionRow(
+                                    title: option.value,
+                                    count: option.count,
+                                    isSelected: activeFilter.lens == option.value,
+                                    identifier: "clove.grid.metadataFilter.lens.\(option.value)"
+                                ) {
+                                    browsing.toggleLensFilter(option.value)
+                                }
+                            }
+                        }
+                        if !focalLengths.isEmpty {
+                            dimensionSection(
+                                title: AppLocalization.string("Focal length", language: language),
+                                options: focalLengths,
+                                includesSummary: firstSection == .focalLength
+                            ) { option in
+                                filterOptionRow(
+                                    title: AppLocalization.focalLengthBucketTitle(
+                                        option.value, language: language),
+                                    subtitle: option.value.rangeLabel,
+                                    count: option.count,
+                                    isSelected: activeFilter.focalLength == option.value,
+                                    identifier:
+                                        "clove.grid.metadataFilter.focalLength.\(option.value.rawValue)"
+                                ) {
+                                    browsing.toggleFocalLengthFilter(option.value)
+                                }
+                            }
+                        }
+                        if !keywords.isEmpty {
+                            keywordsSection(
+                                keywords,
+                                selected: activeFilter.keyword,
+                                includesSummary: firstSection == .keywords)
+                        }
                     }
+                    .listStyle(.insetGrouped)
+                    .listSectionSpacing(12)
+                    .scrollContentBackground(.hidden)
                 } else {
                     ContentUnavailableView {
                         Label(
@@ -122,119 +168,73 @@ struct MetadataFilterSheet: View {
         )
         .font(.subheadline.weight(.medium))
         .foregroundStyle(Color.clove.text.secondary)
+        .textCase(nil)
         .accessibilityIdentifier("clove.grid.metadataFilter.summary")
     }
 
-    private func listDimensionSection(
+    private func dimensionSection<Value: Hashable, Row: View>(
         title: String,
-        options: [PhotoFilterOption<String>],
-        selected: String?,
-        identifierPrefix: String,
-        onSelect: @escaping (String) -> Void
+        options: [PhotoFilterOption<Value>],
+        includesSummary: Bool,
+        @ViewBuilder row: @escaping (PhotoFilterOption<Value>) -> Row
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(title)
-            VStack(spacing: 0) {
-                ForEach(Array(options.enumerated()), id: \.element.value) { index, option in
-                    let isSelected = selected == option.value
-                    Button {
-                        onSelect(option.value)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "checkmark")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.clove.accent)
-                                .opacity(isSelected ? 1 : 0)
-                                .frame(width: 16)
-                            Text(option.value)
-                                .font(.subheadline)
-                                .foregroundStyle(Color.clove.text.primary)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 8)
-                            Text(option.count.formatted(.number.locale(language.locale)))
-                                .font(.caption)
-                                .foregroundStyle(Color.clove.text.secondary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .accessibilityIdentifier("\(identifierPrefix).\(option.value)")
-                    if index < options.count - 1 {
-                        Divider()
-                            .overlay(Color.clove.separator)
-                            .padding(.leading, 40)
-                    }
-                }
+        Section {
+            ForEach(options, id: \.value) { option in
+                row(option)
             }
-            .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
+        } header: {
+            sectionHeader(title, includesSummary: includesSummary)
         }
+        .listRowBackground(theme.tokens.card.color)
     }
 
-    private func focalLengthSection(
-        _ focalLengths: [PhotoFilterOption<FocalLengthBucket>],
-        selected: FocalLengthBucket?
+    private func filterOptionRow(
+        title: String,
+        subtitle: String? = nil,
+        count: Int,
+        isSelected: Bool,
+        identifier: String,
+        action: @escaping () -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(AppLocalization.string("Focal length", language: language))
-            VStack(spacing: 0) {
-                ForEach(Array(focalLengths.enumerated()), id: \.element.value) { index, option in
-                    let isSelected = selected == option.value
-                    Button {
-                        browsing.toggleFocalLengthFilter(option.value)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "checkmark")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.clove.accent)
-                                .opacity(isSelected ? 1 : 0)
-                                .frame(width: 16)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(
-                                    AppLocalization.focalLengthBucketTitle(
-                                        option.value, language: language)
-                                )
-                                .font(.subheadline)
-                                .foregroundStyle(Color.clove.text.primary)
-                                Text(option.value.rangeLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(Color.clove.text.secondary)
-                            }
-                            Spacer(minLength: 8)
-                            Text(option.count.formatted(.number.locale(language.locale)))
-                                .font(.caption)
-                                .foregroundStyle(Color.clove.text.secondary)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .accessibilityIdentifier(
-                        "clove.grid.metadataFilter.focalLength.\(option.value.rawValue)")
-                    if index < focalLengths.count - 1 {
-                        Divider()
-                            .overlay(Color.clove.separator)
-                            .padding(.leading, 40)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.clove.text.primary)
+                        .lineLimit(subtitle == nil ? 2 : 1)
+                        .multilineTextAlignment(.leading)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(Color.clove.text.secondary)
                     }
                 }
+                Spacer(minLength: 8)
+                Text(count.formatted(.number.locale(language.locale)))
+                    .font(.caption)
+                    .foregroundStyle(Color.clove.text.secondary)
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.clove.accent)
+                        .accessibilityHidden(true)
+                }
             }
-            .background(Color.clove.surface.card, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.vertical, subtitle == nil ? 0 : 2)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier(identifier)
     }
 
     private func keywordsSection(
         _ keywords: [PhotoFilterOption<String>],
-        selected: String?
+        selected: String?,
+        includesSummary: Bool
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionTitle(AppLocalization.string("Keywords", language: language))
+        Section {
             MetadataChipLayout(spacing: 8) {
                 ForEach(keywords, id: \.value) { option in
                     let isSelected = selected == option.value
@@ -258,13 +258,37 @@ struct MetadataFilterSheet: View {
                         .frame(minHeight: 36)
                         .background(
                             isSelected ? Color.clove.accent : Color.clove.surface.card,
-                            in: Capsule())
+                            in: Capsule()
+                        )
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(isSelected ? .isSelected : [])
                     .accessibilityIdentifier("clove.grid.metadataFilter.keyword.\(option.value)")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .contain)
+            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            sectionHeader(
+                AppLocalization.string("Keywords", language: language),
+                includesSummary: includesSummary)
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String, includesSummary: Bool) -> some View {
+        if includesSummary {
+            VStack(alignment: .leading, spacing: 12) {
+                matchSummary
+                sectionTitle(title)
+            }
+            .accessibilityElement(children: .contain)
+        } else {
+            sectionTitle(title)
         }
     }
 
@@ -420,7 +444,8 @@ private struct MetadataChipLayout: Layout {
         var widestRow: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(
+                ProposedViewSize(width: proposal.width, height: nil))
             if rowWidth > 0 && rowWidth + spacing + size.width > maxWidth {
                 totalHeight += rowHeight + spacing
                 widestRow = max(widestRow, rowWidth)
@@ -444,7 +469,8 @@ private struct MetadataChipLayout: Layout {
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = subview.sizeThatFits(
+                ProposedViewSize(width: bounds.width, height: nil))
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
