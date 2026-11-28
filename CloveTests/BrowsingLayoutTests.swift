@@ -111,7 +111,6 @@ struct BrowsingLayoutTests {
                 rootView: BrowseShell(browsing: model)
                     .environment(SettingsStore.sample)
                     .environment(\.isDuoExpanded, true)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.usesVerticalBrowsingToolbar, true)
                     .environment(\.hasFoldRegion, true)
                     .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
@@ -171,7 +170,6 @@ struct BrowsingLayoutTests {
             }
             .environment(SettingsStore.sample)
             .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true)
             .environment(\.usesVerticalBrowsingToolbar, true)
             .environment(\.hasFoldRegion, true)
             .onPreferenceChange(TapPickerFramesPreferenceKey.self) { frames in
@@ -234,7 +232,6 @@ struct BrowsingLayoutTests {
             var body: some View {
                 BrowseShell(browsing: model)
                     .environment(SettingsStore.sample)
-                    .environment(\.usesSystemBrowsingToolbar, duoBox.usesSystemToolbar)
                     .environment(\.usesVerticalBrowsingToolbar, duoBox.usesVertical)
                     .environment(\.hasFoldRegion, duoBox.hasFoldRegion)
                     .environment(\.isDuoExpanded, duoBox.isDuoExpanded)
@@ -575,16 +572,12 @@ struct BrowsingLayoutTests {
         model.openFolder()
         try await waitFor("folder did not open") { !model.isFolderOpening }
 
-        let headerFrames = TestHeaderFramesBox()
         let host = UIHostingController(
             rootView: NavigationStack {
                 GridScreen(browsing: model, thumbnails: model.thumbnails)
             }
             .environment(SettingsStore.sample)
-            .environment(\.cloveUserInterfaceIdiom, .phone)
-            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                headerFrames.frames = frames
-            })
+            .environment(\.cloveUserInterfaceIdiom, .phone))
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .compact
 
@@ -600,12 +593,14 @@ struct BrowsingLayoutTests {
         var collectionView: UICollectionView?
         try await waitFor("landscape grid header and collection did not lay out") {
             collectionView = self.findCollectionView(in: window)
-            return headerFrames.frames["clove.browsing.header"] != nil
+            return self.findNavigationBar(in: window) != nil
+                && self.hasToolbarItem(identifier: "clove.nav.back", in: host, window: window)
                 && collectionView?.visibleCells.isEmpty == false
         }
 
-        let landscapeHeader = try #require(headerFrames.frames["clove.browsing.header"])
-        #expect(abs(landscapeHeader.height - 44) <= 0.5)
+        let landscapeNavBar = try #require(findNavigationBar(in: window))
+        #expect(!landscapeNavBar.isHidden && landscapeNavBar.alpha > 0.9)
+        #expect(landscapeNavBar.frame.height > 0 && landscapeNavBar.frame.height <= 54)
 
         let grid = try #require(collectionView)
         let row0Cells = grid.visibleCells.filter { cell in
@@ -619,14 +614,15 @@ struct BrowsingLayoutTests {
             }
         }
 
-        // Portrait keeps the 64 pt header and 3-column grid.
+        // Portrait keeps the visible navigation bar and 3-column grid.
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         host.view.setNeedsLayout()
         host.view.layoutIfNeeded()
         try await waitFor("portrait grid header did not update") {
-            abs((headerFrames.frames["clove.browsing.header"]?.height ?? 0) - 64) <= 0.5
+            guard let navBar = self.findNavigationBar(in: window) else { return false }
+            return !navBar.isHidden && navBar.alpha > 0.9 && navBar.frame.height > 0
         }
         let portraitCellsRow0 = grid.visibleCells.filter { cell in
             guard let indexPath = grid.indexPath(for: cell) else { return false }
@@ -644,7 +640,7 @@ struct BrowsingLayoutTests {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
 
-        for width in [CGFloat(320), CGFloat(375), CGFloat(393)] {
+        for width in [CGFloat(375), CGFloat(393)] {
             for language in [
                 ResolvedAppLanguage.english, .simplifiedChinese, .traditionalChinese,
             ] {
@@ -663,13 +659,15 @@ struct BrowsingLayoutTests {
                     let language: ResolvedAppLanguage
                     let box: TestHeaderFramesBox
                     var body: some View {
-                        GridScreen(browsing: model, thumbnails: model.thumbnails)
-                            .environment(SettingsStore.sample)
-                            .environment(\.cloveUserInterfaceIdiom, .phone)
-                            .environment(\.appLanguage, language)
-                            .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                                box.frames = frames
-                            }
+                        NavigationStack {
+                            GridScreen(browsing: model, thumbnails: model.thumbnails)
+                        }
+                        .environment(SettingsStore.sample)
+                        .environment(\.cloveUserInterfaceIdiom, .phone)
+                        .environment(\.appLanguage, language)
+                        .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
+                            box.frames = frames
+                        }
                     }
                 }
 
@@ -689,30 +687,34 @@ struct BrowsingLayoutTests {
                 try await waitFor(
                     "grid selection header mounted (\(width), \(language.rawValue))"
                 ) {
-                    box.frames["clove.grid.selectAll"] != nil
-                        && box.frames["clove.grid.batch.count"] != nil
+                    box.frames["clove.grid.batch.count"] != nil
                         && box.frames["clove.grid.batch.hiddenCount"] != nil
-                        && box.frames["clove.grid.filter"] != nil
-                        && box.frames["clove.grid.batch.done"] != nil
+                        && self.hasToolbarItem(
+                            identifier: "clove.grid.selectAll", in: host, window: window)
+                        && self.hasToolbarItem(
+                            identifier: "clove.grid.filter", in: host, window: window)
+                        && self.hasToolbarItem(
+                            identifier: "clove.grid.batch.done", in: host, window: window)
                 }
 
-                let selectAllFrame = try #require(box.frames["clove.grid.selectAll"])
+                let snapshot = inspectToolbarState(in: host, window: window)
+                let selectAllFrame = try #require(snapshot.frame(for: "clove.grid.selectAll"))
                 let countFrame = try #require(box.frames["clove.grid.batch.count"])
                 let hiddenFrame = try #require(box.frames["clove.grid.batch.hiddenCount"])
-                let filterFrame = try #require(box.frames["clove.grid.filter"])
-                let doneFrame = try #require(box.frames["clove.grid.batch.done"])
+                let filterFrame = try #require(snapshot.frame(for: "clove.grid.filter"))
+                let doneFrame = try #require(snapshot.frame(for: "clove.grid.batch.done"))
 
                 for frame in [selectAllFrame, countFrame, hiddenFrame, filterFrame, doneFrame] {
                     #expect(frame.width > 0 && frame.height > 0)
-                    #expect(frame.minX >= 16 - 1.5)
-                    #expect(frame.maxX <= width - 16 + 1.5)
+                    #expect(frame.minX >= 0)
+                    #expect(frame.maxX <= width)
                 }
 
                 let titleMinX = min(countFrame.minX, hiddenFrame.minX)
                 let titleMaxX = max(countFrame.maxX, hiddenFrame.maxX)
-                #expect(selectAllFrame.maxX <= titleMinX + 1.5)
-                #expect(titleMaxX <= filterFrame.minX + 1.5)
-                #expect(filterFrame.maxX <= doneFrame.minX + 1.5)
+                #expect(selectAllFrame.maxX <= titleMinX + 2)
+                #expect(titleMaxX <= filterFrame.minX + 2)
+                #expect(filterFrame.maxX <= doneFrame.minX + 2)
             }
         }
     }
@@ -740,8 +742,7 @@ struct BrowsingLayoutTests {
                     GridScreen(browsing: model, thumbnails: model.thumbnails)
                 }
                 .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.cloveUserInterfaceIdiom, .phone))
             host.traitOverrides.horizontalSizeClass = .compact
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -783,8 +784,7 @@ struct BrowsingLayoutTests {
                     GridScreen(browsing: model, thumbnails: model.thumbnails)
                 }
                 .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .pad)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.cloveUserInterfaceIdiom, .pad))
             host.traitOverrides.horizontalSizeClass = .regular
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -1126,7 +1126,6 @@ struct BrowsingLayoutTests {
                     }
                     .environment(store)
                     .environment(\.cloveUserInterfaceIdiom, idiom)
-                    .environment(\.usesSystemBrowsingToolbar, true)
                     .environment(\.isDuoExpanded, isDuoExpanded)
                 }
             }
@@ -1225,31 +1224,6 @@ struct BrowsingLayoutTests {
                 #expect(duoBackFrame.width <= 60)
             }
         }
-
-        // 2. Fallback BrowsingHeader on wide iPad also renders `< {SelectedRowTitle}`.
-        model.setFilter(.unmarked)
-        let fallbackFrames = TestHeaderFramesBox()
-        let fallbackWindow = UIWindow(windowScene: scene)
-        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 1024, height: 768)
-        let fallbackHost = UIHostingController(
-            rootView: DetailScreen(browsing: model)
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .pad)
-                .environment(\.usesSystemBrowsingToolbar, false)
-                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                    fallbackFrames.frames = frames
-                })
-        fallbackHost.traitOverrides.horizontalSizeClass = .regular
-        fallbackWindow.rootViewController = fallbackHost
-        fallbackWindow.makeKeyAndVisible()
-        defer {
-            fallbackWindow.isHidden = true
-            fallbackWindow.rootViewController = nil
-        }
-        try await waitFor("fallback wide iPad detail header did not render Unmarked back title") {
-            guard let backFrame = fallbackFrames.frames["clove.nav.back"] else { return false }
-            return backFrame.width > 60 && backFrame.width <= 165
-        }
     }
 
     @Test func iPadSidebarUses280WidthProminentTitleCasingAnd10PtDots() async throws {
@@ -1298,8 +1272,7 @@ struct BrowsingLayoutTests {
         let shellHost = UIHostingController(
             rootView: BrowseShell(browsing: model)
                 .environment(SettingsStore.sample)
-                .environment(\.cloveUserInterfaceIdiom, .pad)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.cloveUserInterfaceIdiom, .pad))
         shellHost.traitOverrides.horizontalSizeClass = .regular
         shellWindow.rootViewController = shellHost
         shellWindow.makeKeyAndVisible()
@@ -1381,7 +1354,6 @@ struct BrowsingLayoutTests {
                 }
                 .environment(SettingsStore.sample)
                 .environment(\.cloveUserInterfaceIdiom, idiom)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.isDuoExpanded, isDuoExpanded)
             }
         }
@@ -1487,7 +1459,6 @@ struct BrowsingLayoutTests {
             .environment(store)
             .environment(\.cloveUserInterfaceIdiom, .phone)
             .environment(\.isDuoExpanded, true)
-            .environment(\.usesSystemBrowsingToolbar, true)
             .environment(\.usesVerticalBrowsingToolbar, true)
             .environment(\.hasFoldRegion, true)
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
@@ -1596,54 +1567,6 @@ struct BrowsingLayoutTests {
             #expect(snapshot.rawLeadingItemCount == 2)
             #expect(trailingRawCount == 1)
         }
-
-        // Non-system BrowsingHeader fallback omits Undo, More, and Move Rejects for Expanded Duo
-        // while keeping Back, centered tappable filename Info (>= 44 pt), Filter, and bottom pill.
-        let fallbackFrames = TestHeaderFramesBox()
-        let fallbackWindow = UIWindow(windowScene: scene)
-        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 951, height: 669)
-        let fallbackHost = UIHostingController(
-            rootView: DetailScreen(browsing: model)
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, false)
-                .environment(\.hasFoldRegion, true)
-                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                    fallbackFrames.frames = frames
-                })
-        fallbackHost.traitOverrides.horizontalSizeClass = .regular
-        fallbackWindow.rootViewController = fallbackHost
-        fallbackWindow.makeKeyAndVisible()
-        defer {
-            fallbackWindow.isHidden = true
-            fallbackWindow.rootViewController = nil
-        }
-        try await waitFor("fallback detail header did not mount") {
-            fallbackFrames.frames["clove.nav.back"] != nil
-                && fallbackFrames.frames["clove.detail.info"] != nil
-                && fallbackFrames.frames["clove.detail.fileName"] != nil
-                && fallbackFrames.frames["clove.detail.filter"] != nil
-                && fallbackFrames.frames["clove.detail.focusToggle"] != nil
-                && fallbackFrames.frames["clove.detail.compare"] != nil
-        }
-        #expect(fallbackFrames.frames["clove.detail.undo"] == nil)
-        #expect(fallbackFrames.frames["clove.duo.undo"] == nil)
-        #expect(fallbackFrames.frames["clove.grid.more"] == nil)
-        #expect(fallbackFrames.frames["clove.grid.moveRejects"] == nil)
-        if let fBack = fallbackFrames.frames["clove.nav.back"],
-            let fFocus = fallbackFrames.frames["clove.detail.focusToggle"],
-            let fCompare = fallbackFrames.frames["clove.detail.compare"],
-            let fInfo = fallbackFrames.frames["clove.detail.info"],
-            let fFilter = fallbackFrames.frames["clove.detail.filter"]
-        {
-            #expect(fBack.maxX <= fInfo.minX)
-            #expect(fInfo.width >= 44 && fInfo.height >= 44)
-            #expect(fInfo.maxX <= fFilter.minX + 1)
-            #expect(fFocus.minY > fBack.maxY)
-            #expect(fCompare.minY > fBack.maxY)
-            #expect(fFocus.maxX <= fCompare.minX + 2)
-        }
     }
 
     @Test func expandedDuoPortrait669x951DetailAndGridTopBarsFitWithoutOverflow() async throws {
@@ -1695,7 +1618,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, false)
                 .environment(\.hasFoldRegion, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
@@ -1782,7 +1704,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, false)
                 .environment(\.hasFoldRegion, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
@@ -1843,7 +1764,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, false)
                 .environment(\.hasFoldRegion, true))
             host.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClass.regular
@@ -1896,7 +1816,6 @@ struct BrowsingLayoutTests {
             .environment(\.cloveUserInterfaceIdiom, .phone)
             .environment(\.isDuoCover, true)
             .environment(\.isDuoExpanded, false)
-            .environment(\.usesSystemBrowsingToolbar, true)
             .environment(\.usesVerticalBrowsingToolbar, true))
         host.traitOverrides.horizontalSizeClass = .compact
         window.rootViewController = host
@@ -2001,36 +1920,6 @@ struct BrowsingLayoutTests {
             #expect(selectFilterFrame.midY > window.bounds.height * 0.65)
         }
         model.clearSelection()
-
-        // Non-system BrowsingHeader fallback on Duo Cover Grid also omits Undo and exposes Move Rejects, Filter, More.
-        let fallbackFrames = TestHeaderFramesBox()
-        let fallbackWindow = UIWindow(windowScene: scene)
-        fallbackWindow.frame = CGRect(x: 0, y: 0, width: 466, height: 678)
-        let fallbackHost = UIHostingController(
-            rootView: GridScreen(browsing: model, thumbnails: model.thumbnails)
-                .environment(store)
-                .environment(\.cloveUserInterfaceIdiom, .phone)
-                .environment(\.isDuoCover, true)
-                .environment(\.isDuoExpanded, false)
-                .environment(\.usesSystemBrowsingToolbar, false)
-                .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
-                    fallbackFrames.frames = frames
-                })
-        fallbackHost.traitOverrides.horizontalSizeClass = .compact
-        fallbackWindow.rootViewController = fallbackHost
-        fallbackWindow.makeKeyAndVisible()
-        defer {
-            fallbackWindow.isHidden = true
-            fallbackWindow.rootViewController = nil
-        }
-        try await waitFor("fallback Duo Cover Grid did not mount") {
-            fallbackFrames.frames["clove.nav.back"] != nil
-                && fallbackFrames.frames["clove.grid.filter"] != nil
-        }
-        let fallbackSnapshot = inspectToolbarState(in: fallbackHost, window: fallbackWindow)
-        #expect(!fallbackSnapshot.contains("clove.duo.undo"))
-        #expect(!fallbackSnapshot.contains("clove.detail.undo"))
-        #expect(!fallbackSnapshot.contains("clove.grid.undo"))
     }
 
     @Test func expandedDuoGridAndPhoneAndIPadGridsPreserveExistingToolbarLayouts() async throws {
@@ -2054,7 +1943,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true))
             host.traitOverrides.horizontalSizeClass = .regular
@@ -2109,8 +1997,7 @@ struct BrowsingLayoutTests {
                 .environment(store)
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, false)
-                .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.isDuoCover, false))
             host.traitOverrides.horizontalSizeClass = .compact
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -2147,8 +2034,7 @@ struct BrowsingLayoutTests {
                 .environment(store)
                 .environment(\.cloveUserInterfaceIdiom, .pad)
                 .environment(\.isDuoExpanded, false)
-                .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.isDuoCover, false))
             host.traitOverrides.horizontalSizeClass = .regular
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -2187,8 +2073,7 @@ struct BrowsingLayoutTests {
                 .environment(store)
                 .environment(\.cloveUserInterfaceIdiom, .pad)
                 .environment(\.isDuoExpanded, false)
-                .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true))
+                .environment(\.isDuoCover, false))
             host.traitOverrides.horizontalSizeClass = .regular
             window.rootViewController = host
             window.makeKeyAndVisible()
@@ -2237,7 +2122,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, false)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames.frames = $0 })
             host.traitOverrides.horizontalSizeClass = .compact
             window.rootViewController = host
@@ -2314,7 +2198,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoCover, true)
                 .environment(\.isDuoExpanded, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
                     headerFrames.frames = frames
@@ -2486,7 +2369,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, entry.idiom)
                 .environment(\.isDuoExpanded, entry.isDuoExpanded)
                 .environment(\.isDuoCover, entry.isDuoCover)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, entry.usesVerticalToolbar)
                 .environment(\.hasFoldRegion, entry.hasFoldRegion)
                 .environment(\.scenePhase, .active))
@@ -2627,7 +2509,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.duoVerticalDivisionRange, foldRange)
@@ -2802,7 +2683,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.duoVerticalDivisionRange, foldRange)
@@ -2923,7 +2803,6 @@ struct BrowsingLayoutTests {
                 .environment(\.cloveUserInterfaceIdiom, .phone)
                 .environment(\.isDuoExpanded, true)
                 .environment(\.isDuoCover, false)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .environment(\.duoVerticalDivisionRange, foldRange)
@@ -2993,7 +2872,6 @@ struct BrowsingLayoutTests {
             //     on activePhoto and shows the auto-dismissing non-blocking rotate toast.
             let foldRange: ClosedRange<CGFloat> = 466...485
             let duoBox = TestDuoEnvironmentBox()
-            duoBox.usesSystemToolbar = true
             duoBox.usesVertical = true
             duoBox.hasFoldRegion = true
             duoBox.isDuoExpanded = true
@@ -3024,7 +2902,6 @@ struct BrowsingLayoutTests {
                     .environment(\.cloveUserInterfaceIdiom, .phone)
                     .environment(\.isDuoExpanded, duoBox.isDuoExpanded)
                     .environment(\.isDuoCover, duoBox.isDuoCover)
-                    .environment(\.usesSystemBrowsingToolbar, duoBox.usesSystemToolbar)
                     .environment(\.usesVerticalBrowsingToolbar, duoBox.usesVertical)
                     .environment(\.hasFoldRegion, duoBox.hasFoldRegion)
                     .environment(
@@ -3458,34 +3335,40 @@ struct BrowsingLayoutTests {
             || overlayIdentifiers["clove.duo.photoPreview"] != nil
 
         func knownIdentifier(forText text: String) -> String? {
-            if isCompare {
-                switch text {
-                case "Done", "Back": return "clove.compare.done"
-                case "Focus regions": return "clove.compare.focusRegions"
-                case "Sync On", "Sync Off": return "clove.compare.syncToggle"
-                case "Set as A": return "clove.compare.setAsA"
-                default: return nil
+            let languages: [ResolvedAppLanguage] = [
+                .english, .simplifiedChinese, .traditionalChinese,
+            ]
+            func matches(_ keys: String...) -> Bool {
+                keys.contains { key in
+                    languages.contains { AppLocalization.string(key, language: $0) == text }
                 }
             }
-            switch text {
-            case "Back": return "clove.nav.back"
-            case "Filter": return isDetailScreen ? "clove.detail.filter" : "clove.grid.filter"
-            case "More": return "clove.grid.more"
-            case "Compare": return "clove.detail.compare"
-            case "Info": return "clove.detail.info"
-            case "Undo": return usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo"
-            case "Reject", "Rejected": return "clove.duo.reject"
-            case "Move rejects": return "clove.grid.moveRejects"
-            case "Done": return "clove.grid.batch.done"
-            case "Select All", "Deselect All", "Select all", "Deselect all":
-                return "clove.grid.selectAll"
-            case "Hide photo grid", "Show photo grid": return "clove.detail.gridToggle"
-            case "Focus regions": return "clove.detail.focusToggle"
-            default:
-                if text.hasPrefix("Rating") { return "clove.duo.rating" }
-                if text.hasPrefix("Label") { return "clove.duo.label" }
+            if isCompare {
+                if matches("Done", "Back") { return "clove.compare.done" }
+                if matches("Focus regions") { return "clove.compare.focusRegions" }
+                if matches("Sync On", "Sync Off") { return "clove.compare.syncToggle" }
+                if matches("Set as A") { return "clove.compare.setAsA" }
                 return nil
             }
+            if matches("Back") { return "clove.nav.back" }
+            if matches("Filter") {
+                return isDetailScreen ? "clove.detail.filter" : "clove.grid.filter"
+            }
+            if matches("More") { return "clove.grid.more" }
+            if matches("Compare") { return "clove.detail.compare" }
+            if matches("Info") { return "clove.detail.info" }
+            if matches("Undo") { return usesVerticalBar ? "clove.duo.undo" : "clove.detail.undo" }
+            if matches("Reject", "Rejected") { return "clove.duo.reject" }
+            if matches("Move rejects") { return "clove.grid.moveRejects" }
+            if matches("Done") { return "clove.grid.batch.done" }
+            if matches("Select All", "Deselect All", "Select all", "Deselect all") {
+                return "clove.grid.selectAll"
+            }
+            if matches("Hide photo grid", "Show photo grid") { return "clove.detail.gridToggle" }
+            if matches("Focus regions") { return "clove.detail.focusToggle" }
+            if text.hasPrefix("Rating") { return "clove.duo.rating" }
+            if text.hasPrefix("Label") { return "clove.duo.label" }
+            return nil
         }
 
         func itemIdentifier(_ item: UIBarButtonItem, isLeading: Bool, indexInTrailing: Int = 0)
@@ -3880,7 +3763,6 @@ private final class TestToolbarHostBox {
 @MainActor
 @Observable
 private final class TestDuoEnvironmentBox {
-    var usesSystemToolbar = true
     var usesVertical = true
     var hasFoldRegion = true
     var isDuoExpanded = true

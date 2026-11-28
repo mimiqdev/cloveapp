@@ -5,12 +5,9 @@ import UIKit
 /// Shared Filter toolbar menu reused by Grid and Detail across all devices.
 struct PhotoFilterButton: View {
     let browsing: BrowsingModel
-    var controlSize: ControlSize = .phone
     var identifierPrefix = "clove.grid.filter"
     var onMoreFilters: (() -> Void)? = nil
 
-    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
-    @Environment(\.cloveTheme) private var theme
     @Environment(\.appLanguage) private var language
     @Environment(\.displayScale) private var displayScale
     @Environment(\.self) private var environment
@@ -30,19 +27,10 @@ struct PhotoFilterButton: View {
         Menu {
             filterMenuContent
         } label: {
-            if usesSystemToolbar {
-                Label(filterLabel, systemImage: "line.3.horizontal.decrease")
-                    .accessibilityLabel(filterLabel)
-                    .accessibilityValue(activeValue)
-                    .accessibilityAddTraits(hasFilter ? .isSelected : [])
-            } else {
-                Image(systemName: "line.3.horizontal.decrease")
-                    .font(fallbackSymbolFont)
-                    .foregroundStyle(GlassIconButton.symbolColour(isActive: hasFilter, in: theme))
-                    .frame(width: fallbackDiameter, height: fallbackDiameter)
-                    .contentShape(Circle())
-                    .cloveGlass(in: Circle())
-            }
+            Label(filterLabel, systemImage: "line.3.horizontal.decrease")
+                .accessibilityLabel(filterLabel)
+                .accessibilityValue(activeValue)
+                .accessibilityAddTraits(hasFilter ? .isSelected : [])
         }
         .menuOrder(.fixed)
         .tint(hasFilter ? Color.clove.accent : Color.clove.text.primary)
@@ -51,18 +39,6 @@ struct PhotoFilterButton: View {
         .accessibilityValue(activeValue)
         .accessibilityAddTraits(hasFilter ? .isSelected : [])
         .accessibilityIdentifier(identifierPrefix)
-    }
-
-    private var fallbackDiameter: CGFloat {
-        GlassIconButton.diameter(for: controlSize)
-    }
-
-    private var fallbackSymbolFont: Font {
-        switch controlSize {
-        case .phone: .title3
-        case .pad: .body
-        case .duo: .callout
-        }
     }
 
     @ViewBuilder

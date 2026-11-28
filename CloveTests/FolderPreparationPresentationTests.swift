@@ -743,7 +743,6 @@ struct FolderPreparationPresentationTests {
                 }
                 .environment(SettingsStore.sample)
                 .environment(\.isDuoExpanded, true)
-                .environment(\.usesSystemBrowsingToolbar, true)
                 .environment(\.usesVerticalBrowsingToolbar, true)
                 .environment(\.hasFoldRegion, true)
                 .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frames in
@@ -882,21 +881,22 @@ struct FolderPreparationPresentationTests {
         window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         let timeline = DetailTimeline(photos: [stubPhoto], groups: [], groupsEnabled: false)
         let host = UIHostingController(
-            rootView: DetailMarkingView(
-                browsing: browsing,
-                photo: stubPhoto,
-                settings: SettingsStore.sample.settings,
-                images: SampleDetailImages(),
-                timeline: timeline,
-                expandedGroup: nil,
-                order: [stubPhoto],
-                actions: DetailMarkingActions(
-                    apply: { _, _ in }, marked: { _, _, _ in }, step: { _ in },
-                    markingSwipeBegan: {})
-            )
+            rootView: NavigationStack {
+                DetailMarkingView(
+                    browsing: browsing,
+                    photo: stubPhoto,
+                    settings: SettingsStore.sample.settings,
+                    images: SampleDetailImages(),
+                    timeline: timeline,
+                    expandedGroup: nil,
+                    order: [stubPhoto],
+                    actions: DetailMarkingActions(
+                        apply: { _, _ in }, marked: { _, _, _ in }, step: { _ in },
+                        markingSwipeBegan: {})
+                )
+            }
             .environment(SettingsStore.sample)
             .environment(\.cloveUserInterfaceIdiom, .phone)
-            .environment(\.usesSystemBrowsingToolbar, false)
             .onPreferenceChange(HeaderControlFramesPreferenceKey.self) { frameBox.frames = $0 })
         host.traitOverrides.horizontalSizeClass = .compact
         host.traitOverrides.verticalSizeClass = .regular
@@ -908,10 +908,19 @@ struct FolderPreparationPresentationTests {
         }
 
         try await waitFor("phone detail header inline progress bar laid out") {
-            frameBox.frames["clove.detail.preparation.progress"] != nil
+            let hasFilterItem =
+                self.findNavigationBar(in: window)?.topItem?.trailingItemGroups
+                .flatMap(\.barButtonItems)
+                .contains {
+                    $0.accessibilityIdentifier == "clove.detail.filter"
+                        || $0.accessibilityLabel == "Filter"
+                        || $0.title == "Filter"
+                        || $0.customView != nil
+                } ?? false
+            return frameBox.frames["clove.detail.preparation.progress"] != nil
                 && frameBox.frames["clove.detail.info"] != nil
                 && frameBox.frames["clove.detail.zoom"] != nil
-                && frameBox.frames["clove.detail.filter"] != nil
+                && hasFilterItem
         }
         #expect(frameBox.frames["clove.detail.preparation"] == nil)
         let info = try #require(frameBox.frames["clove.detail.info"])

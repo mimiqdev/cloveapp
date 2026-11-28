@@ -19,7 +19,6 @@ struct CompareView: View {
     @Environment(\.cloveUserInterfaceIdiom) private var idiomOverride
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
-    @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.duoVerticalDivisionRange) private var overrideVerticalDivisionRange
     @Environment(\.displayScale) private var displayScale
@@ -70,7 +69,7 @@ struct CompareView: View {
 
     private var usesDuoSystemToolbar: Bool {
         if #available(iOS 27.1, *) {
-            return isDuoExpanded && usesSystemToolbar && usesVerticalToolbar
+            return isDuoExpanded && usesVerticalToolbar
         }
         return false
     }
@@ -152,7 +151,7 @@ struct CompareView: View {
             .accessibilityIdentifier("clove.compare")
             .navigationBarBackButtonHidden(true)
 
-        if #available(iOS 27.1, *), isDuoExpanded, usesSystemToolbar, usesVerticalToolbar {
+        if #available(iOS 27.1, *), isDuoExpanded, usesVerticalToolbar {
             content
                 .toolbar {
                     duoCompareToolbar

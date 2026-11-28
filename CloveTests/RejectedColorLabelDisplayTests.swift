@@ -339,12 +339,8 @@ struct RejectedColorLabelDisplayTests {
                 }
 
                 var body: some View {
-                    Group {
-                        if layoutCase.isDuo {
-                            NavigationStack { detailScreen }
-                        } else {
-                            detailScreen
-                        }
+                    NavigationStack {
+                        detailScreen
                     }
                     .environment(store)
                     .environment(\.cloveTheme, .light)
@@ -352,7 +348,6 @@ struct RejectedColorLabelDisplayTests {
                     .environment(\.cloveUserInterfaceIdiom, layoutCase.idiom)
                     .environment(\.isDuoExpanded, layoutCase.isDuoExpanded)
                     .environment(\.isDuoCover, layoutCase.isDuoCover)
-                    .environment(\.usesSystemBrowsingToolbar, layoutCase.isDuo)
                     .environment(\.usesVerticalBrowsingToolbar, layoutCase.isDuo)
                     .environment(\.hasFoldRegion, layoutCase.isDuoExpanded)
                     .environment(\.scenePhase, .active)
