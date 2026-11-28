@@ -16,7 +16,7 @@ struct MoveRejectsSheet: View {
             .foregroundStyle(Color.clove.text.primary)
             .background(Color.clove.surface.sheet)
             .presentationBackground(Color.clove.surface.sheet)
-            .presentationDetents([.height(330), .large])
+            .presentationDetents([.height(330)])
             .presentationDragIndicator(.visible)
             .interactiveDismissDisabled(isMoving)
             .accessibilityElement(children: .contain)

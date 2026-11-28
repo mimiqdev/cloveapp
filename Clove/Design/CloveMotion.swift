@@ -45,10 +45,6 @@ enum CloveMotion {
         reduceMotion ? nil : .easeOut(duration: focusArrivalDuration)
     }
 
-    static func nudge(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.52)
-    }
-
     /// Animates mark updates only when the target photo identity has already settled, so
     /// switching photos snaps marks and status glyphs on frame 0 without cross-photo animation.
     static func shouldAnimateMarkChange<ID: Equatable>(
