@@ -107,7 +107,6 @@ struct DetailMarkingView: View {
     @Environment(\.isDuoExpanded) private var isDuoExpanded
     @Environment(\.isDuoCover) private var isDuoCover
     @Environment(\.hasFoldRegion) private var hasFoldRegion
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.cloveReduceMotionOverride) private var reduceMotionOverride
@@ -142,8 +141,6 @@ struct DetailMarkingView: View {
     }
 
     @State private var activeSheet: DetailSheetRoute?
-    @State private var filterHandoff = GridFilterSheetHandoff()
-    @State private var popoverHandoffTask: Task<Void, Never>?
     @State private var emptyFromFilterSelection = false
     private var showsInformation: Bool { activeSheet == .information }
     @State private var showsZoomChip = false
@@ -304,25 +301,13 @@ struct DetailMarkingView: View {
                 focusTracking.reset()
                 inspectedFocusRegionID = nil
                 emptyFromFilterSelection = false
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
                 activeSheet = nil
             }
             .onChange(of: detailFilterSelectionKey) { _, _ in
                 handleDetailFilterSelectionChange()
             }
-            .onChange(of: detailFilterDismissTrigger) { _, _ in
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
-            }
             .onChange(of: tapPickerDismissTrigger) { _, _ in
                 gridPickerDismissToken += 1
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.dismissFiltersAndCancelPending()
-                }
             }
             .task(id: photo.id) {
                 await loadPreview(for: photo)
@@ -337,8 +322,6 @@ struct DetailMarkingView: View {
                 await loadFocusRegions(for: photo)
             }
             .onDisappear {
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
                 cancelUpgradeTask()
                 shown = nil
                 shownPhoto = nil
@@ -755,14 +738,11 @@ struct DetailMarkingView: View {
     }
 
     private var detailFilterButton: some View {
-        PhotoFilterPopoverButton(
+        PhotoFilterButton(
             browsing: browsing,
             controlSize: isWidePadLayout ? .pad : .phone,
             identifierPrefix: "clove.detail.filter",
-            filterHandoff: $filterHandoff,
-            canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
-            onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
-            onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
+            onMoreFilters: canPresentMetadataFilters ? { activeSheet = .metadataFilters } : nil
         )
     }
 
@@ -3210,50 +3190,12 @@ struct DetailMarkingView: View {
             metadataFilter: browsing.metadataFilter)
     }
 
-    private var detailFilterDismissTrigger: DetailFilterDismissTrigger {
-        DetailFilterDismissTrigger(
-            route: browsing.state.route,
-            folder: browsing.state.folder,
-            isDuoExpanded: isDuoExpanded,
-            isDuoCover: isDuoCover,
-            usesVerticalToolbar: usesVerticalToolbar,
-            hasFoldRegion: hasFoldRegion,
-            isComparing: browsing.compareSession != nil,
-            showsPhotoGrid: showsPhotoGrid,
-            horizontalSizeClass: horizontalSizeClass,
-            verticalSizeClass: verticalSizeClass,
-            isLandscapeContainer: isLandscapeContainer)
+    private var canPresentMetadataFilters: Bool {
+        Self.allowsMetadataFilters(isComparing: browsing.compareSession != nil)
     }
 
-    private var canPresentMetadataFiltersFromPopover: Bool {
-        Self.allowsMetadataFiltersFromPopover(isComparing: browsing.compareSession != nil)
-    }
-
-    static func allowsMetadataFiltersFromPopover(isComparing: Bool) -> Bool {
+    static func allowsMetadataFilters(isComparing: Bool) -> Bool {
         !isComparing
-    }
-
-    private func cancelPendingMetadataFiltersHandoff() {
-        popoverHandoffTask?.cancel()
-        popoverHandoffTask = nil
-        filterHandoff.cancelPendingMetadataFilters()
-    }
-
-    private func completeMetadataFiltersHandoffIfPending() {
-        guard filterHandoff.pendingMetadataFiltersAfterPopover else { return }
-        let expectedFolder = browsing.state.folder
-        PhotoFilterPopoverButton.scheduleMetadataFiltersHandoff(
-            handoffTask: &popoverHandoffTask,
-            canPresent: { true },
-            consume: {
-                filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
-                    currentFolder: browsing.state.folder,
-                    isSceneActive: scenePhase == .active,
-                    canPresent: canPresentMetadataFiltersFromPopover
-                        && browsing.state.folder == expectedFolder)
-            },
-            present: { activeSheet = .metadataFilters },
-            clearTask: { popoverHandoffTask = nil })
     }
 
     private func handleDetailFilterSelectionChange() {
@@ -3384,20 +3326,6 @@ private struct DetailFilterSelectionKey: Equatable {
     let filter: PhotoFilter
     let labelFilter: LabelColour?
     let metadataFilter: PhotoMetadataFilter
-}
-
-private struct DetailFilterDismissTrigger: Equatable {
-    let route: BrowserRoute
-    let folder: FolderIdentity?
-    let isDuoExpanded: Bool
-    let isDuoCover: Bool
-    let usesVerticalToolbar: Bool
-    let hasFoldRegion: Bool
-    let isComparing: Bool
-    let showsPhotoGrid: Bool
-    let horizontalSizeClass: UserInterfaceSizeClass?
-    let verticalSizeClass: UserInterfaceSizeClass?
-    let isLandscapeContainer: Bool
 }
 
 /// Filtering a group can change neighbours without changing its current photo.

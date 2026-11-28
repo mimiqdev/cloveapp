@@ -17,8 +17,6 @@ struct GridScreen: View {
     @State private var pendingPhotosConfirmationPlan: PhotosSavePlan?
     @State private var showsNoEligiblePhotosAlert = false
     @State private var isPickingEmptyFolder = false
-    @State private var filterHandoff = GridFilterSheetHandoff()
-    @State private var popoverHandoffTask: Task<Void, Never>?
     @State private var selectsEmpty = false
     @State private var areGroupsUnfolded: Bool
     @State private var isLandscapeContainer = false
@@ -33,9 +31,7 @@ struct GridScreen: View {
     @Environment(\.usesSystemBrowsingToolbar) private var usesSystemToolbar
     @Environment(\.usesVerticalBrowsingToolbar) private var usesVerticalToolbar
     @Environment(\.hasFoldRegion) private var hasFoldRegion
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var filterPopoverTrigger: Int = 0
 
     private enum GridSheetRoute: Identifiable {
         case renameDetails
@@ -82,12 +78,10 @@ struct GridScreen: View {
     init(
         browsing: BrowsingModel,
         thumbnails: (any GridThumbnailSource)? = nil,
-        filterPopoverTrigger: Int = 0,
         initialPresentation: DetailPresentation = .focus
     ) {
         self.browsing = browsing
         self.thumbnails = thumbnails ?? browsing.thumbnails
-        self.filterPopoverTrigger = filterPopoverTrigger
         _presentation = State(initialValue: initialPresentation)
         _areGroupsUnfolded = State(initialValue: browsing.isSelecting)
         _hasOpenedPhoto = State(
@@ -220,8 +214,6 @@ struct GridScreen: View {
                 areGroupsUnfolded = browsing.isSelecting
                 pendingPhotosConfirmationPlan = nil
                 showsNoEligiblePhotosAlert = false
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
                 if activeSheet?.isPhotosConfirmation == true
                     || activeSheet?.isMetadataFilters == true
                 {
@@ -242,20 +234,6 @@ struct GridScreen: View {
                 if route != .detail {
                     presentation = .focus
                 }
-            }
-            .onChange(of: filterDismissTrigger) { _, _ in
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active {
-                    cancelPendingMetadataFiltersHandoff()
-                    filterHandoff.dismissFiltersAndCancelPending()
-                }
-            }
-            .onDisappear {
-                cancelPendingMetadataFiltersHandoff()
-                filterHandoff.dismissFiltersAndCancelPending()
             }
             .overlay(alignment: .bottomTrailing) {
                 if !isRegular, !usesVerticalGridDock, showsMoveRejects {
@@ -928,15 +906,11 @@ struct GridScreen: View {
     }
 
     private var filterButton: some View {
-        PhotoFilterPopoverButton(
+        PhotoFilterButton(
             browsing: browsing,
             controlSize: isRegular ? .pad : .phone,
             identifierPrefix: "clove.grid.filter",
-            filterHandoff: $filterHandoff,
-            canPresentMetadataFilters: canPresentMetadataFiltersFromPopover,
-            popoverTrigger: filterPopoverTrigger,
-            onCancelPendingMetadataFilters: cancelPendingMetadataFiltersHandoff,
-            onCompleteMetadataFiltersHandoff: completeMetadataFiltersHandoffIfPending
+            onMoreFilters: canPresentMetadataFilters ? { presentSheet(.metadataFilters) } : nil
         )
     }
 
@@ -1144,60 +1118,19 @@ struct GridScreen: View {
         }
     }
 
-    private var filterDismissTrigger: GridFilterDismissTrigger {
-        GridFilterDismissTrigger(
-            route: browsing.state.route,
-            folder: browsing.state.folder,
-            isRegular: isRegular,
-            isSelecting: isSelecting,
-            isDuoExpanded: isDuoExpanded,
-            isDuoCover: isDuoCover,
-            usesVerticalToolbar: usesVerticalToolbar,
-            hasFoldRegion: hasFoldRegion,
-            isComparing: browsing.compareSession != nil,
-            horizontalSizeClass: horizontalSizeClass,
-            verticalSizeClass: verticalSizeClass,
-            isLandscapeContainer: isLandscapeContainer)
-    }
-
-    private var canPresentMetadataFiltersFromPopover: Bool {
-        Self.allowsMetadataFiltersFromPopover(
+    private var canPresentMetadataFilters: Bool {
+        Self.allowsMetadataFilters(
             isRegular: isRegular, usesDock: usesDock, route: browsing.state.route)
     }
 
-    static func allowsMetadataFiltersFromPopover(
+    static func allowsMetadataFilters(
         isRegular: Bool, usesDock: Bool, route: BrowserRoute
     ) -> Bool {
         (!isRegular || usesDock) && route == .grid
     }
 
     private func presentSheet(_ route: GridSheetRoute) {
-        cancelPendingMetadataFiltersHandoff()
-        filterHandoff.dismissFiltersAndCancelPending()
         activeSheet = route
-    }
-
-    private func cancelPendingMetadataFiltersHandoff() {
-        popoverHandoffTask?.cancel()
-        popoverHandoffTask = nil
-        filterHandoff.cancelPendingMetadataFilters()
-    }
-
-    private func completeMetadataFiltersHandoffIfPending() {
-        guard filterHandoff.pendingMetadataFiltersAfterPopover else { return }
-        let expectedFolder = browsing.state.folder
-        PhotoFilterPopoverButton.scheduleMetadataFiltersHandoff(
-            handoffTask: &popoverHandoffTask,
-            canPresent: { true },
-            consume: {
-                filterHandoff.consumePendingMetadataFiltersOnPopoverDisappear(
-                    currentFolder: browsing.state.folder,
-                    isSceneActive: scenePhase == .active,
-                    canPresent: canPresentMetadataFiltersFromPopover
-                        && browsing.state.folder == expectedFolder)
-            },
-            present: { activeSheet = .metadataFilters },
-            clearTask: { popoverHandoffTask = nil })
     }
 
     private var tapPickerDismissTrigger: GridTapPickerDismissTrigger {
@@ -1217,7 +1150,6 @@ struct GridScreen: View {
             hasPendingPhotosAlert: pendingPhotosConfirmationPlan != nil
                 || activeSheet?.isPhotosConfirmation == true
                 || showsNoEligiblePhotosAlert,
-            showsFilters: filterHandoff.showsFilters,
             horizontalSizeClass: horizontalSizeClass,
             verticalSizeClass: verticalSizeClass,
             isLandscapeContainer: isLandscapeContainer)
@@ -1249,21 +1181,6 @@ private struct ToolbarTitleBoundingLayout: Layout {
     }
 }
 
-private struct GridFilterDismissTrigger: Equatable {
-    let route: BrowserRoute
-    let folder: FolderIdentity?
-    let isRegular: Bool
-    let isSelecting: Bool
-    let isDuoExpanded: Bool
-    let isDuoCover: Bool
-    let usesVerticalToolbar: Bool
-    let hasFoldRegion: Bool
-    let isComparing: Bool
-    let horizontalSizeClass: UserInterfaceSizeClass?
-    let verticalSizeClass: UserInterfaceSizeClass?
-    let isLandscapeContainer: Bool
-}
-
 private struct GridTapPickerDismissTrigger: Equatable {
     let isSelecting: Bool
     let canMark: Bool
@@ -1278,7 +1195,6 @@ private struct GridTapPickerDismissTrigger: Equatable {
     let hasKeywordsSheet: Bool
     let hasMetadataFiltersSheet: Bool
     let hasPendingPhotosAlert: Bool
-    let showsFilters: Bool
     let horizontalSizeClass: UserInterfaceSizeClass?
     let verticalSizeClass: UserInterfaceSizeClass?
     let isLandscapeContainer: Bool

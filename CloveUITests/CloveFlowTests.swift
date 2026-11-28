@@ -1194,14 +1194,14 @@ final class CloveFlowTests: XCTestCase {
                 let toolbarFilter = element(app, "clove.grid.filter")
                 if toolbarFilter.exists {
                     toolbarFilter.tap()
-                    element(app, "clove.grid.filter.rejected").tap()
+                    filterMenuItem(app, "Rejected").tap()
                 } else {
                     element(app, "clove.sidebar.rejected").tap()
                 }
                 capture("group-badge-\(count)-grid-rejected-\(theme)")
                 if toolbarFilter.exists {
                     toolbarFilter.tap()
-                    element(app, "clove.grid.filter.all").tap()
+                    filterMenuItem(app, "All").tap()
                 } else {
                     element(app, "clove.sidebar.all").tap()
                 }
@@ -1352,11 +1352,11 @@ final class CloveFlowTests: XCTestCase {
             element(app, "clove.nav.back").tap()
             capture("grid-\(theme)")
             element(app, "clove.grid.filter").tap()
-            element(app, "clove.grid.filter.unmarked").tap()
+            filterMenuItem(app, "Unmarked").tap()
             element(app, "clove.grid.filter").tap()
-            XCTAssertTrue(element(app, "clove.grid.filter.all").exists)
+            XCTAssertTrue(filterMenuItem(app, "All").exists)
             capture("grid-filter-\(theme)")
-            element(app, "clove.grid.filter.all").tap()
+            filterMenuItem(app, "All").tap()
             element(app, "clove.grid.more").tap()
             XCTAssertTrue(app.buttons["Settings"].exists)
             capture("grid-more-\(theme)")
@@ -2056,7 +2056,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "value == %@", "Unmarked"), capsule))
 
         detailFilter.tap()
-        let unmarkedFilter = element(app, "clove.detail.filter.unmarked")
+        let unmarkedFilter = filterMenuItem(app, "Unmarked")
         XCTAssertTrue(unmarkedFilter.waitForExistence(timeout: 5))
         unmarkedFilter.tap()
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
@@ -2069,7 +2069,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), undoToast))
         XCTAssertTrue(waitForLabel("MMQ02680.ARW", fileName))
         detailFilter.tap()
-        let allFilter = element(app, "clove.detail.filter.all")
+        let allFilter = filterMenuItem(app, "All")
         XCTAssertTrue(allFilter.waitForExistence(timeout: 5))
         allFilter.tap()
 
@@ -2110,11 +2110,11 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertEqual(faceIndicator.label, "Face detected")
         XCTAssertFalse(missingAFIndicator.exists)
 
-        // Vertical rail Filter popover anchors beside the trailing rail and re-opens reliably (#470).
+        // Vertical rail Filter menu anchors beside the trailing rail and re-opens reliably (#470).
         let coverDetailFilter = element(app, "clove.detail.filter")
         XCTAssertTrue(coverDetailFilter.waitForExistence(timeout: 5))
         coverDetailFilter.tap()
-        let coverDetailRejected = element(app, "clove.detail.filter.rejected")
+        let coverDetailRejected = filterMenuItem(app, "Rejected")
         XCTAssertTrue(coverDetailRejected.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(coverDetailRejected.frame.midX, app.frame.midX)
         XCTAssertGreaterThan(coverDetailRejected.frame.minY, 60)
@@ -2129,7 +2129,7 @@ final class CloveFlowTests: XCTestCase {
         XCTAssertTrue(waitForLabel("MMQ02679.ARW", element(app, "clove.detail.fileName")))
 
         coverDetailFilter.tap()
-        let coverDetailAll = element(app, "clove.detail.filter.all")
+        let coverDetailAll = filterMenuItem(app, "All")
         XCTAssertTrue(coverDetailAll.waitForExistence(timeout: 5))
         coverDetailAll.tap()
         XCTAssertTrue(wait(NSPredicate(format: "exists == false"), coverDetailAll))
@@ -3444,7 +3444,7 @@ final class CloveFlowTests: XCTestCase {
             XCTAssertEqual(value, "Off")
         }
         filterButton.tap()
-        let rejectedRow = element(app, "clove.detail.filter.rejected")
+        let rejectedRow = filterMenuItem(app, "Rejected")
         XCTAssertTrue(rejectedRow.waitForExistence(timeout: 5))
         XCTAssertGreaterThan(rejectedRow.frame.midX, app.frame.midX)
         XCTAssertGreaterThan(rejectedRow.frame.minY, 40)
@@ -3460,9 +3460,9 @@ final class CloveFlowTests: XCTestCase {
         }
         XCTAssertTrue(waitForLabel("MMQ02679.ARW", fileName))
 
-        // More filters hands off from Detail Filter popover cleanly into MetadataFilterSheet.
+        // More filters opens cleanly from Detail Filter menu into MetadataFilterSheet.
         filterButton.tap()
-        let moreFilters = element(app, "clove.detail.filter.more")
+        let moreFilters = filterMenuItem(app, "More filters")
         XCTAssertTrue(moreFilters.waitForExistence(timeout: 5))
         moreFilters.tap()
         let metadataSheet = element(app, "clove.grid.metadataFilter.sheet")
@@ -3822,7 +3822,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
         XCTAssertTrue(element(app, "clove.grid").waitForExistence(timeout: 5))
         element(app, "clove.grid.filter").tap()
-        let unmarkedFilter = element(app, "clove.grid.filter.unmarked")
+        let unmarkedFilter = filterMenuItem(app, "Unmarked")
         XCTAssertTrue(unmarkedFilter.waitForExistence(timeout: 5))
         unmarkedFilter.tap()
 
@@ -4009,7 +4009,7 @@ final class CloveFlowTests: XCTestCase {
         let filterButton = element(app, "clove.grid.filter")
         if filterButton.exists {
             filterButton.tap()
-            element(app, "clove.grid.filter.unmarked").tap()
+            filterMenuItem(app, "Unmarked").tap()
         } else {
             element(app, "clove.sidebar.unmarked").tap()
         }
@@ -4048,7 +4048,7 @@ final class CloveFlowTests: XCTestCase {
         element(app, "clove.nav.back").tap()
         if filterButton.exists {
             filterButton.tap()
-            element(app, "clove.grid.filter.all").tap()
+            filterMenuItem(app, "All").tap()
         } else {
             element(app, "clove.sidebar.all").tap()
         }
@@ -4206,6 +4206,14 @@ final class CloveFlowTests: XCTestCase {
     @MainActor
     func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    @MainActor
+    func filterMenuItem(_ app: XCUIApplication, _ title: String) -> XCUIElement {
+        let predicate = NSPredicate(
+            format: "(label == %@ OR label BEGINSWITH %@) AND identifier != %@",
+            title, "\(title), ", "clove.grid.metadataFilter.bar.edit")
+        return app.collectionViews.buttons.matching(predicate).firstMatch
     }
 
     @MainActor

@@ -147,7 +147,7 @@ extension CloveFlowTests {
 
         let filterButton = element(app, "clove.grid.filter")
         filterButton.tap()
-        element(app, "clove.grid.filter.rejected").tap()
+        filterMenuItem(app, "Rejected").tap()
         XCTAssertEqual(element(app, "clove.grid.batch.count").label, "1 selected")
         XCTAssertEqual(element(app, "clove.grid.batch.hiddenCount").label, "1 hidden by filter")
 
@@ -167,7 +167,7 @@ extension CloveFlowTests {
                 timeout: 5))
 
         filterButton.tap()
-        element(app, "clove.grid.filter.all").tap()
+        filterMenuItem(app, "All").tap()
         element(app, "clove.grid.batch.done").tap()
 
         // Hidden-by-filter mmq02679 stayed untouched.
