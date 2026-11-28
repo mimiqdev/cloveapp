@@ -251,6 +251,7 @@ struct BatchRenameNameSheet: View {
                         .accessibilityHidden(true)
                 }
             }
+            .frame(minHeight: 32)
             .contentShape(Rectangle())
         }
         .tint(Color.clove.text.primary)
